@@ -16,6 +16,11 @@ builder.Services
 // No global fallback policy — /health and /session must remain anonymous.
 builder.Services.AddAuthorization();
 
+// Dev CORS: the Flutter web build runs on a different origin (its own dev-server port),
+// so browser requests to this API are cross-origin. Wide-open in Development only.
+builder.Services.AddCors(options =>
+    options.AddPolicy("dev", p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+
 // Swagger UI (served at /swagger in Development) is the manual API test surface used
 // throughout the plan's session checkpoints.
 builder.Services.AddEndpointsApiExplorer();
@@ -44,9 +49,14 @@ if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI(); // UI at /swagger
+    app.UseCors("dev");
 }
-
-app.UseHttpsRedirection();
+else
+{
+    // Only enforce HTTPS redirect outside Development so the local Flutter app can
+    // talk plain HTTP to the dev server without redirect/cert friction.
+    app.UseHttpsRedirection();
+}
 
 // Auth middleware must appear before endpoint mapping.
 app.UseAuthentication();
