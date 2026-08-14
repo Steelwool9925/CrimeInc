@@ -156,7 +156,7 @@ test UI at `/swagger`. 22 sessions total.
 | Session | Contents | ~tok | How you test it |
 |---|---|---|---|
 | ✅ S0.1 | T0.1 solution + Flutter scaffold + git + T0.3 scripts/.gitignore | 33k | `dotnet build` + `dotnet test` + `flutter test` all run green (empty); Flutter app launches blank on web + Android emulator |
-| S0.2 | T0.2 Postgres compose + EF + first migration + `/health` | 20k | `docker compose up -d`; `dotnet run` → open `/health` → 200; DB schema created (inspect tables) |
+| ✅ S0.2 | T0.2 Postgres compose + EF + first migration + `/health` | 20k | `docker compose up -d`; `dotnet run` → open `/health` → 200; DB schema created (inspect tables) |
 
 ### M1 — Foundation (4 sessions)
 | Session | Contents | ~tok | How you test it |
@@ -314,3 +314,55 @@ Session-by-session record of the actual build. Env: Windows 11 · .NET 10.0.301 
 - Deferred to CP0 (end of M0): manual app launch on web + Android emulator.
 - gru: executed single-context by the controller (sequential in-place scaffolding, no git
   repo yet to worktree-isolate). Minion dispatch begins at S1.1.
+
+### ✅ S0.2 — Postgres + EF + first migration + /health (M0)
+- EF Core 10 + Npgsql provider 10.0.3 in Infrastructure; `Microsoft.EntityFrameworkCore
+  .Design` 10.0.2 + `Swashbuckle.AspNetCore` 10.2.3 in Api. Dropped the unused
+  `Microsoft.AspNetCore.OpenApi` (Swagger UI now via Swashbuckle at `/swagger`). OpenApi
+  2.12.0 pin retained (Swashbuckle pulls it transitively) → **build 0/0**.
+- `GameDbContext` (Infra) with `DbSet<Player>`; minimal `Player` (Id:uuid, CreatedAtUtc:
+  timestamptz) in Domain — first-migration seed, extended in M1. `AddInfrastructure(config)`
+  DI extension; connection string from `ConnectionStrings:Default` env/config with a
+  local-dev fallback matching docker-compose. **No secret committed.**
+- `Program.cs`: `AddInfrastructure`, Swagger UI (Dev), `GET /health` (liveness, 200) and
+  `GET /health/db` (readiness, checks `CanConnectAsync`).
+- `docker-compose.yml`: `postgres:17-alpine`, volume, `pg_isready` healthcheck, local-dev
+  creds. First EF migration `InitialCreate` → `Players` table.
+- **Verification:** `dotnet build` 0/0 · `dotnet test` **2 passed** (added
+  `HealthEndpointTests` proving `GET /health`→200 in-memory via `WebApplicationFactory`, no
+  DB needed) · `flutter test` 1 passed.
+- **Deferred to CP0 (yours):** Docker Desktop daemon wasn't running and I'm not permitted to
+  launch it, so `docker compose up -d` → `dotnet ef database update` (creates the `Players`
+  table) → `GET /health/db` reachable is left for your CP0 run. Steps below.
+- gru: controller single-context (M0 plumbing is tightly coupled/foundational). Minion
+  dispatch begins at **S1.1**.
+
+---
+
+## ▶ CP0 — Milestone M0 checkpoint (please run)
+
+Prereq: **start Docker Desktop** first (its daemon must be running).
+
+```powershell
+# 1. Postgres up
+docker compose up -d
+docker compose ps                # 'underworld-postgres' healthy
+
+# 2. Create the schema from the migration
+dotnet ef database update --project src/UnderworldEmpire.Infrastructure `
+  --startup-project src/UnderworldEmpire.Api
+#    → inspect: a 'Players' table + '__EFMigrationsHistory' exist in the 'underworld' DB
+
+# 3. Run the API and hit health
+./scripts/run-api.ps1
+#    open http://localhost:<port>/health      → 200 {"status":"ok"}
+#    open http://localhost:<port>/health/db   → 200 reachable  (Postgres up)
+#    open http://localhost:<port>/swagger     → Swagger UI loads
+
+# 4. App launches blank on both targets
+./scripts/run-app.ps1                    # web (Chrome)
+#    and on an Android emulator: cd app; flutter run -d <emulator>
+```
+
+Green CP0 = M0 done. Tell me the result and I'll start **M1** (identity, meters, economy,
+content loader) with real minion dispatch.

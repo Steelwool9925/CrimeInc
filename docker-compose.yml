@@ -1,0 +1,23 @@
+# Local development Postgres for Underworld Empire.
+# Creds here are local-dev only and match InfrastructureServiceCollectionExtensions
+# .LocalDevConnectionString. Never used in a real environment.
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: underworld-postgres
+    environment:
+      POSTGRES_DB: underworld
+      POSTGRES_USER: underworld
+      POSTGRES_PASSWORD: underworld
+    ports:
+      - "5432:5432"
+    volumes:
+      - underworld-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U underworld -d underworld"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  underworld-pgdata:
