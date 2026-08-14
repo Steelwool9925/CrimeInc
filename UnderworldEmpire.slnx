@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/UnderworldEmpire.Api/UnderworldEmpire.Api.csproj" />
+    <Project Path="src/UnderworldEmpire.Domain/UnderworldEmpire.Domain.csproj" />
+    <Project Path="src/UnderworldEmpire.Infrastructure/UnderworldEmpire.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/UnderworldEmpire.Tests/UnderworldEmpire.Tests.csproj" />
+  </Folder>
+</Solution>

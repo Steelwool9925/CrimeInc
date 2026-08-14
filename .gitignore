@@ -1,0 +1,43 @@
+# ---- .NET ----
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+.vs/
+project.lock.json
+artifacts/
+TestResults/
+*.trx
+coverage/
+*.coverage
+*.cobertura.xml
+
+# ---- Rider / VS ----
+.idea/
+*.iml
+!app/*.iml   # Flutter's generated module file is kept by app tooling; ignore elsewhere
+
+# ---- Flutter (root-level guard; app/ has its own .gitignore too) ----
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/build/
+.flutter-versions
+
+# ---- Env / secrets (never commit) ----
+.env
+.env.*
+*.local
+secrets/
+appsettings.Development.json
+appsettings.*.local.json
+
+# ---- OS ----
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---- Tooling ----
+gru-ledger.md
