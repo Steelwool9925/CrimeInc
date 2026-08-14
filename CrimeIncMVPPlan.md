@@ -161,10 +161,10 @@ test UI at `/swagger`. 22 sessions total.
 ### M1 — Foundation (4 sessions)
 | Session | Contents | ~tok | How you test it |
 |---|---|---|---|
-| S1.1 | T1.1 meters domain + lazy-regen value objects + tests | 30k | Run `dotnet test` → energy/stamina/health regen + cap tests green |
-| S1.2 | T1.2 guest identity + auth middleware, T1.3 economy service | 43k | Swagger `POST /session` → get device token + new player; economy add/spend tests green |
-| S1.3 | T1.4 content-pack loader (crime), T1.5 `GET /me` | 42k | Swagger `GET /content/pack` → crime manifest; `GET /me` → meters (regenerating), cash, level/XP |
-| S1.4 | T1.6 Flutter networking + guest bootstrap + Home screen | 45k | **CP1**: launch app → guest auto-created, Home shows meter bars + cash, persists across restart |
+| ✅ S1.1 | T1.1 meters domain + lazy-regen value objects + tests | 30k | Run `dotnet test` → energy/stamina/health regen + cap tests green |
+| ✅ S1.2 | T1.2 guest identity + auth middleware, T1.3 economy service | 43k | Swagger `POST /session` → get device token + new player; economy add/spend tests green |
+| ✅ S1.3 | T1.4 content-pack loader (crime), T1.5 `GET /me` | 42k | Swagger `GET /content/pack` → crime manifest; `GET /me` → meters (regenerating), cash, level/XP |
+| ✅ S1.4 | T1.6 Flutter networking + guest bootstrap + Home screen | 45k | **CP1**: launch app → guest auto-created, Home shows meter bars + cash, persists across restart |
 
 ### M2 — Jobs & progression (3 sessions)
 | Session | Contents | ~tok | How you test it |
@@ -374,3 +374,81 @@ docker compose up -d --wait                 # underworld-postgres healthy (host 
 Server-side M0 is green. Once you've eyeballed the API/app in a browser, M0 is fully signed
 off and I'll start **M1** (identity, meters, economy, content loader) with real minion
 dispatch (worktree-isolated, model ≤ Sonnet).
+
+---
+
+## M1 — Foundation ✅ (executed via /gru; pending user CP1)
+
+Real minion dispatch began here: **5 Sonnet minions** across 4 sessions, each independently
+verified by the Opus controller (diff review + `dotnet build`/`dotnet test` + migration apply
++ DB schema check). **0 fix-loop rounds** — every minion passed first verification.
+
+### ✅ S1.1 — Resource meters (T1.1)
+- `Meter` value object (readonly record struct): lazy regen `CurrentAt(now, rate)` (floor,
+  capped), `SpendAt` (guard + clock reset), `GrantAt` (capped), `RefillAt`; ctor guards.
+- `MeterRates` (energy/stamina 5 min/pt, health 1 min/pt), `PlayerDefaults` (10/5/100).
+- Player gains Energy/Stamina/Health (start full); EF `ComplexProperty` mapping (value-type
+  struct → can't `OwnsOne`). Migration `AddPlayerMeters`. 35 domain tests.
+
+### ✅ S1.2 — Guest identity + economy (T1.2 + T1.3)
+- Economy: `Player.Cash` + `PremiumCurrency` (bigint) with guarded Add/Spend (negative →
+  `ArgumentOutOfRange`; overdraft → `InvalidOperationException`); starting 100 / 5. Thin
+  `EconomyService`. 18 domain tests.
+- Identity: `Player.DeviceToken` (unique index); server-generated 32-byte base64url token.
+  `POST /session` (anonymous) find-or-create guest; `GET /whoami` (`[Authorize]`).
+  `DeviceTokenAuthHandler` (Bearer scheme) → `NameIdentifier` claim; no fallback policy so
+  `/health` + `/session` stay anonymous; Swagger Bearer definition. 4 integration tests
+  against a dedicated `underworld_test` DB. Migrations `AddPlayerCurrencies` +
+  `AddPlayerDeviceToken`.
+
+### ✅ S1.3 — Content-pack loader + /me (T1.4 + T1.5)
+- `content/crime/pack.json` (id/name/currencies/palette/assets/version), copied to build
+  output. `ContentPackLoader` with validation (id match, name, currency labels; collects all
+  errors → `ContentPackException`); `IContentPackProvider` singleton loaded at startup.
+  `GET /content/pack` (anonymous). 7 loader tests.
+- Player progression fields (Level 1, Xp 0, SkillPoints 0, Attack/Defense 5 — **fields only;
+  leveling/allocation logic is M2**). Migration `AddPlayerProgression`. `GET /me`
+  (`[Authorize]`) projects lazy-regenned meters (current/max/regenSecs/secsUntilNext) +
+  currencies + level/xp/skillpoints/stats; read-only. 2 integration tests.
+
+### ✅ S1.4 — Flutter Home (T1.6)
+- `ApiClient`/`HttpApiClient` with platform-aware base URL (web `localhost:5080`, Android
+  emulator `10.0.2.2:5080`, `API_BASE_URL` override) + Bearer auth. Device-token persistence
+  via `shared_preferences`. `AppState` (`ChangeNotifier`): bootstrap (token → `/session` →
+  persist → `/content/pack` → `/me`), 10 s polling, error/retry. `HomeScreen`: Energy/Stamina/
+  Health bars (current/max + regen countdown) + cash with the pack's currency label; pack
+  primary colour on the app bar. 19 Flutter tests (fakes).
+- API dev prep (controller): dev CORS + HTTPS-redirect skipped in Development; `run-api.ps1`
+  pinned to `http://localhost:5080`.
+
+**M1 verification:** `dotnet build` 0/0 · **`dotnet test` 67 pass** · `flutter analyze` clean
+· **`flutter test` 19 pass** · `flutter build web` OK. All migrations applied to the dev DB.
+
+---
+
+## ▶ CP1 — Milestone M1 checkpoint (please run)
+
+Prereq: Docker Desktop running; dev DB migrated (from CP0 — or run `dotnet ef database update
+--project src/UnderworldEmpire.Infrastructure --startup-project src/UnderworldEmpire.Api`).
+
+```powershell
+# 1. Postgres + API (fixed port 5080)
+docker compose up -d --wait
+./scripts/run-api.ps1               # http://localhost:5080  (Swagger at /swagger)
+
+# 2. (optional API sanity via Swagger) POST /session -> copy deviceToken -> Authorize ->
+#    GET /me returns meters + cash 100; GET /content/pack -> crime manifest
+
+# 3. Flutter app — in a second terminal
+./scripts/run-app.ps1               # web (Chrome)
+#    Expect: app auto-creates a guest, Home shows Energy/Stamina/Health bars + Cash 100.
+#    Close & reopen the app -> SAME guest (token persisted), state unchanged.
+#    Android: cd app; flutter run -d <emulator>   (uses 10.0.2.2:5080 automatically)
+```
+
+Note: with no spend action yet in M1, meters start full; **visible regen is easiest to see
+after M2 jobs spend energy.** CP1's core assertions — guest auto-create, Home shows meters +
+cash, and the **same guest persists across restart** — are all testable now.
+
+Green CP1 = M1 done. Approve and I'll start **M2** (jobs, RNG payouts, mastery, leveling,
+skill allocation, Jobs UI).
