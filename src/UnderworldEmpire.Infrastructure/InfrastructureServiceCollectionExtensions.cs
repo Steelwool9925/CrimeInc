@@ -21,6 +21,7 @@ public static class InfrastructureServiceCollectionExtensions
     {
         var connectionString = configuration.GetConnectionString("Default") ?? LocalDevConnectionString;
         services.AddDbContext<GameDbContext>(options => options.UseNpgsql(connectionString));
+        services.AddScoped<EconomyService>();
         return services;
     }
 }

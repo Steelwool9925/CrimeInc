@@ -15,4 +15,10 @@ public static class PlayerDefaults
 
     /// <summary>Default maximum Health for a new player.</summary>
     public const int HealthMax = 100;
+
+    /// <summary>Soft-currency balance awarded to every new player. Tunable balance value.</summary>
+    public const long StartingCash = 100;
+
+    /// <summary>Hard-currency balance awarded to every new player. Tunable balance value.</summary>
+    public const long StartingPremiumCurrency = 5;
 }

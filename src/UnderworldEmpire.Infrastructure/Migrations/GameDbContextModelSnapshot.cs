@@ -29,8 +29,19 @@ namespace UnderworldEmpire.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<long>("Cash")
+                        .HasColumnType("bigint");
+
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DeviceToken")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long>("PremiumCurrency")
+                        .HasColumnType("bigint");
 
                     b.ComplexProperty(typeof(Dictionary<string, object>), "Energy", "UnderworldEmpire.Domain.Player.Energy#Meter", b1 =>
                         {
@@ -84,6 +95,9 @@ namespace UnderworldEmpire.Infrastructure.Migrations
                         });
 
                     b.HasKey("Id");
+
+                    b.HasIndex("DeviceToken")
+                        .IsUnique();
 
                     b.ToTable("Players");
                 });

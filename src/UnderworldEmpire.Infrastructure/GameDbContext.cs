@@ -22,6 +22,12 @@ public class GameDbContext : DbContext
         player.HasKey(p => p.Id);
         player.Property(p => p.CreatedAtUtc).IsRequired();
 
+        player.Property(p => p.DeviceToken)
+            .IsRequired()
+            .HasMaxLength(64);
+        player.HasIndex(p => p.DeviceToken)
+            .IsUnique();
+
         // Energy meter — mapped as a complex type (EF 8+) with explicit column names
         player.ComplexProperty(p => p.Energy, b =>
         {
