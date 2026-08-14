@@ -39,6 +39,10 @@ PostgreSQL                    ── all persistent state, transactional mutatio
 - Flutter 3.35+ (Dart 3.9+)
 - Docker (for local Postgres, from S0.2)
 
+> Local Postgres is published on **host port 5433** (see `docker-compose.yml`) to avoid
+> clashing with a natively-installed PostgreSQL on the default 5432. Override the connection
+> string in any real environment via the `ConnectionStrings__Default` env var.
+
 ## Quick start
 
 ```powershell

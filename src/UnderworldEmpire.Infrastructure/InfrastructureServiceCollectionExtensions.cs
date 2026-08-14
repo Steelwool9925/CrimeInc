@@ -7,13 +7,14 @@ namespace UnderworldEmpire.Infrastructure;
 public static class InfrastructureServiceCollectionExtensions
 {
     /// <summary>
-    /// Local-dev fallback connection string, matching <c>docker-compose.yml</c>. Real
-    /// environments MUST override it via the <c>ConnectionStrings__Default</c> environment
+    /// Local-dev fallback connection string, matching <c>docker-compose.yml</c>. Uses host
+    /// port 5433 to avoid colliding with a natively-installed PostgreSQL on the default 5432.
+    /// Real environments MUST override it via the <c>ConnectionStrings__Default</c> environment
     /// variable (ASP.NET Core binds double-underscore env vars into configuration). No
     /// production secret is ever committed.
     /// </summary>
     public const string LocalDevConnectionString =
-        "Host=localhost;Port=5432;Database=underworld;Username=underworld;Password=underworld";
+        "Host=localhost;Port=5433;Database=underworld;Username=underworld;Password=underworld";
 
     /// <summary>Registers the DbContext (PostgreSQL via Npgsql) and infrastructure services.</summary>
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)

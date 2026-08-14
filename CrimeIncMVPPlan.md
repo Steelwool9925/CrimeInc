@@ -331,38 +331,46 @@ Session-by-session record of the actual build. Env: Windows 11 · .NET 10.0.301 
 - **Verification:** `dotnet build` 0/0 · `dotnet test` **2 passed** (added
   `HealthEndpointTests` proving `GET /health`→200 in-memory via `WebApplicationFactory`, no
   DB needed) · `flutter test` 1 passed.
-- **Deferred to CP0 (yours):** Docker Desktop daemon wasn't running and I'm not permitted to
-  launch it, so `docker compose up -d` → `dotnet ef database update` (creates the `Players`
-  table) → `GET /health/db` reachable is left for your CP0 run. Steps below.
+- **CP0 fix (native-Postgres port conflict):** on first CP0 run, `dotnet ef database update`
+  failed with `role "underworld" does not exist` despite a healthy container. Root cause: a
+  **native PostgreSQL service** on `127.0.0.1:5432` shadowed the container for host tools
+  (localhost → 127.0.0.1 first). Resolved by republishing the container on host port **5433**
+  and updating the local-dev connection string. Migration then applied; schema verified.
 - gru: controller single-context (M0 plumbing is tightly coupled/foundational). Minion
   dispatch begins at **S1.1**.
 
 ---
 
-## ▶ CP0 — Milestone M0 checkpoint (please run)
+## ▶ CP0 — Milestone M0 checkpoint
 
 Prereq: **start Docker Desktop** first (its daemon must be running).
 
+> **Note — Postgres runs on host port 5433, not 5432.** CP0's first run surfaced a real
+> conflict: this machine has a **native PostgreSQL Windows service** already listening on
+> `127.0.0.1:5432`. Because `localhost` resolves to `127.0.0.1` first, host tools (`dotnet
+> ef`) hit the native server — which has no `underworld` role — instead of the container,
+> giving `28000: role "underworld" does not exist`. Fixed by publishing the container on
+> **5433** (`docker-compose.yml`) and pointing the app's local-dev connection string at 5433.
+> The native Postgres is left untouched.
+
+**Server-side CP0 (✅ verified by the controller):**
+- `docker compose up -d --wait` → `underworld-postgres` healthy on `0.0.0.0:5433`.
+- `dotnet ef database update` → migration `InitialCreate` applied.
+- Schema confirmed in the `underworld` DB: `Players` (Id uuid PK, CreatedAtUtc timestamptz)
+  + `__EFMigrationsHistory` (InitialCreate, 10.0.4).
+- `dotnet test` 2 pass (incl. `/health`→200 via WebApplicationFactory); `flutter test` 1 pass.
+
+**Client/UI CP0 (yours to eyeball):**
 ```powershell
-# 1. Postgres up
-docker compose up -d
-docker compose ps                # 'underworld-postgres' healthy
-
-# 2. Create the schema from the migration
-dotnet ef database update --project src/UnderworldEmpire.Infrastructure `
-  --startup-project src/UnderworldEmpire.Api
-#    → inspect: a 'Players' table + '__EFMigrationsHistory' exist in the 'underworld' DB
-
-# 3. Run the API and hit health
+docker compose up -d --wait                 # underworld-postgres healthy (host port 5433)
 ./scripts/run-api.ps1
 #    open http://localhost:<port>/health      → 200 {"status":"ok"}
-#    open http://localhost:<port>/health/db   → 200 reachable  (Postgres up)
+#    open http://localhost:<port>/health/db   → 200 reachable   (Postgres up on 5433)
 #    open http://localhost:<port>/swagger     → Swagger UI loads
-
-# 4. App launches blank on both targets
-./scripts/run-app.ps1                    # web (Chrome)
+./scripts/run-app.ps1                         # web (Chrome) → blank home
 #    and on an Android emulator: cd app; flutter run -d <emulator>
 ```
 
-Green CP0 = M0 done. Tell me the result and I'll start **M1** (identity, meters, economy,
-content loader) with real minion dispatch.
+Server-side M0 is green. Once you've eyeballed the API/app in a browser, M0 is fully signed
+off and I'll start **M1** (identity, meters, economy, content loader) with real minion
+dispatch (worktree-isolated, model ≤ Sonnet).

@@ -1,6 +1,10 @@
 # Local development Postgres for Underworld Empire.
 # Creds here are local-dev only and match InfrastructureServiceCollectionExtensions
 # .LocalDevConnectionString. Never used in a real environment.
+#
+# Published on host port 5433 (not 5432) to avoid colliding with a natively-installed
+# PostgreSQL service that many dev machines already run on 5432. Inside the container
+# Postgres still listens on 5432; only the host mapping differs.
 services:
   postgres:
     image: postgres:17-alpine
@@ -10,7 +14,7 @@ services:
       POSTGRES_USER: underworld
       POSTGRES_PASSWORD: underworld
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - underworld-pgdata:/var/lib/postgresql/data
     healthcheck:
