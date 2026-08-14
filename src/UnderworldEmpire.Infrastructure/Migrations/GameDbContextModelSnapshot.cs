@@ -29,18 +29,33 @@ namespace UnderworldEmpire.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<int>("Attack")
+                        .HasColumnType("integer");
+
                     b.Property<long>("Cash")
                         .HasColumnType("bigint");
 
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("Defense")
+                        .HasColumnType("integer");
+
                     b.Property<string>("DeviceToken")
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<int>("Level")
+                        .HasColumnType("integer");
+
                     b.Property<long>("PremiumCurrency")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("SkillPoints")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("Xp")
                         .HasColumnType("bigint");
 
                     b.ComplexProperty(typeof(Dictionary<string, object>), "Energy", "UnderworldEmpire.Domain.Player.Energy#Meter", b1 =>

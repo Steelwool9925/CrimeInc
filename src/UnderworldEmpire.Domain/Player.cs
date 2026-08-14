@@ -30,6 +30,25 @@ public class Player
     public Meter Health { get; set; } =
         Meter.Full(PlayerDefaults.HealthMax, DateTimeOffset.UtcNow);
 
+    // -------------------------------------------------------------------------
+    // Progression — leveling/allocation logic is M2; only scalars live here.
+    // -------------------------------------------------------------------------
+
+    /// <summary>Current level. Leveling logic is M2. Tunable balance value.</summary>
+    public int Level { get; set; } = PlayerDefaults.StartingLevel;
+
+    /// <summary>Accumulated experience points. Leveling logic is M2.</summary>
+    public long Xp { get; set; } = PlayerDefaults.StartingXp;
+
+    /// <summary>Unspent skill points available for allocation (M2+).</summary>
+    public int SkillPoints { get; set; } = PlayerDefaults.StartingSkillPoints;
+
+    /// <summary>Base attack stat. Allocation logic is M2. Tunable balance value.</summary>
+    public int Attack { get; set; } = PlayerDefaults.BaseAttack;
+
+    /// <summary>Base defense stat. Allocation logic is M2. Tunable balance value.</summary>
+    public int Defense { get; set; } = PlayerDefaults.BaseDefense;
+
     /// <summary>Soft in-game currency. Display label supplied by the content pack.</summary>
     public long Cash { get; set; } = PlayerDefaults.StartingCash;
 

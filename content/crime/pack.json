@@ -1,0 +1,18 @@
+{
+  "id": "crime",
+  "name": "Underworld Empire",
+  "currencies": {
+    "cash": { "label": "Cash", "abbr": "$" },
+    "premium": { "label": "Gold Bars", "abbr": "GB" }
+  },
+  "palette": {
+    "primary": "#B71C1C",
+    "secondary": "#212121",
+    "accent": "#FFC107"
+  },
+  "assets": {
+    "logo": "assets/logo.png",
+    "icon": "assets/icon.png"
+  },
+  "version": 1
+}

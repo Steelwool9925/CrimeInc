@@ -22,4 +22,12 @@
     <ProjectReference Include="..\UnderworldEmpire.Infrastructure\UnderworldEmpire.Infrastructure.csproj" />
   </ItemGroup>
 
+  <!-- Copy content pack JSON files to build output so the loader can find them at runtime
+       and in integration tests (AppContext.BaseDirectory/content/<packId>/pack.json). -->
+  <ItemGroup>
+    <Content Include="..\..\content\**\*.json"
+             Link="content\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

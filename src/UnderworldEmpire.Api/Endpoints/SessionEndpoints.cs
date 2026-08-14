@@ -39,7 +39,12 @@ public static class SessionEndpoints
                 Stamina = Meter.Full(PlayerDefaults.StaminaMax, now),
                 Health = Meter.Full(PlayerDefaults.HealthMax, now),
                 Cash = PlayerDefaults.StartingCash,
-                PremiumCurrency = PlayerDefaults.StartingPremiumCurrency
+                PremiumCurrency = PlayerDefaults.StartingPremiumCurrency,
+                Level = PlayerDefaults.StartingLevel,
+                Xp = PlayerDefaults.StartingXp,
+                SkillPoints = PlayerDefaults.StartingSkillPoints,
+                Attack = PlayerDefaults.BaseAttack,
+                Defense = PlayerDefaults.BaseDefense
             };
 
             db.Players.Add(player);
