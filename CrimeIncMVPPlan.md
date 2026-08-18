@@ -562,3 +562,114 @@ docker compose up -d
 Green CP2 = M2 done. Note **CP1 was never run** — M2 was built on M1 unverified, at the user's
 direction; if anything in CP1 fails, treat it as an M1 defect surfacing late rather than an M2
 regression.
+
+---
+
+# Appendix A — Review backlog (NOT tasks)
+
+> **This appendix is not a task list and must not be executed as one.** Nothing here is
+> scheduled, assigned to a milestone, or a prerequisite for any checkpoint. It is a record of
+> findings parked for human review and triage. A future `/execute-plan` run should skip this
+> section entirely when looking for "the next task".
+
+## A.1 — M2 code-review findings (2026-08-18)
+
+Source: `/code-review high` over commit `a793406` (M2, 58 files). Raised **after** that commit
+was already merged to `main` — the review agent was still running when the merge happened, so
+these are defects in code that is currently on `main`. All six were independently verified
+against the merged source, not taken on the reviewer's word.
+
+Nothing below is fixed. `main` behaves as described.
+
+### Confirmed — affects the CP2 checkpoint
+
+**A.1.1 Level-up dialog stacks duplicates** · `app/lib/screens/jobs_screen.dart:31` · medium
+
+`_maybeShowLevelUp` is invoked from `build`, and its only guard is `pendingLevelUp == null`.
+Nothing clears that state until the player taps "Nice", while `main.dart` runs a 10-second
+`Timer.periodic` calling `refresh()` → `notifyListeners()` → rebuild for the app's whole
+lifetime. Every poll therefore schedules another `showDialog` on top of the one already open:
+leave the dialog up for 30 seconds and there are three to dismiss one at a time. The same path
+re-opens the dialog if the player pops JobsScreen without acknowledging.
+
+*Shape of a fix:* track "a level-up dialog is currently open" in the widget State rather than
+inferring it from `pendingLevelUp`, and clear it when the dialog closes.
+
+**A.1.2 Job cards freeze once energy runs out** · `app/lib/state/app_state.dart:84` · medium
+
+`canAttempt` / `unavailableReason` are baked into the cached `Job` objects and only recomputed
+in `_applyOutcomeToCatalog`, which runs **only after a successful `doJob`**. The 10-second poll
+updates `_me` — so the AppBar correctly ticks up to `Energy 1/10` — but never touches `_jobs`,
+so the level-1 card still reads "Needs 1 energy" with a dead button. No path re-enables it:
+`loadJobs()` is called only from `initState` and from the Retry button, which renders only when
+`jobs.isEmpty`. The player has to leave Jobs and re-enter to recover.
+
+This is the most serious of the six: it breaks the core game loop rather than a detail of it.
+Related: `loadJobs` discards `list.currentEnergy` and `list.level`, the server-fresh values that
+would have made this self-correcting.
+
+*Shape of a fix:* derive gating at render time from `_me`, or re-run the gating recompute
+whenever `_me` changes (including in `refresh()`), instead of caching the decision on `Job`.
+
+### Confirmed — lower severity
+
+**A.1.3 No in-flight guard on `allocateSkill`** · `app/lib/state/app_state.dart:226` · low
+
+`doJob` has `_jobInFlight`; `allocateSkill` has no equivalent, so the `+` button stays enabled
+while the POST is outstanding and `me.skillPoints` is stale until it returns. With 2+ points,
+two quick taps issue two concurrent `POST /skills/allocate`; both read the same `xmin`, the
+second gets a 409, and only one point is spent even though the player could afford both.
+
+**A.1.4 Concurrency 409 tells the player to re-read, but the client never does**
+· `app/lib/api/api_client.dart:157` · low
+
+`JobActionError.ConcurrencyConflict` and the skill-allocation conflict both return 409 *without*
+a `reason` extension, so the client falls back to `'unknown'` and surfaces the raw detail
+"Another request modified your state first. Re-read and try again." Neither `doJob` nor
+`allocateSkill` calls `refresh()` or `loadJobs()` on that path, so the app instructs the player
+to retry against exactly the stale state that caused the conflict.
+
+**A.1.5 Job-id length is not validated against the 64-character column**
+· `src/UnderworldEmpire.Infrastructure/Content/ContentPackLoader.cs:184` · low
+
+`ValidateJobs` checks blank and duplicate ids but not length, while `GameDbContext` maps
+`PlayerJobMastery.JobId` as `varchar(64)`. A pack with a 70-character job id passes startup
+validation and serves `GET /jobs` normally; the first `POST /jobs/{id}/do` for it hits Postgres
+22001 on the mastery INSERT, which `IsUniqueViolation` deliberately does not catch, producing an
+unhandled `DbUpdateException` and a 500. That is precisely the failure mode the loader's own
+documentation claims it exists to prevent.
+
+### Confirmed — needs a design decision, not just a fix
+
+**A.1.6 `completionsPerRank` recovery is unsound after a content retune**
+· `app/lib/api/models.dart:135` · low
+
+The client derives the per-rank threshold as `(completions + remaining) / (rank + 1)`, documented
+as "exactly recoverable". That holds only while the stored `Rank` agrees with the current
+threshold. `PlayerJobMastery.Rank` is deliberately persisted and **not** re-derived on retune, and
+`CompletionsUntilNextRank` clamps with `Math.Max(0, …)`. Retune `mastery.completionsPerRank` from
+10 to 5 and a row with `Completions=12, Rank=1` gives `remaining = 2*5 − 12 → 0`; the client then
+computes `perRank = 12 ÷ 2 = 6` (actual: 5) and `rankProgress = 1.0`, showing a full mastery bar
+on a job two ranks short of max. The doc comment overclaims.
+
+*Options, both contract-affecting:* send `completionsPerRank` on the wire and delete the
+derivation, or derive `Rank` on read so stored rank can never disagree with content.
+
+### Checked and cleared (not defects)
+
+Recorded so a later pass does not re-investigate: the `xmin` `AddColumn` in the migration is a
+genuine no-op (the Npgsql migrations generator carries a system-column list);
+`FindAsync([playerId, jobId])` matches the composite key order; `PostgresErrorCodes.UniqueViolation`
+is the correct SQLSTATE for the mastery-insert race; `LevelForXp`'s `(int)` cast cannot overflow
+for any `long` XP value; and `JobService.Attempt` genuinely mutates nothing on a refusal.
+
+## A.2 — Process note
+
+M2 was merged to `main` on the strength of a self-review, after the forked `/code-review` agent
+could not be retrieved through the task API and was assumed dead. It was still running, and it
+found A.1.1 and A.1.2 — both real, both missed by the self-review. The lesson for future
+milestones: do not treat an unretrievable review as a completed one.
+
+Also outstanding and unrelated to the above: **CP1 was never run.** M2 was built on an unverified
+M1 by explicit direction. A CP1 failure should be read as an M1 defect surfacing late rather than
+an M2 regression.
