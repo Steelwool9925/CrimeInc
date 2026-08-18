@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../api/models.dart';
 import '../state/app_state.dart';
+import 'jobs_screen.dart';
+import 'skills_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key, required this.appState});
@@ -102,7 +104,93 @@ class HomeScreen extends StatelessWidget {
               ),
             ),
           ),
+          const SizedBox(height: 8),
+          _ProgressionCard(me: me),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            key: const Key('go-to-jobs'),
+            icon: const Icon(Icons.work_outline),
+            label: const Text('Jobs'),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => JobsScreen(appState: appState)),
+            ),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            key: const Key('go-to-skills'),
+            icon: const Icon(Icons.fitness_center),
+            label: Text(
+              me.skillPoints > 0 ? 'Skills (${me.skillPoints})' : 'Skills',
+            ),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => SkillsScreen(appState: appState)),
+            ),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+/// Level, XP progress toward the next level, and the combat stats a skill point moves.
+class _ProgressionCard extends StatelessWidget {
+  const _ProgressionCard({required this.me});
+
+  final Me me;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Level', style: theme.textTheme.titleMedium),
+                Text(
+                  '${me.level}',
+                  key: const Key('home-level'),
+                  style: theme.textTheme.titleLarge,
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text('${me.xp} XP', key: const Key('home-xp'), style: theme.textTheme.bodySmall),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Attack ${me.attack}',
+                    key: const Key('home-attack'),
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    'Defense ${me.defense}',
+                    key: const Key('home-defense'),
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ),
+              ],
+            ),
+            if (me.skillPoints > 0) ...[
+              const SizedBox(height: 8),
+              Text(
+                '${me.skillPoints} skill point${me.skillPoints == 1 ? '' : 's'} to spend',
+                key: const Key('home-skill-points'),
+                style: theme.textTheme.bodyMedium
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

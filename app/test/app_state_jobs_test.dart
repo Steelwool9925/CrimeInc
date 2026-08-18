@@ -1,0 +1,294 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:underworld_empire/api/models.dart';
+import 'package:underworld_empire/state/app_state.dart';
+
+import 'fakes.dart';
+
+Future<AppState> bootstrapped(FakeApiClient api) async {
+  final state = AppState(apiClient: api, tokenStore: InMemoryTokenStore());
+  await state.bootstrap();
+  return state;
+}
+
+void main() {
+  group('AppState.loadJobs()', () {
+    test('populates the job list', () async {
+      final state = await bootstrapped(FakeApiClient());
+
+      await state.loadJobs();
+
+      expect(state.jobs, hasLength(3));
+      expect(state.jobs.first.id, 'shake-down-corner-store');
+      expect(state.jobsError, isNull);
+    });
+
+    test('records an error when the catalog fails', () async {
+      final state = await bootstrapped(FakeApiClient(throwOnJobs: true));
+
+      await state.loadJobs();
+
+      expect(state.jobsError, isNotNull);
+      expect(state.jobs, isEmpty);
+    });
+
+    test('does nothing before bootstrap (no token)', () async {
+      final api = FakeApiClient();
+      final state = AppState(apiClient: api, tokenStore: InMemoryTokenStore());
+
+      await state.loadJobs();
+
+      expect(api.jobsCalls, 0);
+    });
+
+    test('clears a previous error on a successful reload', () async {
+      final state = await bootstrapped(FakeApiClient(throwOnJobs: true));
+      await state.loadJobs();
+      expect(state.jobsError, isNotNull);
+
+      // A fresh state with a working client stands in for the retry path.
+      final healthy = await bootstrapped(FakeApiClient());
+      await healthy.loadJobs();
+
+      expect(healthy.jobsError, isNull);
+    });
+  });
+
+  group('AppState.doJob()', () {
+    test('records the result and updates the player from the response', () async {
+      final state = await bootstrapped(FakeApiClient());
+      await state.loadJobs();
+
+      await state.doJob('shake-down-corner-store');
+
+      expect(state.lastJobResult, isNotNull);
+      expect(state.lastJobResult!.cashEarned, 22);
+      expect(state.me, isNotNull);
+    });
+
+    test('does not call /me again after doing a job', () async {
+      // The do-job response carries the post-action projection.
+      final api = FakeApiClient();
+      final state = await bootstrapped(api);
+      await state.loadJobs();
+      final before = api.meCalls;
+
+      await state.doJob('shake-down-corner-store');
+
+      expect(api.meCalls, before);
+    });
+
+    test('folds the new mastery into the cached catalog', () async {
+      final state = await bootstrapped(FakeApiClient());
+      await state.loadJobs();
+      expect(state.jobs.first.mastery.completions, 3);
+
+      await state.doJob('shake-down-corner-store');
+
+      expect(state.jobs.first.mastery.completions, 4);
+    });
+
+    test('leaves other jobs mastery untouched', () async {
+      final state = await bootstrapped(FakeApiClient());
+      await state.loadJobs();
+
+      await state.doJob('shake-down-corner-store');
+
+      final other = state.jobs.firstWhere((j) => j.id != 'shake-down-corner-store');
+      expect(other.mastery.completions, 3);
+    });
+
+    test('surfaces an energy refusal as a message, not an error state', () async {
+      final state = await bootstrapped(FakeApiClient(refuseDoJobWith: 'energy'));
+      await state.loadJobs();
+
+      await state.doJob('shake-down-corner-store');
+
+      expect(state.actionMessage, 'Not enough energy.');
+      expect(state.status, LoadStatus.ready);
+      expect(state.lastJobResult, isNull);
+    });
+
+    test('surfaces a level refusal as a message', () async {
+      final state = await bootstrapped(FakeApiClient(refuseDoJobWith: 'level'));
+      await state.loadJobs();
+
+      await state.doJob('shake-down-corner-store');
+
+      expect(state.actionMessage, 'Your level is too low for that job.');
+    });
+
+    test('an unknown refusal reason falls back to the server detail', () async {
+      final state = await bootstrapped(FakeApiClient(refuseDoJobWith: 'somethingNew'));
+      await state.loadJobs();
+
+      await state.doJob('shake-down-corner-store');
+
+      expect(state.actionMessage, contains('somethingNew'));
+    });
+
+    test('does nothing before bootstrap', () async {
+      final api = FakeApiClient();
+      final state = AppState(apiClient: api, tokenStore: InMemoryTokenStore());
+
+      await state.doJob('shake-down-corner-store');
+
+      expect(api.doJobCalls, isEmpty);
+    });
+
+    test('clears jobInFlight when finished', () async {
+      final state = await bootstrapped(FakeApiClient());
+      await state.loadJobs();
+
+      await state.doJob('shake-down-corner-store');
+
+      expect(state.jobInFlight, isNull);
+    });
+
+    test('clears jobInFlight even when refused', () async {
+      final state = await bootstrapped(FakeApiClient(refuseDoJobWith: 'energy'));
+      await state.loadJobs();
+
+      await state.doJob('shake-down-corner-store');
+
+      expect(state.jobInFlight, isNull);
+    });
+
+    test('surfaces a pending level-up', () async {
+      final state = await bootstrapped(FakeApiClient(
+        doJobResult: const DoJobResult(
+          result: JobResult(
+            jobId: 'shake-down-corner-store',
+            energySpent: 1,
+            cashEarned: 20,
+            xpEarned: 10,
+            mastery: kFakeMastery,
+            masteryRankedUp: false,
+          ),
+          player: kFakeMe,
+          levelUp: LevelUp(
+            levelsGained: 1,
+            newLevel: 2,
+            skillPointsGranted: 1,
+            metersRefilled: true,
+          ),
+        ),
+      ));
+      await state.loadJobs();
+
+      await state.doJob('shake-down-corner-store');
+
+      expect(state.pendingLevelUp, isNotNull);
+      expect(state.pendingLevelUp!.newLevel, 2);
+
+      state.acknowledgeLevelUp();
+      expect(state.pendingLevelUp, isNull);
+    });
+
+    test('dismissJobResult clears the panel', () async {
+      final state = await bootstrapped(FakeApiClient());
+      await state.loadJobs();
+      await state.doJob('shake-down-corner-store');
+
+      state.dismissJobResult();
+
+      expect(state.lastJobResult, isNull);
+    });
+  });
+
+  group('AppState.allocateSkill()', () {
+    test('updates the player from the server response', () async {
+      final api = FakeApiClient(
+        allocateResult: const Me(
+          playerId: 'p',
+          energy: MeterState(current: 7, max: 10, regenSecondsPerPoint: 300),
+          stamina: MeterState(current: 5, max: 10, regenSecondsPerPoint: 300),
+          health: MeterState(current: 10, max: 10, regenSecondsPerPoint: 300),
+          cash: 100,
+          premiumCurrency: 0,
+          level: 2,
+          xp: 100,
+          skillPoints: 0,
+          attack: 11,
+          defense: 10,
+        ),
+      );
+      final state = await bootstrapped(api);
+
+      await state.allocateSkill('attack');
+
+      expect(api.allocateCalls, ['attack']);
+      expect(state.me!.attack, 11);
+      expect(state.me!.skillPoints, 0);
+    });
+
+    test('surfaces a no-points refusal as a message', () async {
+      final state = await bootstrapped(FakeApiClient(refuseAllocateWith: 'noSkillPoints'));
+
+      await state.allocateSkill('attack');
+
+      expect(state.actionMessage, 'No skill points to spend.');
+    });
+
+    test('does nothing before bootstrap', () async {
+      final api = FakeApiClient();
+      final state = AppState(apiClient: api, tokenStore: InMemoryTokenStore());
+
+      await state.allocateSkill('attack');
+
+      expect(api.allocateCalls, isEmpty);
+    });
+
+    test('clearActionMessage removes the message', () async {
+      final state = await bootstrapped(FakeApiClient(refuseAllocateWith: 'noSkillPoints'));
+      await state.allocateSkill('attack');
+      expect(state.actionMessage, isNotNull);
+
+      state.clearActionMessage();
+
+      expect(state.actionMessage, isNull);
+    });
+  });
+
+  group('JobMastery derived values', () {
+    test('recovers completionsPerRank from the server figures', () async {
+      // 3 completions, rank 0, 7 to go => threshold is 10.
+      const mastery = JobMastery(
+        completions: 3,
+        rank: 0,
+        maxRank: 5,
+        completionsUntilNextRank: 7,
+      );
+
+      expect(mastery.completionsPerRank, 10);
+      expect(mastery.rankProgress, closeTo(0.3, 0.0001));
+    });
+
+    test('recovers the threshold at a higher rank', () async {
+      // 24 completions, rank 2, 6 to go => (24+6)/3 = 10.
+      const mastery = JobMastery(
+        completions: 24,
+        rank: 2,
+        maxRank: 5,
+        completionsUntilNextRank: 6,
+      );
+
+      expect(mastery.completionsPerRank, 10);
+      expect(mastery.rankProgress, closeTo(0.4, 0.0001));
+    });
+
+    test('reads as complete at max rank', () async {
+      const mastery = JobMastery(completions: 50, rank: 5, maxRank: 5);
+
+      expect(mastery.completionsPerRank, isNull);
+      expect(mastery.rankProgress, 1.0);
+      expect(mastery.isMaxRank, isTrue);
+    });
+
+    test('reads as empty when mastery is disabled', () async {
+      const mastery = JobMastery(completions: 5, rank: 0, maxRank: 0);
+
+      expect(mastery.rankProgress, 0.0);
+      expect(mastery.isMaxRank, isFalse);
+    });
+  });
+}

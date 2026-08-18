@@ -16,10 +16,38 @@ class ApiException implements Exception {
   String toString() => 'ApiException($statusCode): $message';
 }
 
+/// A server refusal that is part of normal play rather than a fault — not enough energy, level too
+/// low, no skill points left.
+///
+/// Separate from [ApiException] because the UI must treat these differently: a refusal is a message
+/// to show in place, whereas a transport error means the app has lost its footing and should offer a
+/// retry.
+class JobRefusedException implements Exception {
+  const JobRefusedException(this.reason, this.detail);
+
+  /// Stable token from the server: 'level', 'energy', 'noSkillPoints', or 'unknown'.
+  final String reason;
+
+  /// Human-readable detail from the server's problem response.
+  final String detail;
+
+  @override
+  String toString() => 'JobRefusedException($reason): $detail';
+}
+
 abstract class ApiClient {
   Future<SessionResult> session(String? deviceToken);
   Future<Me> me(String deviceToken);
   Future<ContentPack> contentPack();
+
+  /// The job catalog with this player's mastery and affordability folded in.
+  Future<JobList> jobs(String deviceToken);
+
+  /// Performs a job. Throws [JobRefusedException] when the server refuses it (409).
+  Future<DoJobResult> doJob(String deviceToken, String jobId);
+
+  /// Spends one skill point. Throws [JobRefusedException] with reason `noSkillPoints` when none remain.
+  Future<Me> allocateSkill(String deviceToken, String target);
 }
 
 class HttpApiClient implements ApiClient {
@@ -82,5 +110,63 @@ class HttpApiClient implements ApiClient {
     _checkStatus(response);
     return ContentPack.fromJson(
         jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  @override
+  Future<JobList> jobs(String deviceToken) async {
+    final response = await _client.get(
+      Uri.parse('$_baseUrl/jobs'),
+      headers: {'Authorization': 'Bearer $deviceToken'},
+    );
+    _checkStatus(response);
+    return JobList.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  @override
+  Future<DoJobResult> doJob(String deviceToken, String jobId) async {
+    final response = await _client.post(
+      Uri.parse('$_baseUrl/jobs/$jobId/do'),
+      headers: {'Authorization': 'Bearer $deviceToken'},
+    );
+    _throwIfRefused(response);
+    _checkStatus(response);
+    return DoJobResult.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  @override
+  Future<Me> allocateSkill(String deviceToken, String target) async {
+    final response = await _client.post(
+      Uri.parse('$_baseUrl/skills/allocate'),
+      headers: {
+        'Authorization': 'Bearer $deviceToken',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'target': target}),
+    );
+    _throwIfRefused(response);
+    _checkStatus(response);
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    return Me.fromJson(body['player'] as Map<String, dynamic>);
+  }
+
+  /// Turns a 409 problem response into a [JobRefusedException] carrying the server's reason token.
+  ///
+  /// The reason is read from the problem body rather than inferred from the status code, so the
+  /// client never has to guess why an action was refused.
+  void _throwIfRefused(http.Response response) {
+    if (response.statusCode != 409) return;
+
+    var reason = 'unknown';
+    var detail = response.body;
+    try {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      reason = body['reason'] as String? ?? 'unknown';
+      detail = body['detail'] as String? ?? detail;
+    } catch (_) {
+      // Malformed problem body — fall back to the raw text rather than masking the refusal.
+    }
+
+    throw JobRefusedException(reason, detail);
   }
 }

@@ -79,6 +79,8 @@ app.MapGet("/health/db", async (GameDbContext db) =>
 app.MapSessionEndpoints();
 app.MapContentEndpoints();
 app.MapMeEndpoints();
+app.MapJobEndpoints();
+app.MapSkillEndpoints();
 
 app.Run();
 

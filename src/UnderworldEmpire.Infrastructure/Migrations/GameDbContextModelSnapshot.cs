@@ -23,6 +23,26 @@ namespace UnderworldEmpire.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("UnderworldEmpire.Domain.Jobs.PlayerJobMastery", b =>
+                {
+                    b.Property<Guid>("PlayerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("JobId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("Completions")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Rank")
+                        .HasColumnType("integer");
+
+                    b.HasKey("PlayerId", "JobId");
+
+                    b.ToTable("PlayerJobMasteries");
+                });
+
             modelBuilder.Entity("UnderworldEmpire.Domain.Player", b =>
                 {
                     b.Property<Guid>("Id")
@@ -57,6 +77,12 @@ namespace UnderworldEmpire.Infrastructure.Migrations
 
                     b.Property<long>("Xp")
                         .HasColumnType("bigint");
+
+                    b.Property<uint>("xmin")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
 
                     b.ComplexProperty(typeof(Dictionary<string, object>), "Energy", "UnderworldEmpire.Domain.Player.Energy#Meter", b1 =>
                         {
@@ -115,6 +141,15 @@ namespace UnderworldEmpire.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("Players");
+                });
+
+            modelBuilder.Entity("UnderworldEmpire.Domain.Jobs.PlayerJobMastery", b =>
+                {
+                    b.HasOne("UnderworldEmpire.Domain.Player", null)
+                        .WithMany()
+                        .HasForeignKey("PlayerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

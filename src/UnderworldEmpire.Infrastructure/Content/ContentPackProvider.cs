@@ -8,8 +8,11 @@ internal sealed class ContentPackProvider : IContentPackProvider
 {
     public ContentPack ActivePack { get; }
 
-    public ContentPackProvider(ContentPack pack)
+    public JobCatalog JobCatalog { get; }
+
+    public ContentPackProvider(ContentPack pack, JobCatalog jobCatalog)
     {
         ActivePack = pack;
+        JobCatalog = jobCatalog;
     }
 }

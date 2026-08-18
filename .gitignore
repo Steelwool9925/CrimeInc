@@ -41,3 +41,12 @@ Desktop.ini
 
 # ---- Tooling ----
 gru-ledger.md
+
+# ---- Agent pipeline artifacts (map/plan/report) ----
+.claude/maps/
+.claude/plans/
+.claude/reports/
+
+# ---- Worktrees (isolated agent workspaces) ----
+.claude/worktrees/
+.worktrees/

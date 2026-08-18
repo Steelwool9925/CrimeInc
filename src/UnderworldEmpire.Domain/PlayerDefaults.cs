@@ -40,4 +40,19 @@ public static class PlayerDefaults
 
     /// <summary>Base defense stat for a new player. Tunable balance value.</summary>
     public const int BaseDefense = 5;
+
+    /// <summary>
+    /// Highest attainable level. Bounds the level-up loop so a pathological XP grant cannot spin,
+    /// and gives <see cref="Progression.LevelCurve"/> a defined ceiling. Tunable balance value.
+    /// </summary>
+    public const int MaxLevel = 100;
+
+    /// <summary>Skill points granted per level gained. Tunable balance value.</summary>
+    public const int SkillPointsPerLevel = 1;
+
+    /// <summary>
+    /// Stat increase per skill point spent. Tunable balance value — CP2 checks that spending one
+    /// point visibly moves the stat on Home, so this must stay &gt;= 1.
+    /// </summary>
+    public const int StatIncreasePerSkillPoint = 1;
 }

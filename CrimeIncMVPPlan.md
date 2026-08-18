@@ -452,3 +452,113 @@ cash, and the **same guest persists across restart** — are all testable now.
 
 Green CP1 = M1 done. Approve and I'll start **M2** (jobs, RNG payouts, mastery, leveling,
 skill allocation, Jobs UI).
+
+---
+
+## M2 — Jobs & progression ✅ (executed via /execute-plan; pending user CP2)
+
+Executed from `.claude/plans/FEATURE_PLAN_JobsProgression.md`, **Tier 2 (Localized
+Optimization)**, in worktree `.claude/worktrees/m2a-jobs-progression` on branch
+`worktree-m2a-jobs-progression`. Run as a **single-context executor** — no subagents, since the
+session's standing instructions bar them unless asked. Milestones M2-A → M2-D.
+
+### ✅ M2-A — Job catalog as content (T2.1, content half)
+- `content/crime/jobs.json`: 6 jobs, level gates 1/2/3/5/8, energy costs 1–9, inclusive cash
+  ranges, fixed XP, pack-wide mastery (10 completions/rank, max rank 5).
+- `ContentPackLoader.LoadJobs` + `ValidateJobs` — collects **all** errors in one message like
+  `pack.json` does, naming each bad entry by array index *and* id. Loaded at startup inside
+  `AddInfrastructure`, so invalid content fails the host rather than the first request.
+- Domain: `Job` (with `EnsureValid`), `PlayerJobMastery` (composite key, stored rank),
+  `IRandomSource` seam; `SystemRandomSource` in Infrastructure (`Random.Shared`, deliberately not
+  crypto — a payout roll is unobservable to the player, unlike a device token).
+- `JobCatalog` holds jobs in a `FrozenDictionary` with an **ordinal** comparer — ids are content
+  keys, so casing is significant.
+- `GET /jobs` (`[Authorize]`, unlike anonymous `/content/pack`) — catalog + per-player mastery +
+  server-computed `canAttempt`/`unavailableReason`. Two queries regardless of catalog size.
+- Migration `AddPlayerJobMastery`: `PK ("PlayerId","JobId")`, FK cascade from Players.
+
+### ✅ M2-B — Doing a job (T2.1 logic half + T2.2)
+- `JobService.Attempt` — validates **before** mutating (level, then energy), spends via
+  `Meter.SpendAt`, rolls cash from the content range, grants XP, records one completion. A refusal
+  mutates nothing and takes no roll.
+- `POST /jobs/{id}/do` — no request body at all; every figure is server-decided. 404 unknown job,
+  409 + `reason` token (`level`/`energy`) on refusal, matching `GET /jobs`' vocabulary.
+- `JobActionService` — one `SaveChangesAsync` covers energy + cash + XP + level + mastery.
+- The response carries the **full post-action player projection**, so the client never follows a
+  job with a `GET /me`. `PlayerProjection` was extracted from `MeEndpoints` for this rather than
+  duplicating the regen countdown arithmetic.
+
+### ✅ M2-C — Levelling and skill points (T2.3)
+- `LevelCurve`: cumulative XP to reach level L is `50·(L−1)·L` → 0, 100, 300, 600, 1000 …
+  `LevelForXp` solves the quadratic then corrects by stepping, because `Math.Sqrt` on a large
+  `long` can land a level either side of a boundary.
+- `Player.ApplyXpAndLevelUp` resolves **all** levels from one grant in a single pass, grants
+  skill points, and refills all three meters. Never demotes a player whose level is ahead of the
+  curve.
+- `POST /skills/allocate` — target parsed to an enum at the boundary (case-insensitive), 400 on
+  an unknown target, 409 `noSkillPoints` when the pool is empty. A point is decremented only
+  after the target is known good.
+
+### ✅ M2-D — Flutter Jobs & Skills UI (T2.4)
+- Models: `Job`, `JobList`, `JobMastery`, `JobResult`, `LevelUp`, `DoJobResult`.
+  `JobMastery.completionsPerRank` recovers the threshold exactly from what the server sends
+  (`(completions + remaining) / (rank + 1)`), so the mastery bar needs no extra contract field.
+- `JobRefusedException` separates normal-play refusals from transport faults, so the UI shows a
+  message in place instead of an error screen with a retry.
+- `JobsScreen` (cards, mastery bars, server-driven lock labels), `JobResultPanel` (realised
+  payout), `LevelUpDialog`, `SkillsScreen`; Home gains a level/XP/stats card and navigation.
+- **No router added.** Direct `MaterialPageRoute` pushes keep the existing hand-wired
+  composition; named routes would need argument plumbing or a DI container to pass `AppState`.
+
+### Balance tuning that CP2 depends on
+Ten runs of the 1-energy job — exactly one full starting energy bar — award exactly **100 XP**
+(the level-2 threshold) and exactly **10 completions** (the first mastery rank). This makes the
+whole CP2 loop reachable without waiting on energy regeneration. Two tests in
+`JobCatalogLoaderTests` pin the underlying properties so a later balance pass cannot silently
+break the checkpoint.
+
+### Bug found and fixed during execution
+Two concurrent attempts at a job a player has **never done before** each tried to INSERT the same
+`(PlayerId, JobId)` mastery row. The loser hit the composite primary key (`23505`) rather than the
+`xmin` concurrency token — the INSERT fails before the player UPDATE's check can matter — so it
+surfaced as an unhandled `DbUpdateException`, i.e. a 500 on any first-time double-tap. Now caught
+and reported as the same 409 conflict, narrowed to that one SQLSTATE so genuine faults still throw.
+Found by `JobConcurrencyTests`, which existed only because Tier 2 required proving the fix.
+
+**M2 verification:** `dotnet build` 0 warnings / 0 errors · **`dotnet test` 198 pass** ·
+`flutter analyze` clean · **`flutter test` 84 pass** · migration applied to `underworld` and
+`underworld_test` · composite key confirmed in the live schema · **no physical `xmin` column**
+added (it maps to Postgres's system column, so the concurrency token needed no DDL) · host
+verified to refuse startup on a deliberately corrupted `jobs.json`, reporting all three injected
+violations at once.
+
+---
+
+## ▶ CP2 — Milestone M2 checkpoint (please run)
+
+```powershell
+# 1. Postgres + API (fixed port 5080)
+docker compose up -d
+./scripts/run-api.ps1
+
+# 2. API sanity via Swagger or UnderworldEmpire.Api.http:
+#    POST /session       -> copy deviceToken -> Authorize
+#    GET  /jobs          -> 6 jobs; level-1 ones attemptable, others "unavailableReason": "level"
+#    POST /jobs/shake-down-corner-store/do  -> energy down 1, cash +15..30, xp +10, mastery 1
+#    repeat x10          -> levelUp {newLevel: 2, skillPointsGranted: 1, metersRefilled: true}
+#                           and mastery rank 1; meters back to full
+#    POST /skills/allocate {"target":"attack"} -> attack 5 -> 6
+#    GET  /me            -> the higher attack persists
+
+# 3. Flutter app — in a second terminal
+./scripts/run-app.ps1
+#    Home -> Jobs -> tap "Do job" on Shake Down a Corner Store.
+#    Expect: energy drops, result panel shows the realised payout, mastery bar ticks up.
+#    Keep tapping to level 2 -> level-up dialog, meters refill, Home shows "1 skill point to spend".
+#    Home -> Skills -> tap + on Attack -> stat rises; back on Home, Attack shows the new value.
+#    Android: cd app; flutter run -d <emulator>   (uses 10.0.2.2:5080 automatically)
+```
+
+Green CP2 = M2 done. Note **CP1 was never run** — M2 was built on M1 unverified, at the user's
+direction; if anything in CP1 fails, treat it as an M1 defect surfacing late rather than an M2
+regression.

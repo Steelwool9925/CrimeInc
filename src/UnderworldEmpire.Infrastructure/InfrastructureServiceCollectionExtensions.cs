@@ -2,7 +2,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using UnderworldEmpire.Domain;
+using UnderworldEmpire.Domain.Jobs;
+using UnderworldEmpire.Domain.Randomness;
 using UnderworldEmpire.Infrastructure.Content;
+using UnderworldEmpire.Infrastructure.Randomness;
 
 namespace UnderworldEmpire.Infrastructure;
 
@@ -25,12 +28,25 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddDbContext<GameDbContext>(options => options.UseNpgsql(connectionString));
         services.AddScoped<EconomyService>();
 
-        // Content-pack: load the default pack at startup and register as a singleton.
-        // The content root is overridable via "Content:Root" for tests and deployments.
+        // Pure game-rule services. JobService holds no state beyond its RNG, but is registered
+        // scoped alongside the services that consume it for lifetime uniformity.
+        services.AddScoped<JobService>();
+        services.AddScoped<JobActionService>();
+        services.AddScoped<ProgressionService>();
+
+        // Server-side RNG for game outcomes. Singleton: Random.Shared is thread-safe and holds no
+        // per-request state.
+        services.AddSingleton<IRandomSource, SystemRandomSource>();
+
+        // Content-pack: load the default pack and its job catalog at startup and register as a
+        // singleton. The content root is overridable via "Content:Root" for tests and deployments.
+        // Loading here (rather than lazily) means invalid content fails the host at startup instead
+        // of surfacing as a 500 on the first request that touches it.
         var contentRoot = configuration["Content:Root"];
         var loader = new ContentPackLoader(contentRoot);
         var pack = loader.Load(BuildInfo.DefaultContentPack);
-        services.AddSingleton<IContentPackProvider>(new ContentPackProvider(pack));
+        var jobCatalog = loader.LoadJobs(BuildInfo.DefaultContentPack);
+        services.AddSingleton<IContentPackProvider>(new ContentPackProvider(pack, jobCatalog));
 
         return services;
     }

@@ -8,4 +8,10 @@ public interface IContentPackProvider
 {
     /// <summary>The loaded and validated content pack.</summary>
     ContentPack ActivePack { get; }
+
+    /// <summary>
+    /// The loaded and validated job catalog for the active pack. Same lifecycle as
+    /// <see cref="ActivePack"/> — read once at startup, immutable thereafter.
+    /// </summary>
+    JobCatalog JobCatalog { get; }
 }

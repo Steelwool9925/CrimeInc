@@ -1,3 +1,5 @@
+using UnderworldEmpire.Domain.Progression;
+
 namespace UnderworldEmpire.Domain;
 
 /// <summary>
@@ -48,6 +50,98 @@ public class Player
 
     /// <summary>Base defense stat. Allocation logic is M2. Tunable balance value.</summary>
     public int Defense { get; set; } = PlayerDefaults.BaseDefense;
+
+    /// <summary>
+    /// Adds <paramref name="amount"/> to <see cref="Xp"/> without applying the level curve.
+    /// </summary>
+    /// <remarks>
+    /// The raw accumulator. Callers that want levelling behaviour use
+    /// <see cref="ApplyXpAndLevelUp"/>; this exists so XP can be granted in contexts that must not
+    /// trigger a level-up as a side effect.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="amount"/> is negative.</exception>
+    public void AddXp(long amount)
+    {
+        if (amount < 0)
+            throw new ArgumentOutOfRangeException(nameof(amount), amount, "Amount must be non-negative.");
+        Xp += amount;
+    }
+
+    /// <summary>
+    /// Adds <paramref name="amount"/> to <see cref="Xp"/> and applies the level curve, refilling
+    /// meters and granting skill points for every level crossed.
+    /// </summary>
+    /// <remarks>
+    /// Resolves <b>all</b> levels gained in one pass rather than looping one level at a time: a
+    /// single large payout can cross several thresholds, and a per-level loop would grant the right
+    /// points but reset the meter clock repeatedly for no reason.
+    /// </remarks>
+    /// <param name="amount">XP to grant; must be non-negative.</param>
+    /// <param name="nowUtc">Instant used as the refill timestamp when a level is gained.</param>
+    /// <returns>What the grant produced; <see cref="LevelUpOutcome.LeveledUp"/> is false if no threshold was crossed.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="amount"/> is negative.</exception>
+    public LevelUpOutcome ApplyXpAndLevelUp(long amount, DateTimeOffset nowUtc)
+    {
+        AddXp(amount);
+
+        int levelBefore = Level;
+        int levelAfter = LevelCurve.LevelForXp(Xp);
+
+        // Guard against a level that is somehow already ahead of the curve (hand-edited data, or a
+        // curve retune that lowered thresholds): never demote a player.
+        if (levelAfter <= levelBefore)
+            return LevelUpOutcome.None(levelBefore);
+
+        int levelsGained = levelAfter - levelBefore;
+        int skillPointsGranted = levelsGained * PlayerDefaults.SkillPointsPerLevel;
+
+        Level = levelAfter;
+        GrantSkillPoints(skillPointsGranted);
+
+        // Levelling refills every meter. This is what lets a player keep going after a grind
+        // instead of stopping to wait, and it is the visible reward CP2 asks the tester to confirm.
+        Energy = Energy.RefillAt(nowUtc);
+        Stamina = Stamina.RefillAt(nowUtc);
+        Health = Health.RefillAt(nowUtc);
+
+        return new LevelUpOutcome(levelsGained, levelAfter, skillPointsGranted, MetersRefilled: true);
+    }
+
+    /// <summary>Grants <paramref name="amount"/> unspent skill points.</summary>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="amount"/> is negative.</exception>
+    public void GrantSkillPoints(int amount)
+    {
+        if (amount < 0)
+            throw new ArgumentOutOfRangeException(nameof(amount), amount, "Amount must be non-negative.");
+        SkillPoints += amount;
+    }
+
+    /// <summary>
+    /// Spends one skill point on <paramref name="target"/>, raising that stat by
+    /// <see cref="PlayerDefaults.StatIncreasePerSkillPoint"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown when no skill points remain.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="target"/> is not a known stat.</exception>
+    public void SpendSkillPoint(SkillTarget target)
+    {
+        if (SkillPoints < 1)
+            throw new InvalidOperationException("no skill points available");
+
+        // Decrement only after the target is known good, so an invalid target cannot burn a point.
+        switch (target)
+        {
+            case SkillTarget.Attack:
+                Attack += PlayerDefaults.StatIncreasePerSkillPoint;
+                break;
+            case SkillTarget.Defense:
+                Defense += PlayerDefaults.StatIncreasePerSkillPoint;
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(target), target, "Unknown skill target.");
+        }
+
+        SkillPoints--;
+    }
 
     /// <summary>Soft in-game currency. Display label supplied by the content pack.</summary>
     public long Cash { get; set; } = PlayerDefaults.StartingCash;

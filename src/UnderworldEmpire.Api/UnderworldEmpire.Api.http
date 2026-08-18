@@ -1,6 +1,57 @@
-@UnderworldEmpire.Api_HostAddress = http://localhost:5173
+@UnderworldEmpire.Api_HostAddress = http://localhost:5080
 
-GET {{UnderworldEmpire.Api_HostAddress}}/weatherforecast/
+### Liveness — 200 whenever the process is up
+GET {{UnderworldEmpire.Api_HostAddress}}/health
 Accept: application/json
 
+### Readiness — needs Postgres on 5433
+GET {{UnderworldEmpire.Api_HostAddress}}/health/db
+Accept: application/json
+
+### Create a guest session. Copy deviceToken from the response into @token below.
+# @name session
+POST {{UnderworldEmpire.Api_HostAddress}}/session
+Content-Type: application/json
+
+{}
+
 ###
+@token = paste-the-deviceToken-here
+
+### Resume an existing session (same player back)
+POST {{UnderworldEmpire.Api_HostAddress}}/session
+Content-Type: application/json
+
+{ "deviceToken": "{{token}}" }
+
+### Auth probe
+GET {{UnderworldEmpire.Api_HostAddress}}/whoami
+Authorization: Bearer {{token}}
+
+### The active content pack (anonymous — no token needed)
+GET {{UnderworldEmpire.Api_HostAddress}}/content/pack
+Accept: application/json
+
+### Player projection: meters, currencies, level/XP/stats
+GET {{UnderworldEmpire.Api_HostAddress}}/me
+Authorization: Bearer {{token}}
+
+### Job catalog with this player's mastery and affordability (M2-A)
+GET {{UnderworldEmpire.Api_HostAddress}}/jobs
+Authorization: Bearer {{token}}
+
+### Do a job (M2-B). No body — every figure is decided server-side.
+### Ten runs of this 1-energy job award exactly 100 XP = level 2, and 10 completions = mastery rank 1.
+POST {{UnderworldEmpire.Api_HostAddress}}/jobs/shake-down-corner-store/do
+Authorization: Bearer {{token}}
+
+### A level-3 job — expect 409 with reason "level" until you are level 3
+POST {{UnderworldEmpire.Api_HostAddress}}/jobs/hijack-a-delivery-truck/do
+Authorization: Bearer {{token}}
+
+### Spend a skill point (M2-C). Target is "attack" or "defense", case-insensitive.
+POST {{UnderworldEmpire.Api_HostAddress}}/skills/allocate
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "target": "attack" }
