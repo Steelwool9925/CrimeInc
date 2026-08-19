@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using UnderworldEmpire.Domain;
+using UnderworldEmpire.Domain.Items;
 using UnderworldEmpire.Domain.Jobs;
 using UnderworldEmpire.Domain.Randomness;
 using UnderworldEmpire.Infrastructure.Content;
@@ -34,6 +35,9 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<JobActionService>();
         services.AddScoped<ProgressionService>();
 
+        // Stateless, but registered scoped alongside the other rule services for lifetime uniformity.
+        services.AddScoped<InventoryService>();
+
         // Server-side RNG for game outcomes. Singleton: Random.Shared is thread-safe and holds no
         // per-request state.
         services.AddSingleton<IRandomSource, SystemRandomSource>();
@@ -46,7 +50,8 @@ public static class InfrastructureServiceCollectionExtensions
         var loader = new ContentPackLoader(contentRoot);
         var pack = loader.Load(BuildInfo.DefaultContentPack);
         var jobCatalog = loader.LoadJobs(BuildInfo.DefaultContentPack);
-        services.AddSingleton<IContentPackProvider>(new ContentPackProvider(pack, jobCatalog));
+        var itemCatalog = loader.LoadItems(BuildInfo.DefaultContentPack);
+        services.AddSingleton<IContentPackProvider>(new ContentPackProvider(pack, jobCatalog, itemCatalog));
 
         return services;
     }

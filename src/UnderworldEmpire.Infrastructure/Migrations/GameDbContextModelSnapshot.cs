@@ -23,6 +23,26 @@ namespace UnderworldEmpire.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("UnderworldEmpire.Domain.Items.PlayerItem", b =>
+                {
+                    b.Property<Guid>("PlayerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ItemId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<bool>("Equipped")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer");
+
+                    b.HasKey("PlayerId", "ItemId");
+
+                    b.ToTable("PlayerItems");
+                });
+
             modelBuilder.Entity("UnderworldEmpire.Domain.Jobs.PlayerJobMastery", b =>
                 {
                     b.Property<Guid>("PlayerId")
@@ -141,6 +161,15 @@ namespace UnderworldEmpire.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("Players");
+                });
+
+            modelBuilder.Entity("UnderworldEmpire.Domain.Items.PlayerItem", b =>
+                {
+                    b.HasOne("UnderworldEmpire.Domain.Player", null)
+                        .WithMany()
+                        .HasForeignKey("PlayerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("UnderworldEmpire.Domain.Jobs.PlayerJobMastery", b =>

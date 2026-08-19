@@ -14,4 +14,10 @@ public interface IContentPackProvider
     /// <see cref="ActivePack"/> — read once at startup, immutable thereafter.
     /// </summary>
     JobCatalog JobCatalog { get; }
+
+    /// <summary>
+    /// The loaded and validated item catalog for the active pack. Same lifecycle as
+    /// <see cref="ActivePack"/> — read once at startup, immutable thereafter.
+    /// </summary>
+    ItemCatalog ItemCatalog { get; }
 }

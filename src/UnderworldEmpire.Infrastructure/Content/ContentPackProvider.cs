@@ -10,9 +10,12 @@ internal sealed class ContentPackProvider : IContentPackProvider
 
     public JobCatalog JobCatalog { get; }
 
-    public ContentPackProvider(ContentPack pack, JobCatalog jobCatalog)
+    public ItemCatalog ItemCatalog { get; }
+
+    public ContentPackProvider(ContentPack pack, JobCatalog jobCatalog, ItemCatalog itemCatalog)
     {
         ActivePack = pack;
         JobCatalog = jobCatalog;
+        ItemCatalog = itemCatalog;
     }
 }

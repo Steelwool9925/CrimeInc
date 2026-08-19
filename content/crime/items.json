@@ -1,0 +1,87 @@
+{
+  "packId": "crime",
+  "version": 1,
+  "items": [
+    {
+      "id": "brass-knuckles",
+      "name": "Brass Knuckles",
+      "description": "Four ounces of persuasion that fits in a coat pocket.",
+      "slot": "weapon",
+      "levelRequirement": 1,
+      "price": 75,
+      "stats": { "attack": 4, "defense": 0 }
+    },
+    {
+      "id": "switchblade",
+      "name": "Switchblade",
+      "description": "Quiet, quick, and legal to carry in exactly nowhere.",
+      "slot": "weapon",
+      "levelRequirement": 2,
+      "price": 180,
+      "stats": { "attack": 7, "defense": 1 }
+    },
+    {
+      "id": "sawed-off-shotgun",
+      "name": "Sawed-Off Shotgun",
+      "description": "Ends arguments at conversational distance.",
+      "slot": "weapon",
+      "levelRequirement": 5,
+      "price": 600,
+      "stats": { "attack": 15, "defense": 2 }
+    },
+    {
+      "id": "assault-rifle",
+      "name": "Assault Rifle",
+      "description": "The kind of hardware that turns a crew into a problem.",
+      "slot": "weapon",
+      "levelRequirement": 10,
+      "price": 2400,
+      "stats": { "attack": 34, "defense": 4 }
+    },
+    {
+      "id": "leather-jacket",
+      "name": "Leather Jacket",
+      "description": "Stops a blade at a glancing angle. Mostly it stops questions.",
+      "slot": "armor",
+      "levelRequirement": 1,
+      "price": 120,
+      "stats": { "attack": 0, "defense": 5 }
+    },
+    {
+      "id": "kevlar-vest",
+      "name": "Kevlar Vest",
+      "description": "Second-hand from a police auction. Nobody asked why.",
+      "slot": "armor",
+      "levelRequirement": 4,
+      "price": 700,
+      "stats": { "attack": 1, "defense": 14 }
+    },
+    {
+      "id": "plated-body-armor",
+      "name": "Plated Body Armor",
+      "description": "Heavy enough that you plan your exits before you walk in.",
+      "slot": "armor",
+      "levelRequirement": 9,
+      "price": 2600,
+      "stats": { "attack": 2, "defense": 30 }
+    },
+    {
+      "id": "stolen-sedan",
+      "name": "Stolen Sedan",
+      "description": "Repainted, re-plated, and utterly forgettable in traffic.",
+      "slot": "vehicle",
+      "levelRequirement": 3,
+      "price": 900,
+      "stats": { "attack": 6, "defense": 8 }
+    },
+    {
+      "id": "armored-suv",
+      "name": "Armored SUV",
+      "description": "Runs flat tyres for a mile and takes a brick to the glass.",
+      "slot": "vehicle",
+      "levelRequirement": 8,
+      "price": 3200,
+      "stats": { "attack": 14, "defense": 22 }
+    }
+  ]
+}

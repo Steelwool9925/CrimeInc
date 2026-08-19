@@ -565,6 +565,71 @@ regression.
 
 ---
 
+## M3 — Items & properties (in progress)
+
+Executed via `/execute-plan` in worktree `.claude/worktrees/m3a-items-loadout` on branch
+`worktree-m3a-items-loadout`. Single-context executor — no subagents, per the session's standing
+instructions. Built test-first throughout: every type below had its test written and watched fail
+before the production code existed.
+
+### ✅ S3.1 — Item catalog, inventory & loadout aggregation (T3.1)
+
+**Content.** `content/crime/items.json`: 9 items across the three slots (weapon/armor/vehicle),
+level gates 1–10, prices 75–3200, non-negative `stats.attack`/`stats.defense`.
+`ContentPackLoader.LoadItems` + `ValidateItems` collect **all** errors in one message the way
+`jobs.json` does, naming each bad entry by array index *and* id. Loaded at startup inside
+`AddInfrastructure`, so invalid content fails the host rather than the first request that opens the
+store.
+
+**Domain (`UnderworldEmpire.Domain/Items`).**
+- `Item` (with `EnsureValid`), `ItemSlot` (engine vocabulary, not content), `PlayerItem`
+  (composite key, quantity + equipped flag), `OwnedItem` (a holding paired with its definition).
+- `Loadout.For(player, equippedItems)` — the attack/defense aggregation. Pure, computed on read,
+  **never stored**: an effective-stat column would need recomputing on every equip, unequip and
+  content retune, and one missed path would leave a player permanently wrong. Reports base and item
+  contributions separately so a client can show both.
+- `InventoryService` — `Purchase` / `Equip` / `Unequip`. Validates before mutating, so a refusal
+  changes nothing; level is reported ahead of cash because it is the permanent obstacle. Stateless
+  and deliberately RNG-free: a shop price is a figure the player plans against, unlike a job payout.
+- Item stats are **not** copied onto the holding. A retune of `items.json` must move every player's
+  numbers; a snapshot taken at purchase time would freeze balance into player data.
+
+**Persistence.** `PlayerItems` with `PK ("PlayerId","ItemId")`, `ItemId varchar(64)`, FK cascade
+from Players. Migration `AddPlayerItems`.
+
+### The one-equipped-item-per-slot invariant has no database constraint
+
+An item's slot lives in `items.json`, so there is no slot column on `PlayerItems` to build a
+filtered unique index over — and adding one would duplicate a content fact that a retune can change.
+The invariant is therefore enforced in two places instead: `InventoryService.Equip` unequips the
+incumbent in that slot on the way in, and `Loadout.For` **throws** rather than aggregate a loadout
+with two items in one slot. Silently summing both would hand the player double the gear bonus. The
+state is unreachable through the API; the throw exists so corruption is loud rather than profitable.
+
+### Balance tuning that CP3 depends on
+
+*Brass Knuckles* — level 1, 75 cash, +4 attack — is buyable outright from the starting 100 cash, so
+"buy + equip a weapon and watch Attack rise" needs no grinding first. Three tests in
+`ItemCatalogLoaderTests` pin the underlying properties (a level-1 item within starting cash that
+actually moves a stat; every slot populated; no free items) so a later balance pass cannot silently
+break the checkpoint.
+
+### Bug found and fixed during execution
+
+`InventoryService.Equip` located the incumbent to displace by slot alone. A caller that passed every
+holding rather than only the equipped ones would get a result naming an item the player was not
+wearing as "unequipped" — a lie the client shows in its result panel. Now filtered on `Equipped` as
+well, which also makes passing the whole inventory safe rather than wrong. Found by self-review after
+green, then reproduced as a failing test before the fix.
+
+**S3.1 verification:** `dotnet build` 0 warnings / 0 errors · **`dotnet test` 282 pass** (203 before
+this session) · migration applied to `underworld` and `underworld_test`, composite key + cascade
+confirmed against the live schema · host verified to refuse startup on a deliberately corrupted
+`items.json`, reporting all six injected violations at once. No Flutter or endpoint code touched —
+`GET /inventory`, buy and equip are T3.2, and nothing yet surfaces effective stats over the wire.
+
+---
+
 # Appendix A — Review backlog (NOT tasks)
 
 > **This appendix is not a task list and must not be executed as one.** Nothing here is

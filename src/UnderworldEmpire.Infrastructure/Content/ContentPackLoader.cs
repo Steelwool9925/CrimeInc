@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using UnderworldEmpire.Domain.Items;
 using UnderworldEmpire.Domain.Jobs;
 
 namespace UnderworldEmpire.Infrastructure.Content;
@@ -125,6 +126,86 @@ public sealed class ContentPackLoader
         return new JobCatalog(jobs, file.Mastery.CompletionsPerRank, file.Mastery.MaxRank);
     }
 
+    /// <summary>
+    /// Loads and validates the item catalog for <paramref name="packId"/> from
+    /// <c>&lt;contentRoot&gt;/&lt;packId&gt;/items.json</c>.
+    /// </summary>
+    /// <remarks>
+    /// Same contract as <see cref="LoadJobs"/>: validation runs to completion and reports every problem at
+    /// once, and domain objects are constructed only after it passes.
+    /// </remarks>
+    /// <exception cref="ContentPackException">
+    ///     Thrown when the file is missing, cannot be parsed, or fails validation.
+    /// </exception>
+    public ItemCatalog LoadItems(string packId)
+    {
+        var itemsFile = Path.Combine(_contentRoot, packId, "items.json");
+
+        if (!File.Exists(itemsFile))
+            throw new ContentPackException(
+                $"Item catalog for pack '{packId}' not found at '{itemsFile}'.");
+
+        ItemCatalogFile file;
+        try
+        {
+            var json = File.ReadAllText(itemsFile, Encoding.UTF8);
+            file = JsonSerializer.Deserialize<ItemCatalogFile>(json, JsonOptions)
+                   ?? throw new ContentPackException(
+                       $"items.json for '{packId}' deserialised to null.");
+        }
+        catch (JsonException ex)
+        {
+            throw new ContentPackException(
+                $"items.json for '{packId}' is not valid JSON: {ex.Message}", ex);
+        }
+
+        ValidateItems(file, packId);
+
+        var items = new List<Item>(file.Items.Count);
+        foreach (var entry in file.Items)
+        {
+            var item = new Item
+            {
+                Id = entry.Id,
+                Name = entry.Name,
+                Description = entry.Description,
+                // ValidateItems has already proved every slot name parses, so the null-forgiving access is
+                // asserting that rather than hoping — a second error path here could never fire.
+                Slot = ParseSlot(entry.Slot)!.Value,
+                LevelRequirement = entry.LevelRequirement,
+                Price = entry.Price,
+                Attack = entry.Stats.Attack,
+                Defense = entry.Stats.Defense
+            };
+            item.EnsureValid();
+            items.Add(item);
+        }
+
+        return new ItemCatalog(items);
+    }
+
+    /// <summary>The slot names content may use, for error messages.</summary>
+    private static readonly string SlotNames = string.Join(", ",
+        Enum.GetNames<ItemSlot>().Select(n => n.ToLowerInvariant()));
+
+    /// <summary>
+    /// Parses a content slot name, or <see langword="null"/> when it names no known
+    /// <see cref="ItemSlot"/>. Case-insensitive: the slot vocabulary is the engine's, not a content key,
+    /// so casing in the pack file is a style choice.
+    /// </summary>
+    /// <remarks>
+    /// An explicit match rather than <c>Enum.TryParse</c>, which also accepts the underlying numbers —
+    /// <c>"slot": "0"</c> would parse as <see cref="ItemSlot.Weapon"/> and let a typo silently mis-slot an
+    /// item. Content names slots by name only.
+    /// </remarks>
+    private static ItemSlot? ParseSlot(string? slot) => slot?.Trim().ToLowerInvariant() switch
+    {
+        "weapon" => ItemSlot.Weapon,
+        "armor" => ItemSlot.Armor,
+        "vehicle" => ItemSlot.Vehicle,
+        _ => null
+    };
+
     // -------------------------------------------------------------------------
     // Validation
     // -------------------------------------------------------------------------
@@ -208,5 +289,74 @@ public sealed class ContentPackLoader
         if (errors.Count > 0)
             throw new ContentPackException(
                 $"Job catalog for pack '{expectedPackId}' failed validation: {string.Join("; ", errors)}.");
+    }
+
+    /// <summary>
+    /// Maximum length of a content id that is used as a database key. Must stay in step with the
+    /// <c>varchar</c> width <c>GameDbContext</c> maps for <c>PlayerItem.ItemId</c>.
+    /// </summary>
+    /// <remarks>
+    /// Validated at startup rather than left to Postgres, because the failure would otherwise land as an
+    /// unhandled write error on the first purchase of an over-long id — long after the content mistake was
+    /// made, and as a 500 rather than a startup message.
+    /// </remarks>
+    private const int ContentIdMaxLength = 64;
+
+    private static void ValidateItems(ItemCatalogFile file, string expectedPackId)
+    {
+        var errors = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(file.PackId))
+            errors.Add("'packId' is missing or empty");
+        else if (!string.Equals(file.PackId, expectedPackId, StringComparison.Ordinal))
+            errors.Add($"'packId' mismatch: expected '{expectedPackId}', found '{file.PackId}'");
+
+        if (file.Items.Count == 0)
+            errors.Add("'items' is missing or empty — a pack must define at least one item");
+
+        var seenIds = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < file.Items.Count; i++)
+        {
+            var item = file.Items[i];
+
+            // Identify the entry by id where possible, falling back to its index — an error about "the
+            // item with no id" is useless without knowing which array slot it sits in.
+            var where = string.IsNullOrWhiteSpace(item.Id) ? $"items[{i}]" : $"items[{i}] ('{item.Id}')";
+
+            if (string.IsNullOrWhiteSpace(item.Id))
+                errors.Add($"{where}: 'id' is missing or empty");
+            else
+            {
+                if (!seenIds.Add(item.Id))
+                    errors.Add($"{where}: duplicate 'id'");
+
+                if (item.Id.Length > ContentIdMaxLength)
+                    errors.Add(
+                        $"{where}: 'id' is {item.Id.Length} characters, above the {ContentIdMaxLength}-character limit");
+            }
+
+            if (string.IsNullOrWhiteSpace(item.Name))
+                errors.Add($"{where}: 'name' is missing or empty");
+
+            if (ParseSlot(item.Slot) is null)
+                errors.Add(
+                    $"{where}: 'slot' is '{item.Slot}', which is not one of: {SlotNames}");
+
+            if (item.LevelRequirement < 1)
+                errors.Add($"{where}: 'levelRequirement' must be >= 1, found {item.LevelRequirement}");
+
+            if (item.Price < 0)
+                errors.Add($"{where}: 'price' must be >= 0, found {item.Price}");
+
+            if (item.Stats.Attack < 0)
+                errors.Add($"{where}: 'stats.attack' must be >= 0, found {item.Stats.Attack}");
+
+            if (item.Stats.Defense < 0)
+                errors.Add($"{where}: 'stats.defense' must be >= 0, found {item.Stats.Defense}");
+        }
+
+        if (errors.Count > 0)
+            throw new ContentPackException(
+                $"Item catalog for pack '{expectedPackId}' failed validation: {string.Join("; ", errors)}.");
     }
 }

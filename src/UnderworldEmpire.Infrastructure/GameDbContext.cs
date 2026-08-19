@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using UnderworldEmpire.Domain;
+using UnderworldEmpire.Domain.Items;
 using UnderworldEmpire.Domain.Jobs;
 
 namespace UnderworldEmpire.Infrastructure;
@@ -18,6 +19,8 @@ public class GameDbContext : DbContext
     public DbSet<Player> Players => Set<Player>();
 
     public DbSet<PlayerJobMastery> PlayerJobMasteries => Set<PlayerJobMastery>();
+
+    public DbSet<PlayerItem> PlayerItems => Set<PlayerItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -88,6 +91,33 @@ public class GameDbContext : DbContext
         mastery.HasOne<Player>()
             .WithMany()
             .HasForeignKey(m => m.PlayerId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Per-player, per-item inventory holdings.
+        var holding = modelBuilder.Entity<PlayerItem>();
+
+        // Composite natural key, same reasoning as the mastery row above: a player holds exactly one row
+        // per item — a second copy raises Quantity rather than inserting again — so uniqueness becomes a
+        // schema guarantee and the lookup by (PlayerId, ItemId) is a primary-key seek.
+        holding.HasKey(i => new { i.PlayerId, i.ItemId });
+
+        // ItemId is a content id, not a foreign key — the item catalog lives in items.json, not the
+        // database. The 64-character cap is enforced up front by ContentPackLoader.ValidateItems, so an
+        // over-long id fails at startup instead of on the first purchase.
+        holding.Property(i => i.ItemId).IsRequired().HasMaxLength(64);
+        holding.Property(i => i.Quantity).IsRequired();
+        holding.Property(i => i.Equipped).IsRequired();
+
+        // One equipped item per slot is deliberately NOT expressed here: the slot lives in content, so
+        // there is no column to build a filtered unique index over. InventoryService.Equip enforces it on
+        // write and Loadout refuses to aggregate a violation.
+
+        // Deleting a player must take their holdings with it. No navigation property on Player, for the
+        // same reason as mastery: nothing needs to load every holding for a player, and adding one would
+        // invite exactly that.
+        holding.HasOne<Player>()
+            .WithMany()
+            .HasForeignKey(i => i.PlayerId)
             .OnDelete(DeleteBehavior.Cascade);
     }
 }
