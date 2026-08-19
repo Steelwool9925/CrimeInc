@@ -628,6 +628,75 @@ confirmed against the live schema · host verified to refuse startup on a delibe
 `items.json`, reporting all six injected violations at once. No Flutter or endpoint code touched —
 `GET /inventory`, buy and equip are T3.2, and nothing yet surfaces effective stats over the wire.
 
+### ⏸ S3.2 — INTERRUPTED mid-way (T3.2 substantially done, T3.3 not started)
+
+Started 2026-08-19 15:00 by the scheduled runner; **killed by the user at 15:15:52** (951 s in) after
+~113 API calls. Not a failure — stopped deliberately, and stopped at the single most misleading moment
+possible (see *State of the tests* below). Nothing was committed.
+
+**Where the work is:** worktree `.claude/worktrees/m3b-item-endpoints-properties`, branch
+`worktree-m3b-item-endpoints-properties`, based on `6ba3e06`. **All changes are uncommitted and the
+branch has no commits on it.** The worktree is git-`locked` (the session held it). ~1,430 new lines
+plus 267 changed.
+
+**What exists (T3.2):**
+- `src/UnderworldEmpire.Api/Endpoints/ItemEndpoints.cs` — all four routes: `GET /inventory`,
+  `POST /items/{id}/buy`, `POST /items/{id}/equip`, `POST /items/{id}/unequip`.
+- `src/UnderworldEmpire.Api/Contracts/InventoryContracts.cs` — wire DTOs.
+- `src/UnderworldEmpire.Infrastructure/InventoryActionService.cs` — the transactional application
+  service (one `SaveChangesAsync` per action; `xmin` conflicts reported, never retried, because a retry
+  would charge twice — same rule as `JobActionService`).
+- `PlayerProjection.ToLoadoutDto` — effective stats on the wire, deliberately *not* folded into
+  `ToMeDto` so progression endpoints that change no gear don't pay for the extra query.
+- Wiring: `app.MapItemEndpoints()` in `Program.cs`, `InventoryActionService` registered scoped.
+- `ItemCatalog.ResolveEquipped` added (+32 lines) and small extensions to `InventoryService`.
+- Tests: `InventoryEndpointTests.cs` (511 lines), `InventoryConcurrencyTests.cs` (255 lines), plus
+  additions to `InventoryServiceTests` and `ItemCatalogLoaderTests`.
+
+**Not started (T3.3):** no `properties.json`, no `PlayerProperty`, no accrual logic, no migration.
+The whole property half of S3.2 remains, and CP3 cannot be run without it.
+
+**State of the tests — read this before assuming something is broken.** `dotnet build` is clean
+(0 warnings / 0 errors) and the suite is **328 tests, 326 passing, 2 failing**. The two failures are
+**intentional**: the session had stubbed out its own fix to watch the new tests fail, and was killed
+inside that window. `InventoryActionService.TouchForConcurrency` carries the marker:
+
+```
+// TEMPORARILY DISABLED to watch the concurrency tests fail. Restored immediately after.
+```
+
+**To resume, restore that one method** to force an UPDATE on the player row so the `xmin` token is
+checked:
+
+```csharp
+_db.Entry(player).State = EntityState.Modified;
+```
+
+Measured 2026-08-19 by the reviewer: with that line in place the concurrency suite goes 6/6 and the
+full suite **328/328**, then reverted so the worktree still matches what the runner left. So the fix is
+one line, already designed, with its call site (`EquipAsync`) and its class-level rationale already
+written.
+
+**The bug those tests were written for is real, and it corrects S3.1's record.** S3.1 claims the
+two-items-in-one-slot state is "unreachable through the API". That is **false**. Two concurrent equips
+of two different weapons each see an empty slot, so neither displaces the other, both writes land on
+different `PlayerItems` rows, and the player ends up wearing both. The existing `xmin` token does not
+catch it because an equip changes **no** column on `Players` — nothing conflicts. Worse, the failure is
+not transient: `Loadout.For` throws on a two-items-in-one-slot loadout, so every later read of that
+player's own inventory 500s, permanently, with no API path back.
+
+On `main` today this is **latent, not live** — S3.1 shipped the domain rule but no endpoint calls it, so
+no external caller can equip anything yet. It becomes reachable the moment these endpoints land, which
+is precisely why it must be fixed before S3.2 is merged rather than filed for later.
+
+**Resume checklist:**
+1. `EnterWorktree` at `.claude/worktrees/m3b-item-endpoints-properties` (or unlock it).
+2. Restore `TouchForConcurrency` as above; confirm 328/328.
+3. Review the uncommitted T3.2 work properly — it has never been reviewed or committed, and 511 lines
+   of endpoint tests were written by a session that was interrupted before it could self-review.
+4. Correct the S3.1 "unreachable through the API" claim above once the fix is in.
+5. Then do T3.3 (properties), which is all still ahead.
+
 ---
 
 # Appendix A — Review backlog (NOT tasks)
