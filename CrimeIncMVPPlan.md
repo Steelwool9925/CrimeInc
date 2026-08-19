@@ -738,3 +738,50 @@ milestones: do not treat an unretrievable review as a completed one.
 Also outstanding and unrelated to the above: **CP1 was never run.** M2 was built on an unverified
 M1 by explicit direction. A CP1 failure should be read as an M1 defect surfacing late rather than
 an M2 regression.
+
+## A.3 — Raised during S3.1 (2026-08-19)
+
+Findings from the S3.1 session that are **not** part of T3.1 and were deliberately not acted on.
+
+**A.3.1 The scheduled runner's prompt is a no-op** · `scripts/scheduled-gru.ps1:66` · high
+
+The standing prompt begins `' /goal /execute-plan for the next task…'`. Headless Claude Code parses
+the leading token as the `/goal` slash command, finds `/execute-plan …` is not a valid goal
+condition, prints `No goal set. Usage: /goal <condition>` and exits. The 08:00 run on 2026-08-19 —
+the first real firing — did exactly that: the scheduled task reported success (`LastTaskResult 0`,
+`NumberOfMissedRuns 0`) after a **two-second** session that did nothing. Every future run will
+behave identically. The task itself, its triggers and all three guards are fine; only the prompt
+string is wrong.
+
+*Shape of a fix:* lead with prose rather than a slash command, or lead with `/execute-plan` if that
+is the command meant to drive the run.
+
+Secondary, same file: `Session exited with code .` in the log. `$proc.ExitCode` is read after
+`WaitForExit(ms)` without a `Refresh()`, so it comes back empty and the runner's own exit code is
+unreliable.
+
+**A.3.2 `dotnet ef migrations remove --no-build` can delete the wrong migration** · process · medium
+
+Hit during S3.1 and recovered from. Generating a migration with `--no-build` against a stale
+assembly produced an **empty** `Up`/`Down`; the `remove` that followed — also `--no-build` — loaded
+the same stale assembly, could not see the migration just added, and deleted the previous one
+instead. It removed M2's `AddPlayerJobMastery` and reverted the model snapshot. Recovered with
+`git checkout -- Migrations/`, then regenerated after a real build; the final snapshot was confirmed
+to contain both entities and the M2 migration file is intact on main.
+
+*Lesson for future migration work:* build before `dotnet ef migrations add`, and check the generated
+`Up` is non-empty before doing anything else. Never chain `--no-build` into a `remove`.
+
+**A.3.3 A.1.5's missing length check was not repeated, but is still unfixed for jobs** · low
+
+S3.1's `ValidateItems` caps item ids at 64 characters to match the `varchar(64)` on
+`PlayerItems.ItemId`, which is the check A.1.5 says `ValidateJobs` lacks. So the new code does not
+repeat the bug, but `jobs.json` still has it — an over-long job id remains a 500 on first use. A fix
+would ideally share one constant between the two validators.
+
+**A.3.4 CP3 will be run against unverified M2** · process · informational
+
+M3 is now being built on an M2 whose checkpoint has not been run, on an M1 whose checkpoint has not
+been run. Appendix A.1.2 in particular (job cards freeze once energy hits 0) will surface during any
+CP2 or CP3 sitting that lasts past the first empty energy bar. Reading a CP3 failure as an M3 defect
+would be wrong more often than right until CP1 and CP2 have been run.
