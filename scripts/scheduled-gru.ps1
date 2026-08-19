@@ -26,6 +26,16 @@
 
     This file is deliberately ASCII-only. PowerShell 5.1 reads a BOM-less script as
     ANSI, which corrupts non-ASCII punctuation and can break string quoting.
+
+    The prompt is delivered on STDIN, not as a command-line argument. This is not a
+    style choice - it is the fix for the bug that made every run before 2026-08-19 a
+    silent no-op. Start-Process -ArgumentList @(...) splits each array element on
+    whitespace, so a multi-word prompt arrived as a dozen separate argv entries:
+    claude saw "-p /goal" with an empty condition, printed "No goal set. Usage:
+    /goal <condition>", and exited in two seconds while the scheduled task recorded
+    a successful run. Every argument this script now passes on the command line is a
+    single token with no spaces, and anything containing user text goes over STDIN
+    where no quoting rules apply. Do not "simplify" the prompt back into -ArgumentList.
 #>
 [CmdletBinding()]
 param(
@@ -55,8 +65,15 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# The standing prompt, verbatim as specified.
-$Prompt = ' /goal /execute-plan for the next task in the CrimeIncMVPPlan.md then run /test-feature on that task specifically until it is implemented correctly and at a satisfactory level. Any additions to the plan need to be add to an appendix at the end of the plan that is not included as a task and is to be reviewed later. Stop after goal has been completed'
+# The standing prompt, verbatim as specified. Delivered on STDIN - see .NOTES.
+#
+# The leading '/goal' is intentional and correct: it sets a session-scoped goal whose
+# condition is the rest of the line, and the session cannot stop until that condition
+# holds. Everything after it is the condition text, not a chain of commands to run, so
+# the '/execute-plan' and '/test-feature' inside it are read as instructions rather
+# than invoked. Neither of those slash commands exists in this repo; the model reads
+# the intent and uses the equivalent skills.
+$Prompt = '/goal /execute-plan for the next task in the CrimeIncMVPPlan.md then run /test-feature on that task specifically until it is implemented correctly and at a satisfactory level. Any additions to the plan need to be add to an appendix at the end of the plan that is not included as a task and is to be reviewed later. Stop after goal has been completed'
 
 # ---------------------------------------------------------------- logging
 
@@ -153,8 +170,9 @@ Write-Log ('branch          : ' + $branch)
 
 if ($WhatIfOnly) {
     Write-Log '-WhatIfOnly set. Would run:'
-    Write-Log ('  ' + $claudeExe + ' -p [prompt] --permission-mode ' + $PermissionMode)
-    Write-Log ('Prompt: ' + $Prompt)
+    Write-Log ('  ' + $claudeExe + ' -p --permission-mode ' + $PermissionMode + '  < [prompt file]')
+    Write-Log ('Prompt (' + $Prompt.Length + ' chars, delivered on STDIN):')
+    Write-Log ('  ' + $Prompt)
     exit 0
 }
 
@@ -170,14 +188,29 @@ try {
     $sessionLog = Join-Path $LogDir ($stamp + '.session.log')
     $errLog = Join-Path $LogDir ($stamp + '.session.err.log')
 
-    # -p runs headless: one shot, no interactive prompts. Output is captured rather
-    # than streamed so the transcript survives for review.
+    # The prompt goes to a file and is piped in on STDIN. Keeping it off the command
+    # line is what stops PowerShell splitting it on spaces (see .NOTES); writing it
+    # next to the logs also means an unattended run can be audited against the exact
+    # prompt it was given, rather than the one the script says it sends today.
+    $promptFile = Join-Path $LogDir ($stamp + '.prompt.txt')
+    Set-Content -Path $promptFile -Value $Prompt -Encoding ASCII -NoNewline
+    Write-Log ('prompt          : ' + $promptFile)
+
+    # -p runs headless: no interactive prompts. Every argument here is a single token
+    # with no spaces, so the -ArgumentList array cannot mangle it. Output is captured
+    # rather than streamed so the transcript survives for review.
     $proc = Start-Process -FilePath $claudeExe `
-        -ArgumentList @('-p', $Prompt, '--permission-mode', $PermissionMode) `
+        -ArgumentList @('-p', '--permission-mode', $PermissionMode) `
         -WorkingDirectory $RepoRoot `
+        -RedirectStandardInput $promptFile `
         -RedirectStandardOutput $sessionLog `
         -RedirectStandardError $errLog `
         -NoNewWindow -PassThru
+
+    # Reading .Handle makes this object hold the process handle open, which is the only
+    # reason .ExitCode is still readable after the process ends. Without it every run
+    # logged "Session exited with code ." and the runner's own exit code was a guess.
+    $null = $proc.Handle
 
     Write-Log ('Session PID ' + $proc.Id + '; transcript -> ' + $sessionLog)
 
@@ -188,7 +221,25 @@ try {
     }
     else {
         $exitCode = $proc.ExitCode
-        Write-Log ('Session exited with code ' + $exitCode + '.')
+        if ($null -eq $exitCode) {
+            # Never let an unreadable exit code masquerade as success - that is how the
+            # 2026-08-19 no-op run came to be recorded as a clean pass.
+            Write-Log 'Session exited but the exit code could not be read; treating as failure.' 'ERROR'
+            $exitCode = 1
+        }
+        else {
+            Write-Log ('Session exited with code ' + $exitCode + '.')
+        }
+
+        # A real session opens files, builds and tests; it does not finish in seconds. A
+        # near-instant exit is the signature of a prompt that never reached the model -
+        # the exact failure that ran silently twice a day and reported success.
+        $elapsed = [int]($proc.ExitTime - $proc.StartTime).TotalSeconds
+        Write-Log ('Session ran for ' + $elapsed + ' second(s).')
+        if ($elapsed -lt 30) {
+            Write-Log 'That is too fast to have done any work. Check the transcript below:' 'WARN'
+            Write-Log 'a usage message or an auth prompt there means the session never started.' 'WARN'
+        }
     }
 
     foreach ($f in @($sessionLog, $errLog)) {

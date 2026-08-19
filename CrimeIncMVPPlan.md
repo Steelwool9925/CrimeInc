@@ -743,22 +743,37 @@ an M2 regression.
 
 Findings from the S3.1 session that are **not** part of T3.1 and were deliberately not acted on.
 
-**A.3.1 The scheduled runner's prompt is a no-op** · `scripts/scheduled-gru.ps1:66` · high
+**A.3.1 The scheduled runner never delivered its prompt** · `scripts/scheduled-gru.ps1` · high ·
+**FIXED 2026-08-19**
 
-The standing prompt begins `' /goal /execute-plan for the next task…'`. Headless Claude Code parses
-the leading token as the `/goal` slash command, finds `/execute-plan …` is not a valid goal
-condition, prints `No goal set. Usage: /goal <condition>` and exits. The 08:00 run on 2026-08-19 —
-the first real firing — did exactly that: the scheduled task reported success (`LastTaskResult 0`,
-`NumberOfMissedRuns 0`) after a **two-second** session that did nothing. Every future run will
-behave identically. The task itself, its triggers and all three guards are fine; only the prompt
-string is wrong.
+The 08:00 run on 2026-08-19 — the first real firing — printed
+`No goal set. Usage: /goal <condition>` and exited after **two seconds**, while the scheduled task
+recorded a clean pass (`LastTaskResult 0`, `NumberOfMissedRuns 0`). Every subsequent run would have
+done the same.
 
-*Shape of a fix:* lead with prose rather than a slash command, or lead with `/execute-plan` if that
-is the command meant to drive the run.
+The cause was **argument passing, not the prompt text**. `Start-Process -ArgumentList @('-p', $Prompt, …)`
+splits every array element on whitespace, so the 349-character prompt arrived as fifteen separate
+argv entries and `claude` saw `-p /goal` with an empty condition. Confirmed with an argv-echoing
+probe: `argv[0]=[-p] argv[1]=[/goal] argv[2]=[/execute-plan] argv[3]=[for] …`.
 
-Secondary, same file: `Session exited with code .` in the log. `$proc.ExitCode` is read after
-`WaitForExit(ms)` without a `Refresh()`, so it comes back empty and the runner's own exit code is
-unreliable.
+> An earlier version of this entry blamed the leading `/goal` token and recommended rewording the
+> prompt. That diagnosis was wrong and is recorded here so the wrong lesson is not carried forward.
+> The prompt is correct as written — `/goal <condition>` takes the rest of the line as its condition,
+> the `/execute-plan` and `/test-feature` inside it are read as intent rather than invoked (neither
+> command exists in this repo), and the same string works when typed interactively.
+
+*Fixed by* moving the prompt to STDIN (`-RedirectStandardInput` from a `<stamp>.prompt.txt` written
+beside the logs), leaving only space-free single tokens on the command line. Verified: a bare `/goal`
+sent over STDIN returns its usage message, so slash commands do parse from STDIN; the real prompt
+sent the same way drives a session that locates the plan and starts work, rather than exiting in two
+seconds.
+
+Secondary, same file — also fixed: `Session exited with code .` in the log. `$proc.ExitCode` is
+unreadable after a `Start-Process -PassThru` process exits unless the object has held the process
+handle open. `WaitForExit()` and `Refresh()` do **not** help (measured: still empty); reading
+`$proc.Handle` once after launch does (measured: `exit 3` → `[3]`). An unreadable code is now
+treated as a failure rather than a success, and a session shorter than 30 seconds logs a warning —
+the original bug's real damage was that it was invisible, not that it was subtle.
 
 **A.3.2 `dotnet ef migrations remove --no-build` can delete the wrong migration** · process · medium
 
