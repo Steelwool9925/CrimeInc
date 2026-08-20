@@ -37,6 +37,7 @@ public static class InfrastructureServiceCollectionExtensions
 
         // Stateless, but registered scoped alongside the other rule services for lifetime uniformity.
         services.AddScoped<InventoryService>();
+        services.AddScoped<InventoryActionService>();
 
         // Server-side RNG for game outcomes. Singleton: Random.Shared is thread-safe and holds no
         // per-request state.

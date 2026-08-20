@@ -405,6 +405,42 @@ public class ItemCatalogLoaderTests : IDisposable
         Assert.All(catalog.Items, i => Assert.True(i.Price > 0, $"Item '{i.Id}' is free."));
     }
 
+    // -------------------------------------------------------------------------
+    // Resolving holdings against the catalog
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void Resolving_equipped_holdings_returns_only_the_worn_ones()
+    {
+        var catalog = new ContentPackLoader(FindRepoContentRoot()).LoadItems("crime");
+        var playerId = Guid.NewGuid();
+
+        var worn = new PlayerItem { PlayerId = playerId, ItemId = "brass-knuckles" };
+        worn.AddCopies(1);
+        worn.Equip();
+
+        var spare = new PlayerItem { PlayerId = playerId, ItemId = "leather-jacket" };
+        spare.AddCopies(1);
+
+        var resolved = catalog.ResolveEquipped([worn, spare]);
+
+        Assert.Equal(["brass-knuckles"], resolved.Select(i => i.Id));
+    }
+
+    [Fact]
+    public void An_equipped_holding_whose_item_no_longer_exists_is_skipped_rather_than_throwing()
+    {
+        // Content dropped the item after the player bought it. The row stays — so a restored item comes
+        // back with its history — but an item that no longer exists can no longer score anything, and a
+        // throw here would lock the player out of their own inventory screen.
+        var catalog = new ContentPackLoader(FindRepoContentRoot()).LoadItems("crime");
+        var ghost = new PlayerItem { PlayerId = Guid.NewGuid(), ItemId = "retired-item" };
+        ghost.AddCopies(1);
+        ghost.Equip();
+
+        Assert.Empty(catalog.ResolveEquipped([ghost]));
+    }
+
     /// <summary>
     /// Walks up from the test assembly to the repo root's <c>content</c> folder, the same approach
     /// <see cref="JobCatalogLoaderTests"/> uses — the test project does not copy content to output.

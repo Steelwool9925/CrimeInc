@@ -1,4 +1,5 @@
 using UnderworldEmpire.Domain;
+using UnderworldEmpire.Domain.Items;
 
 namespace UnderworldEmpire.Api.Contracts;
 
@@ -28,6 +29,21 @@ public static class PlayerProjection
             SkillPoints: player.SkillPoints,
             Attack: player.Attack,
             Defense: player.Defense);
+
+    /// <summary>Projects a computed <paramref name="loadout"/> onto the wire.</summary>
+    /// <remarks>
+    /// Deliberately not folded into <see cref="ToMeDto"/>: building a loadout costs a second query for
+    /// the player's equipped holdings, and the endpoints that report progression (a job, a skill point)
+    /// change no gear, so making every one of them pay for it would buy nothing.
+    /// </remarks>
+    public static LoadoutDto ToLoadoutDto(Loadout loadout) =>
+        new(
+            BaseAttack: loadout.BaseAttack,
+            ItemAttack: loadout.ItemAttack,
+            TotalAttack: loadout.TotalAttack,
+            BaseDefense: loadout.BaseDefense,
+            ItemDefense: loadout.ItemDefense,
+            TotalDefense: loadout.TotalDefense);
 
     /// <summary>
     /// Builds a <see cref="MeterState"/> for <paramref name="meter"/>, computing the lazily-regenned

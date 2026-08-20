@@ -308,4 +308,118 @@ public class InventoryServiceTests
         Assert.Equal(9, loadout.TotalAttack);
         Assert.Equal(6, loadout.TotalDefense);
     }
+
+    // -------------------------------------------------------------------------
+    // Read-only gating — the same rules, asked without acting on them
+    // -------------------------------------------------------------------------
+    //
+    // GET /inventory has to tell the client which buttons are live. Re-deriving that in the endpoint
+    // would be a second copy of the precedence below, free to drift from the one that actually
+    // refuses the request — the client would offer a button the server then rejects.
+
+    [Fact]
+    public void An_affordable_in_level_item_reports_no_purchase_obstacle()
+    {
+        var service = new InventoryService();
+
+        Assert.Equal(
+            InventoryFailure.None,
+            service.CheckPurchase(TestPlayer(level: 1, cash: 100), TestItem(levelRequirement: 1, price: 75)));
+    }
+
+    [Fact]
+    public void Checking_a_purchase_reports_level_ahead_of_cash_exactly_as_purchasing_does()
+    {
+        var service = new InventoryService();
+        var player = TestPlayer(level: 1, cash: 0);
+        var item = TestItem(levelRequirement: 5, price: 600);
+
+        // Both obstacles are present. The level is the permanent one, so it is the one reported.
+        Assert.Equal(InventoryFailure.LevelTooLow, service.CheckPurchase(player, item));
+        Assert.Equal(InventoryFailure.LevelTooLow, service.Purchase(player, item, Holding(player.Id, item.Id)).Failure);
+    }
+
+    [Fact]
+    public void Checking_a_purchase_reports_cash_when_that_is_the_only_obstacle()
+    {
+        var service = new InventoryService();
+
+        Assert.Equal(
+            InventoryFailure.InsufficientCash,
+            service.CheckPurchase(TestPlayer(level: 1, cash: 74), TestItem(levelRequirement: 1, price: 75)));
+    }
+
+    [Fact]
+    public void Checking_a_purchase_does_not_charge_the_player()
+    {
+        var service = new InventoryService();
+        var player = TestPlayer(cash: 100);
+
+        service.CheckPurchase(player, TestItem(price: 75));
+
+        Assert.Equal(100, player.Cash);
+    }
+
+    [Fact]
+    public void An_owned_in_level_unworn_item_reports_no_equip_obstacle()
+    {
+        var service = new InventoryService();
+        var player = TestPlayer(level: 1);
+        var item = TestItem(levelRequirement: 1);
+
+        Assert.Equal(
+            InventoryFailure.None,
+            service.CheckEquip(player, item, Holding(player.Id, item.Id, copies: 1)));
+    }
+
+    [Fact]
+    public void Checking_an_equip_reports_not_owned_before_anything_else()
+    {
+        var service = new InventoryService();
+        var player = TestPlayer(level: 1);
+        var item = TestItem(levelRequirement: 5);
+
+        // Out-levelled and unowned at once: not owning it is the obstacle worth naming, because a
+        // player who does not have the item has nothing to act on.
+        Assert.Equal(
+            InventoryFailure.NotOwned,
+            service.CheckEquip(player, item, Holding(player.Id, item.Id)));
+    }
+
+    [Fact]
+    public void Checking_an_equip_reports_the_level_gate_on_gear_bought_before_a_level_reset()
+    {
+        var service = new InventoryService();
+        var player = TestPlayer(level: 1);
+        var item = TestItem(levelRequirement: 5);
+
+        Assert.Equal(
+            InventoryFailure.LevelTooLow,
+            service.CheckEquip(player, item, Holding(player.Id, item.Id, copies: 1)));
+    }
+
+    [Fact]
+    public void Checking_an_equip_reports_gear_already_being_worn()
+    {
+        var service = new InventoryService();
+        var player = TestPlayer(level: 1);
+        var item = TestItem(levelRequirement: 1);
+
+        Assert.Equal(
+            InventoryFailure.AlreadyEquipped,
+            service.CheckEquip(player, item, Holding(player.Id, item.Id, copies: 1, equipped: true)));
+    }
+
+    [Fact]
+    public void Checking_an_equip_does_not_equip_anything()
+    {
+        var service = new InventoryService();
+        var player = TestPlayer(level: 1);
+        var item = TestItem(levelRequirement: 1);
+        var holding = Holding(player.Id, item.Id, copies: 1);
+
+        service.CheckEquip(player, item, holding);
+
+        Assert.False(holding.Equipped);
+    }
 }
