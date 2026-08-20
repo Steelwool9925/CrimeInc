@@ -48,6 +48,23 @@ abstract class ApiClient {
 
   /// Spends one skill point. Throws [JobRefusedException] with reason `noSkillPoints` when none remain.
   Future<Me> allocateSkill(String deviceToken, String target);
+
+  /// The item catalog with this player's holdings, gating and effective stats folded in.
+  ///
+  /// One call serves both the Store and the Inventory: the server sends the whole catalog, not only
+  /// owned rows, so the two screens cannot disagree about an item.
+  Future<InventoryList> inventory(String deviceToken);
+
+  /// Buys one copy of [itemId]. Throws [JobRefusedException] on a refusal ('level', 'cash').
+  Future<BuyItemResult> buyItem(String deviceToken, String itemId);
+
+  /// Wears [itemId], displacing whatever occupied its slot. Throws [JobRefusedException] on a
+  /// refusal ('notOwned', 'level', 'alreadyEquipped').
+  Future<EquipItemResult> equipItem(String deviceToken, String itemId);
+
+  /// Takes [itemId] off, keeping the copies owned. Throws [JobRefusedException] with reason
+  /// `notEquipped` when it was not being worn.
+  Future<EquipItemResult> unequipItem(String deviceToken, String itemId);
 }
 
 class HttpApiClient implements ApiClient {
@@ -148,6 +165,52 @@ class HttpApiClient implements ApiClient {
     _checkStatus(response);
     final body = jsonDecode(response.body) as Map<String, dynamic>;
     return Me.fromJson(body['player'] as Map<String, dynamic>);
+  }
+
+  @override
+  Future<InventoryList> inventory(String deviceToken) async {
+    final response = await _client.get(
+      Uri.parse('$_baseUrl/inventory'),
+      headers: {'Authorization': 'Bearer $deviceToken'},
+    );
+    _checkStatus(response);
+    return InventoryList.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  @override
+  Future<BuyItemResult> buyItem(String deviceToken, String itemId) async {
+    final response = await _post(deviceToken, '/items/$itemId/buy');
+    return BuyItemResult.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  @override
+  Future<EquipItemResult> equipItem(String deviceToken, String itemId) async {
+    final response = await _post(deviceToken, '/items/$itemId/equip');
+    return EquipItemResult.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  @override
+  Future<EquipItemResult> unequipItem(String deviceToken, String itemId) async {
+    final response = await _post(deviceToken, '/items/$itemId/unequip');
+    return EquipItemResult.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  /// POSTs a bodyless action and applies the two status checks every action shares.
+  ///
+  /// The item endpoints take no request body — the price and the stats are content, so there is
+  /// nothing for a client to supply or tamper with.
+  Future<http.Response> _post(String deviceToken, String path) async {
+    final response = await _client.post(
+      Uri.parse('$_baseUrl$path'),
+      headers: {'Authorization': 'Bearer $deviceToken'},
+    );
+    _throwIfRefused(response);
+    _checkStatus(response);
+    return response;
   }
 
   /// Turns a 409 problem response into a [JobRefusedException] carrying the server's reason token.

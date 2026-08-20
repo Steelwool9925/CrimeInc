@@ -42,6 +42,15 @@ class AppState extends ChangeNotifier {
   /// A refusal or error from the last action, shown transiently.
   String? _actionMessage;
 
+  // ---- Inventory & store ----
+  List<InventoryItem> _inventory = const [];
+  LoadoutStats? _loadout;
+  bool _inventoryLoading = false;
+  String? _inventoryError;
+
+  /// The id of the item currently being bought or worn, so the UI can disable just that row.
+  String? _itemInFlight;
+
   LoadStatus get status => _status;
   Me? get me => _me;
   ContentPack? get contentPack => _contentPack;
@@ -54,6 +63,24 @@ class AppState extends ChangeNotifier {
   JobResult? get lastJobResult => _lastJobResult;
   LevelUp? get pendingLevelUp => _pendingLevelUp;
   String? get actionMessage => _actionMessage;
+
+  List<InventoryItem> get inventory => _inventory;
+
+  /// Effective combat stats. Null until the inventory has been read once — [Me] carries only the
+  /// player's base stats, because building a loadout costs a query the progression endpoints do not
+  /// need to pay for.
+  LoadoutStats? get loadout => _loadout;
+
+  bool get inventoryLoading => _inventoryLoading;
+  String? get inventoryError => _inventoryError;
+  String? get itemInFlight => _itemInFlight;
+
+  /// The rows the player actually holds — what the Inventory screen lists.
+  ///
+  /// Derived rather than fetched: GET /inventory sends the whole catalog so the Store and the
+  /// Inventory cannot disagree about an item, and this is the Inventory's view of that one list.
+  List<InventoryItem> get ownedItems =>
+      _inventory.where((i) => i.isOwned).toList(growable: false);
 
   Future<void> bootstrap() async {
     _status = LoadStatus.loading;
@@ -217,6 +244,115 @@ class AppState extends ChangeNotifier {
     _actionMessage = null;
     notifyListeners();
   }
+
+  // -------------------------------------------------------------------------
+  // Inventory & store
+  // -------------------------------------------------------------------------
+
+  /// Loads the item catalog with this player's holdings and gating folded in.
+  ///
+  /// Safe to call repeatedly; concurrent calls are collapsed.
+  Future<void> loadInventory() async {
+    final token = _deviceToken;
+    if (token == null || _inventoryLoading) return;
+
+    _inventoryLoading = true;
+    _inventoryError = null;
+    notifyListeners();
+
+    try {
+      final list = await _apiClient.inventory(token);
+      _inventory = list.items;
+      _loadout = list.loadout;
+    } catch (e) {
+      _inventoryError = e.toString();
+    } finally {
+      _inventoryLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Buys one copy of [itemId].
+  Future<void> buyItem(String itemId) => _itemAction(
+        itemId,
+        (token) async {
+          final result = await _apiClient.buyItem(token, itemId);
+          _me = result.player;
+          _loadout = result.loadout;
+        },
+      );
+
+  /// Wears [itemId], displacing whatever occupied its slot.
+  Future<void> equipItem(String itemId) => _itemAction(
+        itemId,
+        (token) async {
+          final result = await _apiClient.equipItem(token, itemId);
+          _me = result.player;
+          _loadout = result.loadout;
+        },
+      );
+
+  /// Takes [itemId] off, keeping the copies owned.
+  Future<void> unequipItem(String itemId) => _itemAction(
+        itemId,
+        (token) async {
+          final result = await _apiClient.unequipItem(token, itemId);
+          _me = result.player;
+          _loadout = result.loadout;
+        },
+      );
+
+  /// Runs one item action, then re-reads the catalog it just invalidated.
+  ///
+  /// The action response carries the authoritative player and loadout, so those are applied at once
+  /// and the screen updates without waiting on a second round trip. What it does *not* carry is the
+  /// gating for every *other* row: buying changes the cash `canBuy` was computed against, and
+  /// equipping changes which item holds the slot `canEquip` was computed against. Rather than
+  /// re-derive those locally — a second copy of a server rule, free to drift — the client asks the
+  /// server again. Appendix A.1.2 is what the other choice looks like once it has drifted: job cards
+  /// whose buttons stay dead because the cached decision on them is never recomputed.
+  ///
+  /// The refresh is deliberately not conditional on the action succeeding. A refusal usually means
+  /// the client's picture was already stale, which is exactly when re-reading is most useful.
+  ///
+  /// The in-flight guard is held across the refresh, not released when the action returns. Between
+  /// those two points the rows on screen still carry the gating the server computed *before* the
+  /// action, so a second action started there would be aimed at a picture the server has already
+  /// moved past — and `loadInventory` would collapse its refresh into the one still running, leaving
+  /// that second action's own changes unread. Keeping the guard up closes both.
+  Future<void> _itemAction(String itemId, Future<void> Function(String) act) async {
+    final token = _deviceToken;
+    if (token == null || _itemInFlight != null) return;
+
+    _itemInFlight = itemId;
+    _actionMessage = null;
+    notifyListeners();
+
+    try {
+      await act(token);
+    } on JobRefusedException catch (e) {
+      _actionMessage = _itemRefusalMessage(e);
+    } catch (e) {
+      _actionMessage = 'Could not do that. $e';
+    }
+
+    try {
+      await loadInventory();
+    } finally {
+      _itemInFlight = null;
+      notifyListeners();
+    }
+  }
+
+  /// Wording for the server's refusal token. The server sends a stable token, not display text.
+  String _itemRefusalMessage(JobRefusedException e) => switch (e.reason) {
+        'cash' => 'You cannot afford that.',
+        'level' => 'Your level is too low for that item.',
+        'notOwned' => 'You do not own that item.',
+        'alreadyEquipped' => 'You are already wearing that.',
+        'notEquipped' => 'You are not wearing that.',
+        _ => e.detail,
+      };
 
   // -------------------------------------------------------------------------
   // Skills
