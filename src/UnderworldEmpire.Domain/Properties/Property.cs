@@ -13,6 +13,26 @@ namespace UnderworldEmpire.Domain.Properties;
 /// </remarks>
 public sealed record Property
 {
+    /// <summary>
+    /// The longest accrual window content may declare: 30 days, in minutes.
+    /// </summary>
+    /// <remarks>
+    /// Past a month the "come back before it fills" mechanic has stopped being a mechanic. The bound is
+    /// also half of what keeps <see cref="CapPerUnit"/> away from overflowing a <see cref="long"/> — see
+    /// <see cref="MaxIncomePerHour"/>.
+    /// </remarks>
+    public const int MaxAccrualCapMinutes = 43_200;
+
+    /// <summary>The highest hourly rate content may declare: a million cash an hour.</summary>
+    /// <remarks>
+    /// Far above any plausible balance — the top property in the shipped crime pack earns 3,600 — so the
+    /// only thing this rejects is a typo. Together with <see cref="MaxAccrualCapMinutes"/> it bounds
+    /// <see cref="CapPerUnit"/> at 720 million, which no reachable number of units can multiply past a
+    /// <see cref="long"/>. Without a bound the product wraps: 2^62 an hour over nine minutes comes back
+    /// as a positive number, so the "floors to zero" guard below never sees it.
+    /// </remarks>
+    public const long MaxIncomePerHour = 1_000_000;
+
     /// <summary>Stable content id, unique within the pack. The route value and the holdings key.</summary>
     public required string Id { get; init; }
 
@@ -79,9 +99,19 @@ public sealed record Property
             throw new ArgumentOutOfRangeException(nameof(IncomePerHour), IncomePerHour,
                 $"Property '{Id}' must earn at least 1 cash per hour.");
 
+        if (IncomePerHour > MaxIncomePerHour)
+            throw new ArgumentOutOfRangeException(nameof(IncomePerHour), IncomePerHour,
+                $"Property '{Id}' earns more than the {MaxIncomePerHour}/hour ceiling.");
+
         if (AccrualCapMinutes < 1)
             throw new ArgumentOutOfRangeException(nameof(AccrualCapMinutes), AccrualCapMinutes,
                 $"Property '{Id}' must hold at least one minute of income.");
+
+        // Checked before CapPerUnit is read: an unbounded window is exactly what lets the product below
+        // wrap, and a wrapped value can come back positive and look reasonable.
+        if (AccrualCapMinutes > MaxAccrualCapMinutes)
+            throw new ArgumentOutOfRangeException(nameof(AccrualCapMinutes), AccrualCapMinutes,
+                $"Property '{Id}' holds more than the {MaxAccrualCapMinutes}-minute (30-day) ceiling.");
 
         // Rate and window are independently valid but can still multiply out to nothing once floored —
         // 30/hour over one minute is half a coin. Caught here rather than at collection time, where it

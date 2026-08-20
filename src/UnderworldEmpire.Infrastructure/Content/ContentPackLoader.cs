@@ -464,14 +464,24 @@ public sealed class ContentPackLoader
             if (property.Income.PerHour < 1)
                 errors.Add($"{where}: 'income.perHour' must be >= 1, found {property.Income.PerHour}");
 
+            else if (property.Income.PerHour > Property.MaxIncomePerHour)
+                errors.Add(
+                    $"{where}: 'income.perHour' must be <= {Property.MaxIncomePerHour}, found {property.Income.PerHour}");
+
             if (property.Income.CapMinutes < 1)
                 errors.Add($"{where}: 'income.capMinutes' must be >= 1, found {property.Income.CapMinutes}");
+            else if (property.Income.CapMinutes > Property.MaxAccrualCapMinutes)
+                errors.Add(
+                    $"{where}: 'income.capMinutes' must be <= {Property.MaxAccrualCapMinutes} (30 days), " +
+                    $"found {property.Income.CapMinutes}");
 
             // Both fields can be individually legal and still multiply out to nothing once floored to
             // whole cash — 30/hour over one minute is half a coin. Only the product catches it, and
             // catching it here beats shipping a property that charges for a purchase and never pays.
             if (property.Income.PerHour >= 1
+                && property.Income.PerHour <= Property.MaxIncomePerHour
                 && property.Income.CapMinutes >= 1
+                && property.Income.CapMinutes <= Property.MaxAccrualCapMinutes
                 && property.Income.PerHour * property.Income.CapMinutes / 60L < 1)
             {
                 errors.Add(

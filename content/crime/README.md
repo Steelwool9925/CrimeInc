@@ -118,8 +118,8 @@ properties[] the catalog, in display order — the engine does not sort
   levelRequirement  minimum player level to buy (>= 1)
   price             cash cost of one unit (>= 0), fixed — never rolled
   income
-    perHour         cash one unit earns per hour of elapsed time (>= 1)
-    capMinutes      how many minutes of income one unit holds before accrual stops (>= 1)
+    perHour         cash one unit earns per hour of elapsed time (1 .. 1,000,000)
+    capMinutes      minutes of income one unit holds before accrual stops (1 .. 43,200 = 30 days)
 ```
 
 Income is **accrued lazily**, exactly as the resource meters regenerate: nothing runs on a timer, and
@@ -134,6 +134,13 @@ than hours so an early-game property can have a window short enough to watch fil
 `perHour × capMinutes ÷ 60` floored to whole cash, so `30/hour` over `1 minute` is half a coin and is
 rejected at startup. Both fields are individually legal there — only the product catches it, and a
 property that charges for a purchase and then never pays is worse than a failed boot.
+
+Both also carry **upper** bounds, which exist for the same reason the lower ones do. A month is the
+longest window for which "come back before it fills" still means anything, and a million an hour is
+some 280× the top property here — so the only thing the ceilings reject is a typo. They also keep the
+`perHour × capMinutes` product away from wrapping a 64-bit integer: unbounded, `2^62` an hour over
+nine minutes comes back round as a *positive* number, which sails past the floors-to-zero guard and
+loads as a property with an absurd cap.
 
 Property **ids**, like job and item ids, are compared **ordinally**.
 

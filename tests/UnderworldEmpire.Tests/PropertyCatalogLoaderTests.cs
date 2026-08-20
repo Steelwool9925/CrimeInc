@@ -274,6 +274,37 @@ public class PropertyCatalogLoaderTests : IDisposable
     }
 
     [Fact]
+    public void A_window_longer_than_a_month_is_rejected()
+    {
+        WriteProperties("crime", ValidCatalog(ValidProperty(capMinutes: 43_201)));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadProperties("crime"));
+        Assert.Contains("income.capMinutes", ex.Message);
+    }
+
+    [Fact]
+    public void A_rate_beyond_any_plausible_balance_is_rejected()
+    {
+        // The realistic content typo is extra zeros. Bounding the field turns that into a startup error
+        // naming the field, rather than a property that quietly holds a trillion cash.
+        WriteProperties("crime", ValidCatalog(ValidProperty(perHour: 1_000_001)));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadProperties("crime"));
+        Assert.Contains("income.perHour", ex.Message);
+    }
+
+    [Fact]
+    public void A_rate_and_window_whose_product_wraps_a_long_are_rejected()
+    {
+        // 2^62 an hour over 9 minutes wraps past 2^64 back to a positive number, so the "floors to zero"
+        // guard cannot see it. Without the bounds above this catalog would load.
+        WriteProperties("crime", ValidCatalog(
+            ValidProperty(perHour: 4_611_686_018_427_387_904L, capMinutes: 9)));
+
+        Assert.Throws<ContentPackException>(() => Loader().LoadProperties("crime"));
+    }
+
+    [Fact]
     public void Every_problem_in_the_file_is_reported_at_once()
     {
         // One fix pass rather than one restart per mistake — the same contract jobs.json and items.json

@@ -84,4 +84,36 @@ public class PropertyTests
     {
         TestProperty(incomePerHour: 60, accrualCapMinutes: 1).EnsureValid();
     }
+
+    [Fact]
+    public void A_window_longer_than_a_month_is_rejected()
+    {
+        // Past a month the "come back before it fills" mechanic has stopped being a mechanic, and an
+        // unbounded window is what lets the rate-times-window product below wrap.
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => TestProperty(accrualCapMinutes: 43_201).EnsureValid());
+    }
+
+    [Fact]
+    public void A_rate_beyond_any_plausible_balance_is_rejected()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => TestProperty(incomePerHour: 1_000_001).EnsureValid());
+    }
+
+    [Fact]
+    public void A_rate_and_window_whose_product_wraps_a_long_are_rejected()
+    {
+        // 2^62 an hour over 9 minutes multiplies out past 2^64 and wraps back to a positive number, so
+        // the "floors to zero" guard does not catch it — the property would load with an absurd cap, and
+        // enough units of it would wrap the cap negative and pay a negative collection.
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => TestProperty(incomePerHour: 4_611_686_018_427_387_904L, accrualCapMinutes: 9).EnsureValid());
+    }
+
+    [Fact]
+    public void The_largest_permitted_rate_and_window_are_accepted()
+    {
+        TestProperty(incomePerHour: 1_000_000, accrualCapMinutes: 43_200).EnsureValid();
+    }
 }

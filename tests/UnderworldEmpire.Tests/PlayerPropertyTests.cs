@@ -207,4 +207,35 @@ public class PlayerPropertyTests
 
         Assert.Equal(20, total);
     }
+
+    [Fact]
+    public void Buying_another_unit_of_a_full_holding_gives_it_room_again()
+    {
+        // The cap scales with the units owned, so expanding a property that had stopped earning starts
+        // it earning again — without forfeiting the full window it was already sitting on.
+        var holding = Holding();
+        holding.AddUnits(TestProperty(), 1, T0);
+
+        holding.AddUnits(TestProperty(), 1, T0.AddHours(6));
+
+        Assert.Equal(60, holding.UncollectedCash);
+        Assert.Equal(120, holding.CapAt(TestProperty()));
+
+        // Two units earn 4 a minute, on top of the full window it was already holding.
+        Assert.Equal(68, holding.PendingAt(TestProperty(), T0.AddHours(6).AddMinutes(2)));
+    }
+
+    [Fact]
+    public void A_holding_that_sat_full_for_days_does_not_bank_the_waiting_as_a_head_start()
+    {
+        // Reaching the cap discards the time spent full. Collecting then leaves the holding empty and
+        // earning from now, not part-way through the next window.
+        var holding = Holding();
+        holding.AddUnits(TestProperty(), 1, T0);
+
+        holding.CollectAt(TestProperty(), T0.AddDays(3));
+
+        Assert.Equal(0, holding.PendingAt(TestProperty(), T0.AddDays(3)));
+        Assert.Equal(2, holding.PendingAt(TestProperty(), T0.AddDays(3).AddMinutes(1)));
+    }
 }
