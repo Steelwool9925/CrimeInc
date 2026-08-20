@@ -1,4 +1,4 @@
-namespace UnderworldEmpire.Infrastructure.Content;
+﻿namespace UnderworldEmpire.Infrastructure.Content;
 
 /// <summary>
 /// Provides access to the active content pack for the running application.
@@ -20,4 +20,10 @@ public interface IContentPackProvider
     /// <see cref="ActivePack"/> — read once at startup, immutable thereafter.
     /// </summary>
     ItemCatalog ItemCatalog { get; }
+
+    /// <summary>
+    /// The loaded and validated property catalog for the active pack. Same lifecycle as
+    /// <see cref="ActivePack"/> — read once at startup, immutable thereafter.
+    /// </summary>
+    PropertyCatalog PropertyCatalog { get; }
 }

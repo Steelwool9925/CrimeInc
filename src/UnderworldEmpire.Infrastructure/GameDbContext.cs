@@ -1,7 +1,8 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using UnderworldEmpire.Domain;
 using UnderworldEmpire.Domain.Items;
 using UnderworldEmpire.Domain.Jobs;
+using UnderworldEmpire.Domain.Properties;
 
 namespace UnderworldEmpire.Infrastructure;
 
@@ -21,6 +22,8 @@ public class GameDbContext : DbContext
     public DbSet<PlayerJobMastery> PlayerJobMasteries => Set<PlayerJobMastery>();
 
     public DbSet<PlayerItem> PlayerItems => Set<PlayerItem>();
+
+    public DbSet<PlayerProperty> PlayerProperties => Set<PlayerProperty>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -118,6 +121,32 @@ public class GameDbContext : DbContext
         holding.HasOne<Player>()
             .WithMany()
             .HasForeignKey(i => i.PlayerId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Per-player, per-property income holdings.
+        var owned = modelBuilder.Entity<PlayerProperty>();
+
+        // Composite natural key, same reasoning as the holdings above: a player holds exactly one row
+        // per property — a second unit raises Quantity rather than inserting again. Two rows would each
+        // accrue income against their own clock and the player would collect twice.
+        owned.HasKey(p => new { p.PlayerId, p.PropertyId });
+
+        // PropertyId is a content id, not a foreign key — the catalog lives in properties.json, not the
+        // database. The 64-character cap is enforced up front by ContentPackLoader.ValidateProperties.
+        owned.Property(p => p.PropertyId).IsRequired().HasMaxLength(64);
+        owned.Property(p => p.Quantity).IsRequired();
+        owned.Property(p => p.UncollectedCash).IsRequired();
+
+        // Income is derived from the gap between this instant and now, so it is load-bearing arithmetic
+        // rather than an audit field. timestamptz (Npgsql's default for DateTimeOffset) keeps
+        // microseconds, which is finer than any rate content can express.
+        owned.Property(p => p.AccruedAtUtc).IsRequired();
+
+        // Deleting a player must take their properties with them. No navigation property on Player, for
+        // the same reason as the holdings above.
+        owned.HasOne<Player>()
+            .WithMany()
+            .HasForeignKey(p => p.PlayerId)
             .OnDelete(DeleteBehavior.Cascade);
     }
 }

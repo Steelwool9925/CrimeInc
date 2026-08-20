@@ -163,6 +163,29 @@ namespace UnderworldEmpire.Infrastructure.Migrations
                     b.ToTable("Players");
                 });
 
+            modelBuilder.Entity("UnderworldEmpire.Domain.Properties.PlayerProperty", b =>
+                {
+                    b.Property<Guid>("PlayerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PropertyId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("AccruedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("UncollectedCash")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("PlayerId", "PropertyId");
+
+                    b.ToTable("PlayerProperties");
+                });
+
             modelBuilder.Entity("UnderworldEmpire.Domain.Items.PlayerItem", b =>
                 {
                     b.HasOne("UnderworldEmpire.Domain.Player", null)
@@ -173,6 +196,15 @@ namespace UnderworldEmpire.Infrastructure.Migrations
                 });
 
             modelBuilder.Entity("UnderworldEmpire.Domain.Jobs.PlayerJobMastery", b =>
+                {
+                    b.HasOne("UnderworldEmpire.Domain.Player", null)
+                        .WithMany()
+                        .HasForeignKey("PlayerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("UnderworldEmpire.Domain.Properties.PlayerProperty", b =>
                 {
                     b.HasOne("UnderworldEmpire.Domain.Player", null)
                         .WithMany()

@@ -1,7 +1,8 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using UnderworldEmpire.Domain.Items;
 using UnderworldEmpire.Domain.Jobs;
+using UnderworldEmpire.Domain.Properties;
 
 namespace UnderworldEmpire.Infrastructure.Content;
 
@@ -184,6 +185,62 @@ public sealed class ContentPackLoader
         return new ItemCatalog(items);
     }
 
+
+    /// <summary>
+    /// Loads and validates the property catalog for <paramref name="packId"/> from
+    /// <c>&lt;contentRoot&gt;/&lt;packId&gt;/properties.json</c>.
+    /// </summary>
+    /// <remarks>
+    /// Same contract as <see cref="LoadItems"/>: validation runs to completion and reports every problem
+    /// at once, and domain objects are constructed only after it passes.
+    /// </remarks>
+    /// <exception cref="ContentPackException">
+    ///     Thrown when the file is missing, cannot be parsed, or fails validation.
+    /// </exception>
+    public PropertyCatalog LoadProperties(string packId)
+    {
+        var propertiesFile = Path.Combine(_contentRoot, packId, "properties.json");
+
+        if (!File.Exists(propertiesFile))
+            throw new ContentPackException(
+                $"Property catalog for pack '{packId}' not found at '{propertiesFile}'.");
+
+        PropertyCatalogFile file;
+        try
+        {
+            var json = File.ReadAllText(propertiesFile, Encoding.UTF8);
+            file = JsonSerializer.Deserialize<PropertyCatalogFile>(json, JsonOptions)
+                   ?? throw new ContentPackException(
+                       $"properties.json for '{packId}' deserialised to null.");
+        }
+        catch (JsonException ex)
+        {
+            throw new ContentPackException(
+                $"properties.json for '{packId}' is not valid JSON: {ex.Message}", ex);
+        }
+
+        ValidateProperties(file, packId);
+
+        var properties = new List<Property>(file.Properties.Count);
+        foreach (var entry in file.Properties)
+        {
+            var property = new Property
+            {
+                Id = entry.Id,
+                Name = entry.Name,
+                Description = entry.Description,
+                LevelRequirement = entry.LevelRequirement,
+                Price = entry.Price,
+                IncomePerHour = entry.Income.PerHour,
+                AccrualCapMinutes = entry.Income.CapMinutes
+            };
+            property.EnsureValid();
+            properties.Add(property);
+        }
+
+        return new PropertyCatalog(properties);
+    }
+
     /// <summary>The slot names content may use, for error messages.</summary>
     private static readonly string SlotNames = string.Join(", ",
         Enum.GetNames<ItemSlot>().Select(n => n.ToLowerInvariant()));
@@ -358,5 +415,73 @@ public sealed class ContentPackLoader
         if (errors.Count > 0)
             throw new ContentPackException(
                 $"Item catalog for pack '{expectedPackId}' failed validation: {string.Join("; ", errors)}.");
+    }
+
+    private static void ValidateProperties(PropertyCatalogFile file, string expectedPackId)
+    {
+        var errors = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(file.PackId))
+            errors.Add("'packId' is missing or empty");
+        else if (!string.Equals(file.PackId, expectedPackId, StringComparison.Ordinal))
+            errors.Add($"'packId' mismatch: expected '{expectedPackId}', found '{file.PackId}'");
+
+        if (file.Properties.Count == 0)
+            errors.Add("'properties' is missing or empty — a pack must define at least one property");
+
+        var seenIds = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < file.Properties.Count; i++)
+        {
+            var property = file.Properties[i];
+
+            // Identify the entry by id where possible, falling back to its index — the same convention
+            // ValidateItems uses, so a content author reads one error format across every catalog.
+            var where = string.IsNullOrWhiteSpace(property.Id)
+                ? $"properties[{i}]"
+                : $"properties[{i}] ('{property.Id}')";
+
+            if (string.IsNullOrWhiteSpace(property.Id))
+                errors.Add($"{where}: 'id' is missing or empty");
+            else
+            {
+                if (!seenIds.Add(property.Id))
+                    errors.Add($"{where}: duplicate 'id'");
+
+                if (property.Id.Length > ContentIdMaxLength)
+                    errors.Add(
+                        $"{where}: 'id' is {property.Id.Length} characters, above the {ContentIdMaxLength}-character limit");
+            }
+
+            if (string.IsNullOrWhiteSpace(property.Name))
+                errors.Add($"{where}: 'name' is missing or empty");
+
+            if (property.LevelRequirement < 1)
+                errors.Add($"{where}: 'levelRequirement' must be >= 1, found {property.LevelRequirement}");
+
+            if (property.Price < 0)
+                errors.Add($"{where}: 'price' must be >= 0, found {property.Price}");
+
+            if (property.Income.PerHour < 1)
+                errors.Add($"{where}: 'income.perHour' must be >= 1, found {property.Income.PerHour}");
+
+            if (property.Income.CapMinutes < 1)
+                errors.Add($"{where}: 'income.capMinutes' must be >= 1, found {property.Income.CapMinutes}");
+
+            // Both fields can be individually legal and still multiply out to nothing once floored to
+            // whole cash — 30/hour over one minute is half a coin. Only the product catches it, and
+            // catching it here beats shipping a property that charges for a purchase and never pays.
+            if (property.Income.PerHour >= 1
+                && property.Income.CapMinutes >= 1
+                && property.Income.PerHour * property.Income.CapMinutes / 60L < 1)
+            {
+                errors.Add(
+                    $"{where}: 'income' of {property.Income.PerHour}/hour over {property.Income.CapMinutes} " +
+                    "minutes floors to zero cash — the property could never pay out");
+            }
+        }
+
+        if (errors.Count > 0)
+            throw new ContentPackException(
+                $"Property catalog for pack '{expectedPackId}' failed validation: {string.Join("; ", errors)}.");
     }
 }
