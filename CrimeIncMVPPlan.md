@@ -178,7 +178,7 @@ test UI at `/swagger`. 22 sessions total.
 |---|---|---|---|
 | ✅ S3.1 | T3.1 items domain + attack/defense aggregation + tests | 35k | `dotnet test` → loadout aggregation tests green |
 | ✅ S3.2 | T3.2 item endpoints (buy/equip/`GET /inventory`), T3.3 property domain + capped accrual + tests | 50k | Swagger: buy+equip item → attack/defense change; property accrual + cap tests green |
-| S3.3 | T3.4 property endpoints (buy/collect), T3.5a Flutter Inventory + Store screens | 40k | Swagger buy/collect property; in app: Store→buy item, Inventory→equip, stats rise |
+| ✅ S3.3 | T3.4 property endpoints (buy/collect), T3.5a Flutter Inventory + Store screens | 40k | Swagger buy/collect property; in app: Store→buy item, Inventory→equip, stats rise |
 | S3.4 | T3.5b Flutter Properties screen (buy/collect UI + accrual display) | 27k | **CP3**: in app buy a property, watch income accrue to cap, collect → cash↑ |
 
 ### M4 — Combat, bounty & crew (6 sessions)
@@ -736,13 +736,96 @@ back to 5), plus refusals verified end to end (re-equip 409 `alreadyEquipped`, l
 affordability 409 `cash`, unknown id 404, wrong-case id 404, double unequip 409 `notEquipped`,
 anonymous read 401). No Flutter code touched.
 
-### ▶ Next: S3.3 — T3.4 property endpoints + T3.5a Flutter Inventory/Store screens
+### ✅ S3.3 — Property endpoints + Flutter Inventory/Store (T3.4 + T3.5a)
 
-The property domain is complete and unexposed. S3.3 puts `GET /properties`,
-`POST /properties/{id}/buy` and `POST /properties/{id}/collect` over it — `PropertyService` already
-carries the read-only `CheckPurchase` those endpoints need for their listing, mirroring what T3.2 did
-with `InventoryService` — and then builds the Flutter Inventory and Store screens on the `/inventory`
-contract that now exists.
+Executed 2026-08-20 via `/execute-plan` in worktree `.claude/worktrees/m3c-property-endpoints-flutter`
+on branch `worktree-m3c-property-endpoints-flutter`, from `8d5739c`. Single-context executor — no
+subagents, per the session's standing instructions. Test-first throughout: every type below had its
+test written and watched fail before the production code existed.
+
+#### T3.4 — `GET /properties`, buy, collect · commit `112676b`
+
+`GET /properties` returns the **whole catalog**, not only owned rows — the same rule `GET /inventory`
+follows, so the "buy" and "collect" halves of the Properties screen are one list that cannot disagree
+with itself. Each row carries `canBuy`/`canCollect` plus a stable reason token
+(`level`, `cash`, `notOwned`, `nothingToCollect`), computed by asking the domain the same question the
+write path refuses on.
+
+**`PropertyService.CheckCollect`, the read-only twin of `Collect`.** `CheckPurchase` already existed;
+collecting had no equivalent, so the listing would have had to re-derive the rule. It now asks, and
+`Collect` refuses on exactly its answer. It takes no `Player` — collecting your own takings has no
+level or cash gate, which makes it the one property question that is about the holding alone.
+
+**The listing does not settle what it reports.** Pending income is read through `PendingAt`, which
+banks nothing. A polling client hits this route constantly, and a read that settled would reset each
+holding's clock and discard the part-earned coin every time — reintroducing at the read path the exact
+bug `PropertyIncome` was built to avoid. Pinned by a test that asks 600 times and then collects the
+full amount, and by an HTTP-level test that reads the listing five times before collecting.
+
+**One clock per request.** Each endpoint takes `DateTimeOffset.UtcNow` once and threads that single
+instant through the settle and the projection built from it. Reading the clock twice inside one
+operation would let the two disagree by the gap between them, which is how a response comes back
+reporting a pending balance the stored row never held.
+
+**Concurrency.** Both actions move `Player.Cash`, so the `xmin` token covers them without the
+`TouchForConcurrency` an equip needs. Collecting is the case that makes it load-bearing: two concurrent
+collects would otherwise each read the same pending balance and each credit it, paying one holding's
+takings out twice — a cash printer rather than a discount. Conflicts are reported, never retried: a
+retried buy charges twice, and a retried collect settles a holding whose payout the winner already
+banked.
+
+**`IsUniqueViolation` was about to become its third copy**, so it moved to a shared
+`WriteConflicts` helper that `JobActionService` and `InventoryActionService` now use. Three copies of a
+rule about which faults are safe to swallow is three chances to widen one by accident. (A.4.4 asked for
+the same treatment for the id-length constant; that one is still outstanding.)
+
+#### T3.5a — Flutter Store and Inventory · commit `d6792ec`
+
+Both screens render one `GET /inventory`. Every gating decision shown is the server's; nothing is
+re-derived on the client, and the wording for the server's tokens lives in one `item_gating.dart` so two
+screens cannot phrase the same refusal differently.
+
+**After an action the client re-reads the catalog.** The action response carries the authoritative
+player and loadout, which are applied at once so the screen moves without waiting. What it cannot carry
+is the gating for every *other* row: buying changes the cash `canBuy` was computed against, and
+equipping changes which item holds the slot `canEquip` was computed against. Re-deriving those locally
+would be a second copy of a server rule — A.1.2 is what that looks like once it has drifted. The cost
+is two round trips per action, accepted deliberately.
+
+**The Inventory's loadout card is where CP3 is observed.** `GET /me` carries only base stats, so
+equipping does not move the numbers on Home — it moves them here, and the "10 + 4" split shows how much
+comes off again on unequip. See A.5.1: Home and Inventory now disagree about "Attack", which is real and
+unfixed.
+
+### Bug found and fixed during execution
+
+`_itemAction` released the in-flight guard when the action returned, then re-read the catalog outside it.
+Between those two points the rows on screen still carried pre-action gating, so a second action could
+start against a picture the server had already moved past — and `loadInventory`'s own collapse guard
+would have folded that second action's refresh into the reload already running, leaving its changes
+unread. Found by self-review after green, then reproduced as a failing test (a completer holding the
+re-read open while a second action is attempted) before the guard was widened to cover the refresh.
+
+### Balance tuning that CP3 depends on
+
+Unchanged from S3.1/S3.2 — no content was retuned this session. *Brass Knuckles* (level 1, 75 cash, +4
+attack) is still buyable from the starting 100, and *Street Corner* (level 1, 500 cash, 4/minute, a
+15-minute window) is still the observable-in-one-sitting starter property. The existing catalog tests
+continue to pin both.
+
+**S3.3 verification:** `dotnet build` 0 warnings / 0 errors · **`dotnet test` 468 pass** (429 before this
+session) · `flutter analyze` clean · **`flutter test` 128 pass** (84 before) · `flutter build web
+--release` succeeds · `dotnet ef migrations has-pending-model-changes` reports none — T3.4 changed no
+entity, so no migration was added and the S3.2 schema stands. A manual HTTP smoke was **not** run: the
+session's security hook blocks `curl`, so the 28 `PropertyEndpointTests` — real HTTP against real
+Postgres, covering 200/401/404/409 on all three routes — stand in for it. See A.5.3.
+
+### ▶ Next: S3.4 — T3.5b Flutter Properties screen
+
+The property endpoints are complete and unconsumed by the client. S3.4 builds the Properties screen on
+the `/properties` contract that now exists: buy, collect, and an accrual display that fills toward the
+cap. `incomePerHour` and `accrualCapMinutes` are on the wire precisely so that screen can animate the
+bar forward between polls without inventing the rate. That session ends at **CP3**.
 
 ---
 
@@ -971,4 +1054,69 @@ invoked. This session honoured `/test-feature` with the closest available equiva
 `superpowers` verification and TDD skills, an adversarial self-review of the diff, a live end-to-end
 API smoke, and a deliberate content-corruption test — rather than skipping the step. If a real
 `/test-feature` command is wanted, it needs writing.
+
+## A.5 — Raised during S3.3 (2026-08-20)
+
+Findings from the S3.3 session that are **not** part of T3.4 or T3.5a and were deliberately not acted
+on. Nothing here is scheduled.
+
+**A.5.1 Home and Inventory disagree about "Attack"** · `app/lib/screens/home_screen.dart:169` · medium
+
+Home renders `me.attack` from `GET /me`, which is the player's **base** stat. The Inventory renders
+`loadout.totalAttack`, which includes gear. So after equipping the knuckles the Inventory reads
+`Attack 14` and Home still reads `Attack 10`, with nothing on either screen saying which is which.
+
+This is not a bug in either screen — it is the consequence of a deliberate contract decision recorded in
+`PlayerProjection.ToLoadoutDto`: building a loadout costs a second query for the equipped holdings, and
+the endpoints that report progression (a job, a skill point) change no gear, so making every one of them
+pay for it would buy nothing. That reasoning is still sound for the *endpoints*; what it did not
+anticipate is a screen showing the base figure unlabelled next to a screen showing the effective one.
+
+Out of scope for T3.5a, which was scoped to the two new screens. **A design decision, not just a fix** —
+the options are contract-affecting:
+- send the loadout on `/me` and pay the query on every poll;
+- label Home's figure as base ("Attack 10 base") and leave the contract alone;
+- move the combat stats off Home entirely, since the Inventory now owns them.
+
+The second is the cheapest and the least honest-looking; the third is probably right once M4 gives
+combat a home of its own. Worth deciding before CP3 is run, because a tester watching Home during a
+"buy + equip → Attack rises" checkpoint will read the unchanged number as a failure.
+
+**A.5.2 The property concurrency tests were never mutation-checked** · `tests/.../PropertyConcurrencyTests.cs` · low
+
+The six tests passed on their first run. The check that would prove they are not vacuous — disabling the
+`xmin` concurrency token and watching `Two_concurrent_collects_pay_one_holding_once` fail — was
+**blocked by the session's permission classifier** part-way through: the edit was made, the test run was
+refused, and the edit was reverted immediately (`git diff` on `GameDbContext.cs` confirmed clean before
+anything else ran, and the full suite was re-run green afterwards).
+
+The safeguard itself is not new and not unproven: the `xmin` token shipped in M2 and is already pinned
+by `JobConcurrencyTests` and `InventoryConcurrencyTests`. What is unverified is only whether *these*
+particular property assertions would catch its removal. Cheap to close whenever a mutation run is
+permitted.
+
+**A.5.3 No manual HTTP smoke was possible this session** · process · informational
+
+S3.2 verified its endpoints with a live `curl` session against a running host. This session could not:
+the environment's `verify-command.sh` hook blocks `curl`/`wget`/`nc` outright as a network-egress
+restriction. `PropertyEndpointTests` covers the same ground — real HTTP over `WebApplicationFactory`
+against the real `underworld_test` database, asserting 200/401/404/409 across all three routes including
+case-sensitive id matching — so the endpoints are not unverified, but nobody has yet typed a property
+purchase into Swagger. That happens at CP3.
+
+**A.5.4 Every item action now costs two round trips** · design · informational
+
+`AppState._itemAction` follows each buy/equip/unequip with a `GET /inventory`, because the action
+response cannot carry refreshed gating for the rows it did not touch. On a slow connection the row stays
+busy for both legs. The alternative — folding the response into the cached list and re-deriving
+`canBuy`/`canEquip` locally — is the shape A.1.2 already went wrong in, so the round trip was chosen
+deliberately. If it becomes a felt cost, the fix is a server change (have the action endpoints return the
+refreshed catalog) rather than a client one; that would also make the Properties screen in S3.4 cheaper.
+
+**A.5.5 A.4.1's deleted runner scripts are still deleted** · `scripts/` · medium · **unchanged**
+
+Re-checked at the start of this session: `scripts/register-scheduled-gru.ps1` and
+`scripts/scheduled-gru.ps1` are still uncommitted deletions in `main`'s working tree. This session worked
+in a worktree and did not touch them, so the position is exactly as A.4.1 left it — still recoverable
+with `git checkout -- scripts/`, still one `git commit -a` away from permanent.
 
