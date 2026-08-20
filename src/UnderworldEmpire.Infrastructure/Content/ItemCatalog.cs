@@ -35,4 +35,36 @@ public sealed class ItemCatalog
     /// <returns>The item, or <see langword="null"/> when no item carries that id.</returns>
     public Item? Find(string itemId) =>
         _byId.TryGetValue(itemId, out var item) ? item : null;
+
+    /// <summary>
+    /// The definitions of everything in <paramref name="holdings"/> that the player is wearing.
+    /// </summary>
+    /// <remarks>
+    /// The bridge between persisted holdings (which store only an id) and the domain's
+    /// <see cref="Loadout"/> (which needs resolved definitions). Lives here rather than in each caller
+    /// because <c>GET /inventory</c> and every write path need the same answer, and two copies would be
+    /// free to disagree about the case below.
+    /// <para>
+    /// A holding whose id no longer resolves — content dropped the item between the purchase and now — is
+    /// <b>skipped</b>, not treated as an error. The row survives, so a restored item comes back with its
+    /// history, but an item that no longer exists scores nothing. Throwing instead would lock the player
+    /// out of their own inventory screen over a content edit they had no part in.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<Item> ResolveEquipped(IEnumerable<PlayerItem> holdings)
+    {
+        ArgumentNullException.ThrowIfNull(holdings);
+
+        var equipped = new List<Item>();
+        foreach (var holding in holdings)
+        {
+            if (!holding.Equipped)
+                continue;
+
+            if (Find(holding.ItemId) is { } definition)
+                equipped.Add(definition);
+        }
+
+        return equipped;
+    }
 }

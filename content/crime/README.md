@@ -5,7 +5,7 @@ The MVP theme pack. Populated from M1 onward with the data-driven content schema
 - `pack.json` — theme name, currency labels, palette, asset map ✅ *live since M1*
 - `jobs.json` — job catalog ✅ *live since M2*
 - `items.json` — item catalog ✅ *live since M3*
-- `properties.json` — property catalog (M3) — not yet present
+- `properties.json` — property catalog ✅ *live since M3*
 - `strings.json` — localizable UI text — not yet present
 
 The engine references abstract ids; this pack supplies concrete content + art paths. Swapping
@@ -101,3 +101,63 @@ Two properties are load-bearing for the **CP3** checkpoint and are pinned by tes
   current tuning makes that *Brass Knuckles* (75 cash, +4 attack) against a starting 100.
 - No item is free, so filling a slot always means engaging with the economy.
 
+## `properties.json`
+
+Loaded and validated at **startup** by `ContentPackLoader.LoadProperties`, on the same terms as
+`jobs.json` and `items.json`: every problem is reported at once, an invalid catalog stops the host,
+and **editing this file requires an API restart to take effect.**
+
+```
+packId       must equal the pack folder name ("crime")
+version      schema version of this file
+properties[] the catalog, in display order — the engine does not sort
+  id                content id, unique within the pack; the route value and the holdings key.
+                    Max 64 characters — it is stored as varchar(64) in PlayerProperties.
+  name              player-facing name
+  description       player-facing flavour text
+  levelRequirement  minimum player level to buy (>= 1)
+  price             cash cost of one unit (>= 0), fixed — never rolled
+  income
+    perHour         cash one unit earns per hour of elapsed time (1 .. 1,000,000)
+    capMinutes      minutes of income one unit holds before accrual stops (1 .. 43,200 = 30 days)
+```
+
+Income is **accrued lazily**, exactly as the resource meters regenerate: nothing runs on a timer, and
+what a property has earned is derived from elapsed time whenever somebody asks. Buying another unit
+raises both the rate and the ceiling, so owning more never shortens how long you may stay away.
+
+`capMinutes` is the reason to come back. Past that window a property stops earning, so one left alone
+for a week pays exactly what one left alone for its window pays. It is expressed in **minutes** rather
+than hours so an early-game property can have a window short enough to watch fill.
+
+`perHour` and `capMinutes` are each validated on their own **and as a product**: cap cash is
+`perHour × capMinutes ÷ 60` floored to whole cash, so `30/hour` over `1 minute` is half a coin and is
+rejected at startup. Both fields are individually legal there — only the product catches it, and a
+property that charges for a purchase and then never pays is worse than a failed boot.
+
+Both also carry **upper** bounds, which exist for the same reason the lower ones do. A month is the
+longest window for which "come back before it fills" still means anything, and a million an hour is
+some 280× the top property here — so the only thing the ceilings reject is a typo. They also keep the
+`perHour × capMinutes` product away from wrapping a 64-bit integer: unbounded, `2^62` an hour over
+nine minutes comes back round as a *positive* number, which sails past the floors-to-zero guard and
+loads as a property with an absurd cap.
+
+Property **ids**, like job and item ids, are compared **ordinally**.
+
+### Balance notes
+
+Prices are absolute cash, to be read against `jobs.json` payouts. Properties are the game's second
+income source: a job pays now for energy spent, a property pays slowly for cash spent up front.
+
+Two properties are load-bearing for the **CP3** checkpoint and are pinned by tests in
+`PropertyCatalogLoaderTests`:
+
+- The cheapest `levelRequirement: 1` property costs no more than roughly two full energy bars of the
+  starting job, so "buy a property" is a short grind rather than a project. The current tuning makes
+  that *Street Corner* at 500.
+- That same starter earns at least a coin a minute and fills its window in no more than 30 minutes,
+  so "watch income accrue to the cap, then collect" is observable inside one test session rather than
+  overnight. *Street Corner* earns 4 a minute and fills in 15.
+
+Every property is also pinned to repay its own price within 200 full collections, so none of them is
+a trap rather than a choice.

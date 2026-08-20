@@ -1,0 +1,54 @@
+{
+  "packId": "crime",
+  "version": 1,
+  "properties": [
+    {
+      "id": "street-corner",
+      "name": "Street Corner",
+      "description": "A patch of pavement nobody works without your say-so.",
+      "levelRequirement": 1,
+      "price": 500,
+      "income": { "perHour": 240, "capMinutes": 15 }
+    },
+    {
+      "id": "pawn-shop",
+      "name": "Pawn Shop",
+      "description": "Buys low, asks nothing, and keeps no paperwork worth subpoenaing.",
+      "levelRequirement": 2,
+      "price": 1800,
+      "income": { "perHour": 300, "capMinutes": 120 }
+    },
+    {
+      "id": "car-wash",
+      "name": "Car Wash",
+      "description": "Twelve dollars a wash and a great deal more than twelve dollars a day.",
+      "levelRequirement": 4,
+      "price": 6000,
+      "income": { "perHour": 640, "capMinutes": 240 }
+    },
+    {
+      "id": "night-club",
+      "name": "Night Club",
+      "description": "Loud enough that nobody upstairs hears the counting room.",
+      "levelRequirement": 6,
+      "price": 18000,
+      "income": { "perHour": 1100, "capMinutes": 480 }
+    },
+    {
+      "id": "shipping-warehouse",
+      "name": "Shipping Warehouse",
+      "description": "Half the crates are honest. The manifest says all of them are.",
+      "levelRequirement": 9,
+      "price": 52000,
+      "income": { "perHour": 2000, "capMinutes": 720 }
+    },
+    {
+      "id": "riverside-casino",
+      "name": "Riverside Casino",
+      "description": "The house always wins, and these days the house is you.",
+      "levelRequirement": 12,
+      "price": 140000,
+      "income": { "perHour": 3600, "capMinutes": 1440 }
+    }
+  ]
+}

@@ -37,13 +37,9 @@ public sealed class InventoryService
 
         // ---- Validate before mutating anything ----
 
-        // Level first: it is the permanent obstacle, so reporting it ahead of cash tells the player the
-        // thing that will not fix itself by earning more. Same precedence as a job refusal.
-        if (player.Level < item.LevelRequirement)
-            return ItemPurchaseResult.Refused(InventoryFailure.LevelTooLow);
-
-        if (player.Cash < item.Price)
-            return ItemPurchaseResult.Refused(InventoryFailure.InsufficientCash);
+        var obstacle = CheckPurchase(player, item);
+        if (obstacle != InventoryFailure.None)
+            return ItemPurchaseResult.Refused(obstacle);
 
         // ---- Apply ----
 
@@ -51,6 +47,67 @@ public sealed class InventoryService
         holding.AddCopies(1);
 
         return ItemPurchaseResult.Success(item.Price, holding.Quantity);
+    }
+
+    /// <summary>
+    /// Asks what, if anything, stops <paramref name="player"/> buying <paramref name="item"/> right now,
+    /// without buying it. Returns <see cref="InventoryFailure.None"/> when nothing does.
+    /// </summary>
+    /// <remarks>
+    /// Exists so the store listing and the purchase itself cannot disagree: <see cref="Purchase"/> refuses
+    /// on exactly this answer, so a client told it may buy something will not then be rejected. The
+    /// alternative — re-deriving the gate where the list is projected — is a second copy of the rule, free
+    /// to drift the moment either side is retuned.
+    /// <para>
+    /// Level is reported ahead of cash because it is the permanent obstacle: it tells the player the thing
+    /// that will not fix itself by earning more. Same precedence as a job refusal.
+    /// </para>
+    /// </remarks>
+    public InventoryFailure CheckPurchase(Player player, Item item)
+    {
+        ArgumentNullException.ThrowIfNull(player);
+        ArgumentNullException.ThrowIfNull(item);
+
+        if (player.Level < item.LevelRequirement)
+            return InventoryFailure.LevelTooLow;
+
+        if (player.Cash < item.Price)
+            return InventoryFailure.InsufficientCash;
+
+        return InventoryFailure.None;
+    }
+
+    /// <summary>
+    /// Asks what, if anything, stops <paramref name="player"/> wearing <paramref name="item"/> right now,
+    /// without wearing it. Returns <see cref="InventoryFailure.None"/> when nothing does.
+    /// </summary>
+    /// <remarks>
+    /// The read-only counterpart to <see cref="Equip"/>, which refuses on exactly this answer — see the
+    /// remarks on <see cref="CheckPurchase"/> for why the rule is asked rather than restated.
+    /// <para>
+    /// Not owning the item is reported first: a player who does not have it has nothing to act on, so
+    /// naming a level gate they also fail would send them to earn levels for gear they still would not
+    /// hold. Displacing the slot's incumbent is not an obstacle — that is what equipping does.
+    /// </para>
+    /// </remarks>
+    public InventoryFailure CheckEquip(Player player, Item item, PlayerItem holding)
+    {
+        ArgumentNullException.ThrowIfNull(player);
+        ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(holding);
+
+        if (!holding.IsOwned)
+            return InventoryFailure.NotOwned;
+
+        // Gating equipping as well as buying means gear obtained by any future route — a reward, a drop,
+        // a rebalanced level curve — still cannot be worn early.
+        if (player.Level < item.LevelRequirement)
+            return InventoryFailure.LevelTooLow;
+
+        if (holding.Equipped)
+            return InventoryFailure.AlreadyEquipped;
+
+        return InventoryFailure.None;
     }
 
     /// <summary>
@@ -83,16 +140,9 @@ public sealed class InventoryService
 
         // ---- Validate before mutating anything ----
 
-        if (!holding.IsOwned)
-            return ItemEquipResult.Refused(InventoryFailure.NotOwned);
-
-        // Gating equipping as well as buying means gear obtained by any future route — a reward, a drop,
-        // a rebalanced level curve — still cannot be worn early.
-        if (player.Level < item.LevelRequirement)
-            return ItemEquipResult.Refused(InventoryFailure.LevelTooLow);
-
-        if (holding.Equipped)
-            return ItemEquipResult.Refused(InventoryFailure.AlreadyEquipped);
+        var obstacle = CheckEquip(player, item, holding);
+        if (obstacle != InventoryFailure.None)
+            return ItemEquipResult.Refused(obstacle);
 
         // Filter on Equipped as well as slot, so handing this method every holding rather than only the
         // worn ones cannot make it report displacing something the player was not wearing. Compare by item

@@ -1,4 +1,4 @@
-namespace UnderworldEmpire.Infrastructure.Content;
+﻿namespace UnderworldEmpire.Infrastructure.Content;
 
 /// <summary>
 /// Singleton implementation of <see cref="IContentPackProvider"/> that holds the
@@ -12,10 +12,17 @@ internal sealed class ContentPackProvider : IContentPackProvider
 
     public ItemCatalog ItemCatalog { get; }
 
-    public ContentPackProvider(ContentPack pack, JobCatalog jobCatalog, ItemCatalog itemCatalog)
+    public PropertyCatalog PropertyCatalog { get; }
+
+    public ContentPackProvider(
+        ContentPack pack,
+        JobCatalog jobCatalog,
+        ItemCatalog itemCatalog,
+        PropertyCatalog propertyCatalog)
     {
         ActivePack = pack;
         JobCatalog = jobCatalog;
         ItemCatalog = itemCatalog;
+        PropertyCatalog = propertyCatalog;
     }
 }
