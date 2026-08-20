@@ -176,8 +176,8 @@ test UI at `/swagger`. 22 sessions total.
 ### M3 — Items & properties (4 sessions)
 | Session | Contents | ~tok | How you test it |
 |---|---|---|---|
-| S3.1 | T3.1 items domain + attack/defense aggregation + tests | 35k | `dotnet test` → loadout aggregation tests green |
-| S3.2 | T3.2 item endpoints (buy/equip/`GET /inventory`), T3.3 property domain + capped accrual + tests | 50k | Swagger: buy+equip item → attack/defense change; property accrual + cap tests green |
+| ✅ S3.1 | T3.1 items domain + attack/defense aggregation + tests | 35k | `dotnet test` → loadout aggregation tests green |
+| ✅ S3.2 | T3.2 item endpoints (buy/equip/`GET /inventory`), T3.3 property domain + capped accrual + tests | 50k | Swagger: buy+equip item → attack/defense change; property accrual + cap tests green |
 | S3.3 | T3.4 property endpoints (buy/collect), T3.5a Flutter Inventory + Store screens | 40k | Swagger buy/collect property; in app: Store→buy item, Inventory→equip, stats rise |
 | S3.4 | T3.5b Flutter Properties screen (buy/collect UI + accrual display) | 27k | **CP3**: in app buy a property, watch income accrue to cap, collect → cash↑ |
 
@@ -603,8 +603,20 @@ An item's slot lives in `items.json`, so there is no slot column on `PlayerItems
 filtered unique index over — and adding one would duplicate a content fact that a retune can change.
 The invariant is therefore enforced in two places instead: `InventoryService.Equip` unequips the
 incumbent in that slot on the way in, and `Loadout.For` **throws** rather than aggregate a loadout
-with two items in one slot. Silently summing both would hand the player double the gear bonus. The
-state is unreachable through the API; the throw exists so corruption is loud rather than profitable.
+with two items in one slot. Silently summing both would hand the player double the gear bonus.
+
+> **Corrected 2026-08-20 (S3.2).** This section originally claimed the two-items-in-one-slot state was
+> "unreachable through the API". That was **false**, and S3.2 fixed the hole before shipping the
+> endpoints that would have opened it. Two concurrent equips of two different weapons each saw an
+> empty slot, so neither displaced the other and both writes landed on different `PlayerItems` rows.
+> The `xmin` token on `Players` could not catch it because an equip changes no player column — nothing
+> conflicted. The damage was permanent rather than transient: `Loadout.For` throws on that state, so
+> every later read of the player's own inventory would 500 with no API path back. Fixed in
+> `InventoryActionService.TouchForConcurrency`, which forces the player row into the update batch so
+> its token becomes the serialisation point. Pinned by `InventoryConcurrencyTests`.
+
+The throw in `Loadout.For` remains, and remains worth having: it is the reason the race showed up as a
+loud failure rather than as a quietly doubled gear bonus.
 
 ### Balance tuning that CP3 depends on
 
@@ -628,74 +640,109 @@ confirmed against the live schema · host verified to refuse startup on a delibe
 `items.json`, reporting all six injected violations at once. No Flutter or endpoint code touched —
 `GET /inventory`, buy and equip are T3.2, and nothing yet surfaces effective stats over the wire.
 
-### ⏸ S3.2 — INTERRUPTED mid-way (T3.2 substantially done, T3.3 not started)
+### ✅ S3.2 — Item endpoints, property domain & capped income accrual (T3.2 + T3.3)
 
-Started 2026-08-19 15:00 by the scheduled runner; **killed by the user at 15:15:52** (951 s in) after
-~113 API calls. Not a failure — stopped deliberately, and stopped at the single most misleading moment
-possible (see *State of the tests* below). Nothing was committed.
+Resumed 2026-08-20 in worktree `.claude/worktrees/m3b-item-endpoints-properties` from the run the user
+killed on 2026-08-19. Merged to `main`. The interrupted session's uncommitted work was reviewed before
+being committed; T3.3 was then built from nothing, test-first throughout.
 
-**Where the work is:** worktree `.claude/worktrees/m3b-item-endpoints-properties`, branch
-`worktree-m3b-item-endpoints-properties`, based on `6ba3e06`. **All changes are uncommitted and the
-branch has no commits on it.** The worktree is git-`locked` (the session held it). ~1,430 new lines
-plus 267 changed.
+**State on resume.** The concurrency fix the previous session had stubbed out to watch its tests fail
+was already restored in the worktree, and the suite was **328/328**, not the 326/2 the interruption
+notes predicted. Nothing else had to be recovered.
 
-**What exists (T3.2):**
-- `src/UnderworldEmpire.Api/Endpoints/ItemEndpoints.cs` — all four routes: `GET /inventory`,
-  `POST /items/{id}/buy`, `POST /items/{id}/equip`, `POST /items/{id}/unequip`.
-- `src/UnderworldEmpire.Api/Contracts/InventoryContracts.cs` — wire DTOs.
-- `src/UnderworldEmpire.Infrastructure/InventoryActionService.cs` — the transactional application
-  service (one `SaveChangesAsync` per action; `xmin` conflicts reported, never retried, because a retry
-  would charge twice — same rule as `JobActionService`).
-- `PlayerProjection.ToLoadoutDto` — effective stats on the wire, deliberately *not* folded into
-  `ToMeDto` so progression endpoints that change no gear don't pay for the extra query.
-- Wiring: `app.MapItemEndpoints()` in `Program.cs`, `InventoryActionService` registered scoped.
-- `ItemCatalog.ResolveEquipped` added (+32 lines) and small extensions to `InventoryService`.
-- Tests: `InventoryEndpointTests.cs` (511 lines), `InventoryConcurrencyTests.cs` (255 lines), plus
-  additions to `InventoryServiceTests` and `ItemCatalogLoaderTests`.
+#### T3.2 — buy, equip, unequip, `GET /inventory`
 
-**Not started (T3.3):** no `properties.json`, no `PlayerProperty`, no accrual logic, no migration.
-The whole property half of S3.2 remains, and CP3 cannot be run without it.
+`GET /inventory` returns the **whole catalog**, not only owned rows: the store and the inventory are
+two views of one list, so a single call serves both screens and they cannot disagree about an item.
+Each row carries `canBuy`/`canEquip` plus a stable reason token, computed by asking
+`InventoryService.CheckPurchase`/`CheckEquip` — the same question the write path refuses on. That is
+the point of extracting them: a client told it may buy something is never then rejected, where
+re-deriving the gate at the projection would be a second copy of the rule, free to drift.
 
-**State of the tests — read this before assuming something is broken.** `dotnet build` is clean
-(0 warnings / 0 errors) and the suite is **328 tests, 326 passing, 2 failing**. The two failures are
-**intentional**: the session had stubbed out its own fix to watch the new tests fail, and was killed
-inside that window. `InventoryActionService.TouchForConcurrency` carries the marker:
+`InventoryActionService` applies each action in one `SaveChangesAsync`. Conflicts are reported and
+never retried, because a retry would charge twice — the same rule `JobActionService` follows.
 
-```
-// TEMPORARILY DISABLED to watch the concurrency tests fail. Restored immediately after.
-```
+**The cross-row equip race, fixed.** See the corrected S3.1 note above: two concurrent equips left a
+player wearing two weapons in one slot, permanently 500ing every later read of their own inventory.
+`TouchForConcurrency` forces the player row into the update batch so its `xmin` token becomes the
+serialisation point for an operation that writes no player column. Latent on `main` until these
+endpoints landed, which is exactly why it was fixed before merging rather than filed.
 
-**To resume, restore that one method** to force an UPDATE on the player row so the `xmin` token is
-checked:
+#### T3.3 — properties, holdings, capped lazy accrual, collect
 
-```csharp
-_db.Entry(player).State = EntityState.Modified;
-```
+**Content.** `content/crime/properties.json`: six properties, level gates 1–12, prices 500–140,000,
+each with `income.perHour` and `income.capMinutes`. Validated at startup on the same terms as
+`items.json` — every problem reported at once, an invalid catalog stops the host.
 
-Measured 2026-08-19 by the reviewer: with that line in place the concurrency suite goes 6/6 and the
-full suite **328/328**, then reverted so the worktree still matches what the runner left. So the fix is
-one line, already designed, with its call site (`EquipAsync`) and its class-level rationale already
-written.
+**Lazy, like the meters.** Nothing runs on a timer. What a property has earned is derived from
+elapsed time whenever somebody asks, so a server with a million idle properties does no work for any
+of them.
 
-**The bug those tests were written for is real, and it corrects S3.1's record.** S3.1 claims the
-two-items-in-one-slot state is "unreachable through the API". That is **false**. Two concurrent equips
-of two different weapons each see an empty slot, so neither displaces the other, both writes land on
-different `PlayerItems` rows, and the player ends up wearing both. The existing `xmin` token does not
-catch it because an equip changes **no** column on `Players` — nothing conflicts. Worse, the failure is
-not transient: `Loadout.For` throws on a two-items-in-one-slot loadout, so every later read of that
-player's own inventory 500s, permanently, with no API path back.
+**The clock advances by less than the elapsed time.** Cash is whole numbers, so a settle usually
+leaves a fraction of a coin unearned. Resetting the clock to `now` would discard it — which means a
+client polling every second would earn strictly *less* than one polling once an hour, and a player
+tapping *collect* repeatedly could earn nothing at all. `PropertyIncome.Accrue` advances the stored
+instant only by the time the payout actually consumed. Pinned by tests that settle 600 times and
+compare against settling once. Collecting nothing is **refused rather than applied** for the same
+reason: a refusal must not settle the holding.
 
-On `main` today this is **latent, not live** — S3.1 shipped the domain rule but no endpoint calls it, so
-no external caller can equip anything yet. It becomes reachable the moment these endpoints land, which
-is precisely why it must be fixed before S3.2 is merged rather than filed for later.
+**The cap does discard time**, deliberately. Once full the clock jumps to `now`: the hours a full
+property spent waiting are worth nothing, and banking them as a head start would quietly undo the
+reason to come back.
 
-**Resume checklist:**
-1. `EnterWorktree` at `.claude/worktrees/m3b-item-endpoints-properties` (or unlock it).
-2. Restore `TouchForConcurrency` as above; confirm 328/328.
-3. Review the uncommitted T3.2 work properly — it has never been reviewed or committed, and 511 lines
-   of endpoint tests were written by a session that was interrupted before it could self-review.
-4. Correct the S3.1 "unreachable through the API" claim above once the fix is in.
-5. Then do T3.3 (properties), which is all still ahead.
+**Two stored fields, not one.** Income could come from a timestamp alone if the rate never changed,
+but buying another unit changes it. `UncollectedCash` banks what the old rate earned so the new one is
+never applied retroactively; `AccruedAtUtc` carries the part-earned coin. Every method that can change
+the rate settles first. Rate and price are never copied onto the holding — a retune of
+`properties.json` must move every player's income, the same rule `PlayerItem` follows for stats.
+
+**Persistence.** `PlayerProperties` with `PK ("PlayerId","PropertyId")`, `PropertyId varchar(64)`,
+`UncollectedCash bigint`, `AccruedAtUtc timestamptz`, FK cascade from Players. Migration
+`AddPlayerProperties`.
+
+**No endpoints.** `POST /properties/{id}/buy`, `POST /properties/{id}/collect` and `GET /properties`
+are **T3.4**, in S3.3. Nothing surfaces property income over the wire yet.
+
+### Balance tuning that CP3 depends on (properties)
+
+*Street Corner* — level 1, 500 cash, 240/hour, a 15-minute window — earns 4 a minute and fills its
+cap at 60. That is roughly two full energy bars of the starting job to buy, and a window short enough
+that "watch income accrue to the cap, then collect" is observable inside one sitting rather than
+overnight. Four tests in `PropertyCatalogLoaderTests` pin those properties (a level-1 property inside
+a short grind; a starter that fills in ≤30 minutes and earns ≥1 coin a minute; no free properties;
+every property repays its own price within 200 full collections) so a later balance pass cannot
+silently break the checkpoint.
+
+### Bug found and fixed during execution
+
+`ContentPackLoader.ValidateProperties` checks that `perHour × capMinutes` does not floor to zero cash
+— but that guard cannot see an **overflow**. The realistic content typo is extra zeros, and while most
+of those wrap the product negative (which the guard does catch), some wrap back round to a positive:
+`2^62` an hour over nine minutes reads as `2^62` again. That would load as a property with an absurd
+cap, and enough units of it would wrap the cap negative, so a collection would pay negative cash and
+`Player.AddCash` would throw a 500. Found by self-review after green, then reproduced as three failing
+tests — the wrapping catalog demonstrably loaded clean — before upper bounds were added to both
+fields. The bounds are stated as design facts, not arithmetic ones: a month is the longest window for
+which "come back before it fills" means anything, and a million an hour is 280× the top property in
+the shipped pack.
+
+**S3.2 verification:** `dotnet build` 0 warnings / 0 errors · **`dotnet test` 429 pass** (328 on
+resume, 282 before the session) · `AddPlayerProperties` applied to `underworld` and `underworld_test`,
+composite key + cascade confirmed against the live schema · host verified to refuse startup on a
+deliberately corrupted `properties.json`, reporting all nine injected violations at once · live API
+smoke against a running host: guest session → `GET /inventory` (9 items, gating tokens correct) → buy
+Brass Knuckles (cash 100→25) → equip (attack 5→9) → re-read confirms it persisted → unequip (attack
+back to 5), plus refusals verified end to end (re-equip 409 `alreadyEquipped`, level gate 409 `level`,
+affordability 409 `cash`, unknown id 404, wrong-case id 404, double unequip 409 `notEquipped`,
+anonymous read 401). No Flutter code touched.
+
+### ▶ Next: S3.3 — T3.4 property endpoints + T3.5a Flutter Inventory/Store screens
+
+The property domain is complete and unexposed. S3.3 puts `GET /properties`,
+`POST /properties/{id}/buy` and `POST /properties/{id}/collect` over it — `PropertyService` already
+carries the read-only `CheckPurchase` those endpoints need for their listing, mirroring what T3.2 did
+with `InventoryService` — and then builds the Flutter Inventory and Store screens on the `/inventory`
+contract that now exists.
 
 ---
 
@@ -869,3 +916,59 @@ M3 is now being built on an M2 whose checkpoint has not been run, on an M1 whose
 been run. Appendix A.1.2 in particular (job cards freeze once energy hits 0) will surface during any
 CP2 or CP3 sitting that lasts past the first empty energy bar. Reading a CP3 failure as an M3 defect
 would be wrong more often than right until CP1 and CP2 have been run.
+
+## A.4 — Raised during S3.2 (2026-08-20)
+
+Findings from the S3.2 session that are **not** part of T3.2 or T3.3 and were deliberately not acted
+on. Nothing here is scheduled.
+
+**A.4.1 The scheduled runner's two script files are deleted in the working tree, uncommitted** ·
+`scripts/scheduled-gru.ps1`, `scripts/register-scheduled-gru.ps1` · medium
+
+Both files are staged-for-nothing deletions in `main`'s working tree (`git status` shows ` D` for
+each) and have been since before this session started. They are still present in `HEAD`, so the fix
+committed in `6ba3e06` is intact in history — but the runner cannot fire from a working tree where its
+script does not exist, and the next `git commit -a` would silently make the deletion permanent. This
+session did not restore or commit them: whether the unattended runner is still wanted is the user's
+call, not a code decision. Restore with `git checkout -- scripts/`, or commit the removal
+deliberately.
+
+**A.4.2 `dotnet run --no-build` reads a stale copy of the content pack** · build/process · medium
+
+`UnderworldEmpire.Api.csproj` copies `content/**/*.json` to the build output, and the loader resolves
+`AppContext.BaseDirectory/content`. So editing a file under `content/` has **no effect** on a
+`--no-build` run, and — because the copy is `PreserveNewest` — restoring a file from a backup whose
+mtime is older than the copy in `bin/` does not re-copy it either. Both bit this session while
+verifying that a corrupted `properties.json` stops the host: the first attempt appeared to prove the
+opposite, and the restore afterwards appeared to leave the corruption in place. `touch` on the source
+plus a real build fixes it.
+
+This is worth remembering for **T5.1**, whose whole acceptance test is "swap one art asset in the pack
+→ UI updates with **no code change**". As things stand that test passes only after a rebuild, which is
+arguably not what the requirement means. Whether content should be read from the repo rather than the
+build output is a design question for that task.
+
+**A.4.3 Properties have no ownership cap** · design · informational
+
+A player may buy unlimited units of any property at a fixed price, and both the income rate and the
+accrual ceiling scale linearly with the count. That is a deliberate simplification for T3.3 — the
+alternatives (a hard per-property limit, or a price that escalates per unit) are balance decisions
+rather than engine ones — but it does mean late-game income is bounded only by cash. Crime Inc itself
+capped property counts. Worth a decision before M5 balance.
+
+**A.4.4 A.3.3's shared id-length constant is now half-done** · low
+
+`ValidateProperties` reuses the same `ContentIdMaxLength` constant `ValidateItems` uses, so the
+64-character cap is consistent across both catalogs. `ValidateJobs` still has no such check, so A.3.3
+stands: an over-long **job** id is still a 500 on first use. The constant to share already exists in
+`ContentPackLoader`.
+
+**A.4.5 `/execute-plan` and `/test-feature` still do not exist as commands** · process · informational
+
+Confirmed again this session: neither is defined in `.claude/commands/`, in the user's global commands
+directory, or in any installed plugin. A.3.1 already records that they are read as intent rather than
+invoked. This session honoured `/test-feature` with the closest available equivalents — the
+`superpowers` verification and TDD skills, an adversarial self-review of the diff, a live end-to-end
+API smoke, and a deliberate content-corruption test — rather than skipping the step. If a real
+`/test-feature` command is wanted, it needs writing.
+
