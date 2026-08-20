@@ -301,4 +301,84 @@ public class PropertyServiceTests
 
         Assert.Equal(60, result.CashCollected);
     }
+
+    // -------------------------------------------------------------------------
+    // CheckCollect — the read-only question GET /properties asks (T3.4)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void CheckCollect_reports_an_unowned_property_as_not_owned()
+    {
+        var service = new PropertyService();
+        var property = TestProperty();
+        var holding = Holding(Guid.NewGuid());
+
+        Assert.Equal(PropertyFailure.NotOwned, service.CheckCollect(property, holding, T0));
+    }
+
+    [Fact]
+    public void CheckCollect_reports_a_holding_that_has_not_earned_a_whole_coin()
+    {
+        var service = new PropertyService();
+        var player = TestPlayer();
+        var property = TestProperty();
+        var holding = Holding(player.Id);
+        service.Purchase(player, property, holding, T0);
+
+        // 2 cash a minute: ten seconds is a third of a coin.
+        Assert.Equal(
+            PropertyFailure.NothingToCollect,
+            service.CheckCollect(property, holding, T0.AddSeconds(10)));
+    }
+
+    [Fact]
+    public void CheckCollect_reports_no_obstacle_once_a_whole_coin_has_accrued()
+    {
+        var service = new PropertyService();
+        var player = TestPlayer();
+        var property = TestProperty();
+        var holding = Holding(player.Id);
+        service.Purchase(player, property, holding, T0);
+
+        Assert.Equal(
+            PropertyFailure.None,
+            service.CheckCollect(property, holding, T0.AddMinutes(1)));
+    }
+
+    [Fact]
+    public void CheckCollect_does_not_settle_the_holding_it_is_asked_about()
+    {
+        var service = new PropertyService();
+        var player = TestPlayer();
+        var property = TestProperty();
+        var holding = Holding(player.Id);
+        service.Purchase(player, property, holding, T0);
+
+        // Asking 600 times must cost the player nothing. If CheckCollect settled, each call would
+        // reset the clock and discard the part-earned coin — the very bug PropertyIncome exists to
+        // avoid, reintroduced at the read path that the listing calls on every poll.
+        for (int i = 1; i <= 600; i++)
+            service.CheckCollect(property, holding, T0.AddSeconds(i));
+
+        var result = service.Collect(player, property, holding, T0.AddSeconds(600));
+
+        Assert.Equal(20, result.CashCollected);
+    }
+
+    [Fact]
+    public void Collect_refuses_on_exactly_what_CheckCollect_reports()
+    {
+        var service = new PropertyService();
+        var player = TestPlayer();
+        var property = TestProperty();
+        var holding = Holding(player.Id);
+        var at = T0.AddSeconds(10);
+
+        // The whole point of extracting the check: a client told it may collect is never then
+        // refused, and a client told why is given the same token the write path would return.
+        service.Purchase(player, property, holding, T0);
+
+        Assert.Equal(service.CheckCollect(property, holding, at),
+            service.Collect(player, property, holding, at).Failure);
+    }
 }
