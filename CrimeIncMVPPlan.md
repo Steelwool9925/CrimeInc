@@ -119,6 +119,27 @@ Attack and see the stat increase on Home.
 income accrues over time up to its cap → collect → cash rises; confirm it stops accruing
 at the cap.
 
+### M3R — Job risk: stat gates & failable jobs
+
+> Added after M3 was scoped, at the user's request (2026-08-20). Slotted **after** M3 rather than
+> inside M2 because the success chance is measured against *effective* stats — base plus equipped
+> gear — so it depends on `Loadout` from T3.1, which did not exist when M2 ran. The full design,
+> already decided, is specified in **§ M3R design** below; these rows are the executable tasks.
+
+| # | Task | Band | ~tokens |
+|---|------|------|--------|
+| T3R.1 | `Job` record: `attackRequirement`/`defenseRequirement`, `baseSuccessChance`, `successChancePerSurplusPoint`, `healthLossMin/Max` + `EnsureValid` guards + `SuccessChanceFor`/`MeetsStatRequirements`. TDD the chance curve and the per-stat surplus floor. | M | 25k |
+| T3R.2 | `jobs.json`: pack-wide `risk` block (`maxSuccessChance`, `consolationCashFraction`, `consolationXpFraction`) + per-job `requirements` and `risk` blocks; balance pass across all six jobs; `content/crime/README.md` schema + balance notes. | M | 20k |
+| T3R.3 | Content loader: `JobRequirementsJson`/`JobRiskJson`/`RiskRulesJson` (nullable, so a *missing* block is a named error), `ValidateJobs` rules, `JobCatalog` exposes the pack-wide risk rules. TDD every new validation error. | M | 25k |
+| T3R.4 | Domain: `JobFailure.StatsTooLow`, a `JobOutcome` that can describe a **failed but applied** attempt, and `JobService.Attempt` — stat gate, basis-point success roll, consolation payout, clamped health loss, no mastery on failure. Heavy TDD with the scripted `FakeRandomSource`. | L | 45k |
+| T3R.5 | `JobActionService`: build the `Loadout` for the attempt, persist a failed attempt (it now mutates state), keep the xmin conflict behaviour. Then API contracts + `JobEndpoints`: `GET /jobs` reports requirements and live success chance; `POST /jobs/{id}/do` returns a failure outcome as **200, not 409**. TDD both routes. | L | 40k |
+| T3R.6 | Flutter: models + `api_client` + `app_state` for the new fields; Jobs screen shows each job's requirement and success %, and gates on `"stats"`; result panel renders a failed attempt (consolation cash/XP, health lost). Widget tests for both branches. | L | 45k |
+
+**🔎 Test Checkpoint CP3R:** A level-1 job below your stat minimum refuses with `"stats"` and
+spends nothing. Equip a weapon → the same job becomes attemptable and its displayed success %
+rises. Grind it until one attempt fails → energy still spent, ~1% cash and ~10% XP awarded,
+health may drop, mastery bar does **not** advance.
+
 ### M4 — Combat, bounty & crew
 | # | Task | Band | ~tokens |
 |---|------|------|--------|
@@ -181,6 +202,13 @@ test UI at `/swagger`. 22 sessions total.
 | ✅ S3.3 | T3.4 property endpoints (buy/collect), T3.5a Flutter Inventory + Store screens | 40k | Swagger buy/collect property; in app: Store→buy item, Inventory→equip, stats rise |
 | S3.4 | T3.5b Flutter Properties screen (buy/collect UI + accrual display) | 27k | **CP3**: in app buy a property, watch income accrue to cap, collect → cash↑ |
 
+### M3R — Job risk (3 sessions)
+| Session | Contents | ~tok | How you test it |
+|---|---|---|---|
+| S3R.1 | T3R.1 `Job` risk fields + chance curve, T3R.2 `jobs.json` balance + README, T3R.3 loader validation | 45k | `dotnet test` → chance-curve and content-validation tests green; host refuses a `jobs.json` with a missing `risk` block, naming it |
+| S3R.2 | T3R.4 `JobService` failure path, T3R.5 `JobActionService` loadout + endpoints | 50k | Swagger: a job under your stat minimum → 409 `"stats"`, nothing spent; a job you qualify for → 200 with `succeeded: true/false` and the right consolation figures |
+| S3R.3 | T3R.6 Flutter jobs UI: requirements, success %, failure result panel | 45k | **CP3R**: in app a stat-locked job is greyed with its requirement; equip a weapon → it unlocks and the % rises; a failed attempt shows the consolation payout and health lost |
+
 ### M4 — Combat, bounty & crew (6 sessions)
 | Session | Contents | ~tok | How you test it |
 |---|---|---|---|
@@ -198,7 +226,7 @@ test UI at `/swagger`. 22 sessions total.
 | S5.2 | T5.2 Flutter polish: loading/empty/error states, meter countdown timers, nav | 45k | In app: see countdown timers on meters, graceful loading/error states |
 | S5.3 | T5.3 end-to-end smoke, web + Android; fix fallout | 15k | **CP5**: full playthrough (job→level→buy/equip→property→fight) on web build **and** Android build |
 
-**Session count by milestone:** M0=2 · M1=4 · M2=3 · M3=4 · M4=6 · M5=3 = **22 sessions**.
+**Session count by milestone:** M0=2 · M1=4 · M2=3 · M3=4 · M3R=3 · M4=6 · M5=3 = **25 sessions**.
 Each is ≤50K estimated with 25K headroom; a session that runs hot stops at its test
 checkpoint regardless. Under `/gru`, each session is one decompose→implement→verify unit,
 so its ledger entry lines up 1:1 with a checkpoint you can sign off.
@@ -826,6 +854,129 @@ The property endpoints are complete and unconsumed by the client. S3.4 builds th
 the `/properties` contract that now exists: buy, collect, and an accrual display that fills toward the
 cap. `incomePerHour` and `accrualCapMinutes` are on the wire precisely so that screen can animate the
 bar forward between polls without inventing the rate. That session ends at **CP3**.
+
+S3.3 was merged to `main` on 2026-08-20 (`6748350`) with 468 .NET and 128 Flutter tests green.
+
+---
+
+## § M3R design — job risk (decided 2026-08-20, not yet built)
+
+The user asked for failable jobs: a stat-derived success chance with a minimum stat requirement per
+job. The design below was settled with them before any code was written, so **S3R.1–S3R.3 execute it
+as specified rather than re-deciding it.** Nothing here is implemented yet.
+
+### The decisions
+
+1. **Stats are effective, not base.** The gate and the odds both read `Loadout.TotalAttack` /
+   `Loadout.TotalDefense` — the player's own stat plus everything they have equipped. Equipping a
+   weapon therefore improves job success, which gives items a purpose outside M4 combat and reuses
+   the T3.1 aggregation rather than adding a second notion of "your attack".
+
+2. **The stat minimum is a gate, not a penalty.** Below it the attempt is refused and *nothing* is
+   spent, exactly like the existing level gate. New `JobFailure.StatsTooLow`, new reason token
+   `"stats"`. Precedence in both `GET /jobs` and the attempt: **level → stats → energy**, so the
+   most permanent reason is the one reported.
+
+3. **The chance curve.**
+   ```
+   surplus = max(0, effectiveAttack  - attackRequirement)
+           + max(0, effectiveDefense - defenseRequirement)
+
+   chance  = baseSuccessChance + successChancePerSurplusPoint * surplus
+   clamped to [ baseSuccessChance , min(1.0, maxSuccessChance) ]
+   ```
+   Each stat's surplus is floored at zero **independently**. Without that, a big attack overshoot
+   would paper over a defense shortfall and the defense requirement would stop meaning anything.
+
+4. **What a failure costs and yields** (the user's figures, expressed as content fractions):
+   - energy: spent **in full** — that is the risk;
+   - cash: `ceil(rolledCash × consolationCashFraction)`, with the fraction `0.01` → 1%;
+   - XP: `ceil(job.xp × consolationXpFraction)`, with the fraction `0.10` → 10%;
+   - health: rolled inclusively from `healthLossMin..healthLossMax`, then clamped to current health
+     so it floors at 0 (`Meter.SpendAt` throws on an overspend — it must not be handed a raw roll);
+   - mastery: **does not advance**.
+
+5. **Roll order is part of the contract**, because `FakeRandomSource.Sequence(...)` scripts against
+   it: (1) success roll, (2) cash roll, (3) health-loss roll — the last on the failure branch only.
+   The cash range is rolled on *both* branches, since the consolation is a fraction of what the
+   attempt would have earned.
+
+6. **Basis points, not a new RNG method.** The success roll is `NextInclusive(1, 10_000)` compared
+   against the chance converted to basis points, rather than adding `NextDouble()` to
+   `IRandomSource`. That keeps the single-method seam and leaves `FakeRandomSource`'s
+   `Sequence`/`AlwaysMin`/`AlwaysMax` modes exactly assertable.
+   ⚠️ **Known regression:** every attempt now takes ≥2 rolls, so the existing `RollCount` and
+   `LastRange` assertions in `JobServiceTests` will fail and must be updated as part of T3R.4.
+
+7. **Apply health loss *before* the XP grant.** A failed attempt still grants consolation XP, which
+   can still cross a level threshold, and a level-up refills every meter — do it in the other order
+   and the health penalty is silently undone.
+
+8. **Permissive domain defaults, strict content validation.** `Job` defaults to
+   `BaseSuccessChance = 1.0` and zero requirements, so a `Job` built in code never enters the failure
+   path by accident. The loader is the strict one: the `requirements` and `risk` JSON models are
+   **nullable** so that a *missing* block is reported as a named error rather than silently reading
+   as zeros.
+
+9. **A failed attempt is a `200`, not a `409`.** It is an outcome, not a refusal — energy was spent
+   and state changed, so the response carries the post-action player projection like any success.
+   `409` stays reserved for the three gates (`level`, `stats`, `energy`), which spend nothing.
+
+10. **One chance implementation.** `GET /jobs` reports each job's requirements *and* the caller's
+    live `successChance`, computed by the same `Job.SuccessChanceFor` the attempt rolls against. A
+    second implementation on the read path would let the displayed odds drift from the real ones.
+
+### Proposed content schema
+
+```jsonc
+"risk": {                          // pack-wide, sibling of "mastery"
+  "maxSuccessChance":        0.95, // no job is ever a certainty
+  "consolationCashFraction": 0.01, // 1% of the rolled cash, rounded up
+  "consolationXpFraction":   0.10  // 10% of the job's XP, rounded up
+},
+"jobs": [{
+  ...
+  "requirements": { "attack": 3, "defense": 2 },
+  "risk": {
+    "baseSuccessChance":            0.85,
+    "successChancePerSurplusPoint": 0.01,
+    "healthLossMin": 0,
+    "healthLossMax": 1
+  }
+}]
+```
+
+### Proposed starting balance
+
+A fresh player is attack 5 / defense 5, and a skill point is worth +1.
+
+| job | lvl | req atk | req def | base | per surplus pt | health loss |
+|---|---|---|---|---|---|---|
+| shake-down-corner-store | 1 | 3 | 2 | 0.85 | 0.010 | 0–1 |
+| boost-a-parked-car | 1 | 5 | 3 | 0.75 | 0.010 | 0–3 |
+| run-numbers-for-the-bookie | 2 | 6 | 5 | 0.72 | 0.010 | 0–4 |
+| hijack-a-delivery-truck | 3 | 9 | 7 | 0.65 | 0.008 | 2–8 |
+| torch-a-rival-warehouse | 5 | 14 | 10 | 0.60 | 0.006 | 4–14 |
+| rob-an-armored-transport | 8 | 22 | 16 | 0.55 | 0.005 | 8–25 |
+
+This is tuned so a brand-new 5/5 player clears both level-1 jobs (shake-down at 0.90, boost at 0.77)
+and is one point short of *Run Numbers* — which Brass Knuckles (level 1, 75 cash, +4 attack) closes.
+That is deliberately the CP3R demo: a locked job unlocking because you equipped something.
+
+### ⚠️ Open balance question T3R.2 must resolve
+
+The CP2 checkpoint is pinned by `JobCatalogLoaderTests` on this property: *ten runs of Shake Down a
+Corner Store — exactly one full starting energy bar — award 100 XP and 10 completions, which is both
+the level-2 threshold and the first mastery rank.* Failable jobs break it. At a 0.90 success rate ten
+runs yield roughly `9 × 10 + 1 × 1 = 91` XP and 9 completions, so the "level up in one energy bar"
+guarantee becomes a coin flip. Three ways out, to be chosen when T3R.2 runs:
+
+- pin shake-down's base chance at the pack ceiling (0.95) and accept an occasional 11th run;
+- lower the level-2 XP threshold or the mastery `completionsPerRank` so one bar still clears it; or
+- restate the CP2 property as "usually one bar, sometimes two" and relax the test to match.
+
+Whichever is chosen, the pinned test in `JobCatalogLoaderTests` must be updated in the same task —
+leaving it asserting the old certainty would make S3R.1 fail for the right reason and look like a bug.
 
 ---
 
