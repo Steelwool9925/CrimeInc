@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../api/models.dart';
 import '../state/app_state.dart';
+import 'inventory_screen.dart';
 import 'jobs_screen.dart';
 import 'skills_screen.dart';
+import 'store_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key, required this.appState});
@@ -113,6 +115,25 @@ class HomeScreen extends StatelessWidget {
             label: const Text('Jobs'),
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => JobsScreen(appState: appState)),
+            ),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            key: const Key('go-to-store'),
+            icon: const Icon(Icons.storefront_outlined),
+            label: const Text('Store'),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => StoreScreen(appState: appState)),
+            ),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            key: const Key('go-to-inventory'),
+            icon: const Icon(Icons.backpack_outlined),
+            label: const Text('Inventory'),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                  builder: (_) => InventoryScreen(appState: appState)),
             ),
           ),
           const SizedBox(height: 8),

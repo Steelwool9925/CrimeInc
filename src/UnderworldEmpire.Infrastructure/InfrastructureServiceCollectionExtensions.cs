@@ -40,6 +40,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<InventoryService>();
         services.AddScoped<InventoryActionService>();
         services.AddScoped<PropertyService>();
+        services.AddScoped<PropertyActionService>();
 
         // Server-side RNG for game outcomes. Singleton: Random.Shared is thread-safe and holds no
         // per-request state.

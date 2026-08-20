@@ -113,13 +113,9 @@ public sealed class PropertyService
 
         // ---- Validate before mutating anything ----
 
-        if (!holding.IsOwned)
-            return PropertyCollectResult.Refused(PropertyFailure.NotOwned);
-
-        // A read, not a settle: asking costs the holding nothing, so a refusal below leaves the
-        // part-earned coin exactly where it was.
-        if (holding.PendingAt(property, nowUtc) < 1)
-            return PropertyCollectResult.Refused(PropertyFailure.NothingToCollect);
+        var obstacle = CheckCollect(property, holding, nowUtc);
+        if (obstacle != PropertyFailure.None)
+            return PropertyCollectResult.Refused(obstacle);
 
         // ---- Apply ----
 
@@ -130,5 +126,41 @@ public sealed class PropertyService
             collected,
             holding.PendingAt(property, nowUtc),
             holding.CapAt(property));
+    }
+
+    /// <summary>
+    /// Asks what, if anything, stops <paramref name="holding"/> being collected right now, without
+    /// collecting it. Returns <see cref="PropertyFailure.None"/> when nothing does.
+    /// </summary>
+    /// <remarks>
+    /// The read-only twin of <see cref="Collect"/>, which refuses on exactly this answer — so the
+    /// property listing and the collect button cannot disagree, and a client told why it may not
+    /// collect gets the same token the write path would have returned. Same arrangement as
+    /// <see cref="CheckPurchase"/> and <see cref="Items.InventoryService.CheckEquip"/>.
+    /// <para>
+    /// Takes no <see cref="Player"/>: collecting your own takings has no level or cash gate. It is
+    /// the one property question that is about the holding alone.
+    /// </para>
+    /// <para>
+    /// <b>Asking must stay free.</b> This reads through <see cref="PlayerProperty.PendingAt"/> rather
+    /// than settling, so the listing — which a polling client calls repeatedly — never advances the
+    /// income clock and never discards the part-earned coin.
+    /// </para>
+    /// </remarks>
+    /// <param name="property">The property definition from content.</param>
+    /// <param name="holding">This player's holding for that property.</param>
+    /// <param name="nowUtc">The instant to evaluate at.</param>
+    public PropertyFailure CheckCollect(Property property, PlayerProperty holding, DateTimeOffset nowUtc)
+    {
+        ArgumentNullException.ThrowIfNull(property);
+        ArgumentNullException.ThrowIfNull(holding);
+
+        if (!holding.IsOwned)
+            return PropertyFailure.NotOwned;
+
+        if (holding.PendingAt(property, nowUtc) < 1)
+            return PropertyFailure.NothingToCollect;
+
+        return PropertyFailure.None;
     }
 }

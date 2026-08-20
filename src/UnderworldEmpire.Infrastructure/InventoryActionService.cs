@@ -287,7 +287,7 @@ public class InventoryActionService
             // The xmin token fired: another request updated this player between our read and write.
             return false;
         }
-        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        catch (DbUpdateException ex) when (WriteConflicts.IsUniqueViolation(ex))
         {
             // Two concurrent first purchases of the same item each try to INSERT the same
             // (PlayerId, ItemId) row. The loser hits the composite primary key, not the concurrency
@@ -298,14 +298,4 @@ public class InventoryActionService
         }
     }
 
-    /// <summary>
-    /// Whether <paramref name="ex"/> wraps a PostgreSQL unique-constraint violation (SQLSTATE 23505).
-    /// </summary>
-    /// <remarks>
-    /// Narrowed to the specific SQLSTATE rather than catching <see cref="DbUpdateException"/> wholesale,
-    /// which would swallow genuine faults — a broken foreign key or a not-null violation would be silently
-    /// reported to the player as "try again" and never surface in logs as a bug.
-    /// </remarks>
-    private static bool IsUniqueViolation(DbUpdateException ex) =>
-        ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };
 }

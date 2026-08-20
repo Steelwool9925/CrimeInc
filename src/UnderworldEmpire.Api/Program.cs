@@ -82,6 +82,7 @@ app.MapMeEndpoints();
 app.MapJobEndpoints();
 app.MapSkillEndpoints();
 app.MapItemEndpoints();
+app.MapPropertyEndpoints();
 
 app.Run();
 

@@ -173,4 +173,54 @@ void main() {
       expect(api.sessionCalls.length, greaterThan(1));
     });
   });
+
+  group('HomeScreen — navigation', () {
+    testWidgets('offers a way into the Store and the Inventory', (tester) async {
+      final state = AppState(
+          apiClient: FakeApiClient(), tokenStore: InMemoryTokenStore());
+      await state.bootstrap();
+
+      await tester.pumpWidget(_wrap(state));
+      await tester.pumpAndSettle();
+
+      // Without these the two screens exist but are unreachable, which is the same as not shipping
+      // them: CP3 is a sequence a player performs, not a set of routes.
+      expect(find.byKey(const Key('go-to-store')), findsOneWidget);
+      expect(find.byKey(const Key('go-to-inventory')), findsOneWidget);
+    });
+
+    testWidgets('the Store button opens the Store', (tester) async {
+      final api = FakeApiClient();
+      final state = AppState(apiClient: api, tokenStore: InMemoryTokenStore());
+      await state.bootstrap();
+
+      await tester.pumpWidget(_wrap(state));
+      await tester.pumpAndSettle();
+
+      // Home scrolls: with four destinations the later buttons sit below the fold on a small
+      // viewport, so reaching them is a scroll the player makes too.
+      await tester.ensureVisible(find.byKey(const Key('go-to-store')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('go-to-store')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('store-card-brass-knuckles')), findsOneWidget);
+    });
+
+    testWidgets('the Inventory button opens the Inventory', (tester) async {
+      final api = FakeApiClient();
+      final state = AppState(apiClient: api, tokenStore: InMemoryTokenStore());
+      await state.bootstrap();
+
+      await tester.pumpWidget(_wrap(state));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.byKey(const Key('go-to-inventory')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('go-to-inventory')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('inv-card-brass-knuckles')), findsOneWidget);
+    });
+  });
 }

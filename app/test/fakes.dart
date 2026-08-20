@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:underworld_empire/api/api_client.dart';
 import 'package:underworld_empire/api/models.dart';
 import 'package:underworld_empire/storage/token_store.dart';
@@ -85,6 +87,111 @@ const kFakeMe = Me(
   defense: 10,
 );
 
+/// The player the buy endpoint returns: the starting 100 less the knuckles' 75.
+///
+/// Deliberately a different cash figure from [kFakeMe], so a test that reads cash after a purchase
+/// can only pass if the client took the server's post-action player rather than keeping the one it
+/// already had.
+const kBoughtMe = Me(
+  playerId: 'player-guid-123',
+  energy: MeterState(
+    current: 7,
+    max: 10,
+    regenSecondsPerPoint: 300,
+    secondsUntilNextPoint: 42,
+  ),
+  stamina: MeterState(
+    current: 5,
+    max: 10,
+    regenSecondsPerPoint: 300,
+    secondsUntilNextPoint: 120,
+  ),
+  health: MeterState(
+    current: 10,
+    max: 10,
+    regenSecondsPerPoint: 300,
+  ),
+  cash: 25,
+  premiumCurrency: 0,
+  level: 1,
+  xp: 0,
+  skillPoints: 0,
+  attack: 10,
+  defense: 10,
+);
+
+/// A loadout with nothing equipped: the player's own 10/10, matching [kFakeMe].
+const kBareLoadout = LoadoutStats(
+  baseAttack: 10,
+  itemAttack: 0,
+  totalAttack: 10,
+  baseDefense: 10,
+  itemDefense: 0,
+  totalDefense: 10,
+);
+
+/// The same player wearing the knuckles: +4 attack.
+const kArmedLoadout = LoadoutStats(
+  baseAttack: 10,
+  itemAttack: 4,
+  totalAttack: 14,
+  baseDefense: 10,
+  itemDefense: 0,
+  totalDefense: 10,
+);
+
+/// Level 1, 75 cash, +4 attack — affordable from the starting 100, and owned in these fixtures.
+const kOwnedWeapon = InventoryItem(
+  id: 'brass-knuckles',
+  name: 'Brass Knuckles',
+  description: 'Cheap, quiet and entirely deniable.',
+  slot: 'weapon',
+  levelRequirement: 1,
+  price: 75,
+  attack: 4,
+  defense: 0,
+  quantity: 1,
+  equipped: false,
+  canBuy: true,
+  canEquip: true,
+);
+
+/// Level 1, 120 cash — owned but not worn, and above the fixture player's cash.
+const kUnaffordableArmor = InventoryItem(
+  id: 'leather-jacket',
+  name: 'Leather Jacket',
+  description: 'Scuffed in places that suggest experience.',
+  slot: 'armor',
+  levelRequirement: 1,
+  price: 120,
+  attack: 0,
+  defense: 5,
+  quantity: 0,
+  equipped: false,
+  canBuy: false,
+  buyUnavailableReason: 'cash',
+  canEquip: false,
+  equipUnavailableReason: 'notOwned',
+);
+
+/// Level 2 — locked behind a level the fixture player has not reached.
+const kLockedWeapon = InventoryItem(
+  id: 'switchblade',
+  name: 'Switchblade',
+  description: 'Fits a pocket; ends an argument.',
+  slot: 'weapon',
+  levelRequirement: 2,
+  price: 180,
+  attack: 7,
+  defense: 0,
+  quantity: 0,
+  equipped: false,
+  canBuy: false,
+  buyUnavailableReason: 'level',
+  canEquip: false,
+  equipUnavailableReason: 'level',
+);
+
 class FakeApiClient implements ApiClient {
   FakeApiClient({
     SessionResult? sessionResult,
@@ -97,9 +204,43 @@ class FakeApiClient implements ApiClient {
     bool throwOnMe = false,
     bool throwOnContentPack = false,
     bool throwOnJobs = false,
+    InventoryList? inventoryResult,
+    BuyItemResult? buyResult,
+    EquipItemResult? equipResult,
+    EquipItemResult? unequipResult,
+    bool throwOnInventory = false,
     this.refuseDoJobWith,
     this.refuseAllocateWith,
-  })  : _sessionResult = sessionResult ??
+    this.refuseItemActionWith,
+  })  : _inventoryResult = inventoryResult ??
+            const InventoryList(
+              items: [kOwnedWeapon, kUnaffordableArmor, kLockedWeapon],
+              loadout: kBareLoadout,
+              cash: 100,
+              level: 1,
+            ),
+        _buyResult = buyResult ??
+            const BuyItemResult(
+              itemId: 'brass-knuckles',
+              cashSpent: 75,
+              quantityOwned: 1,
+              player: kBoughtMe,
+              loadout: kBareLoadout,
+            ),
+        _equipResult = equipResult ??
+            const EquipItemResult(
+              equippedItemId: 'brass-knuckles',
+              player: kFakeMe,
+              loadout: kArmedLoadout,
+            ),
+        _unequipResult = unequipResult ??
+            const EquipItemResult(
+              unequippedItemId: 'brass-knuckles',
+              player: kFakeMe,
+              loadout: kBareLoadout,
+            ),
+        _throwOnInventory = throwOnInventory,
+        _sessionResult = sessionResult ??
             const SessionResult(
               deviceToken: 'fake-token-abc',
               playerId: 'player-guid-123',
@@ -152,18 +293,39 @@ class FakeApiClient implements ApiClient {
   final bool _throwOnContentPack;
   final bool _throwOnJobs;
 
+  /// The catalog the next GET /inventory returns.
+  ///
+  /// Not final: a fake that served the same catalog however many items were bought or worn would be
+  /// modelling a server that ignores writes, and every test about "the client re-reads after acting"
+  /// would pass against a client that re-read and got nothing new. Each action below advances this
+  /// the way the real endpoints would.
+  InventoryList _inventoryResult;
+
+  final BuyItemResult _buyResult;
+  final EquipItemResult _equipResult;
+  final EquipItemResult _unequipResult;
+  final bool _throwOnInventory;
+
   /// When set, doJob throws a [JobRefusedException] with this reason.
   final String? refuseDoJobWith;
 
   /// When set, allocateSkill throws a [JobRefusedException] with this reason.
   final String? refuseAllocateWith;
 
+  /// When set, every item action (buy, equip, unequip) throws a [JobRefusedException] with this
+  /// reason — the shape a 409 from the item endpoints takes.
+  final String? refuseItemActionWith;
+
   final List<String?> sessionCalls = [];
   int meCalls = 0;
   int contentPackCalls = 0;
   int jobsCalls = 0;
+  int inventoryCalls = 0;
   final List<String> doJobCalls = [];
   final List<String> allocateCalls = [];
+  final List<String> buyCalls = [];
+  final List<String> equipCalls = [];
+  final List<String> unequipCalls = [];
 
   @override
   Future<SessionResult> session(String? deviceToken) async {
@@ -209,6 +371,125 @@ class FakeApiClient implements ApiClient {
       throw JobRefusedException(refuseAllocateWith!, 'refused: $refuseAllocateWith');
     }
     return _allocateResult ?? _meResult;
+  }
+
+  /// When set, every GET /inventory waits on this before returning.
+  ///
+  /// Lets a test hold the post-action re-read open and observe what the client permits while the
+  /// catalog on screen still predates the action.
+  Completer<void>? inventoryGate;
+
+  @override
+  Future<InventoryList> inventory(String deviceToken) async {
+    inventoryCalls++;
+    if (_throwOnInventory) throw const ApiException(500, 'inventory error');
+    if (inventoryGate != null) await inventoryGate!.future;
+    return _inventoryResult;
+  }
+
+  @override
+  Future<BuyItemResult> buyItem(String deviceToken, String itemId) async {
+    buyCalls.add(itemId);
+    _refuseItemActionIfAsked();
+
+    _advanceCatalog(
+      itemId,
+      loadout: _buyResult.loadout,
+      cash: _buyResult.player.cash,
+      quantity: _buyResult.quantityOwned,
+    );
+
+    return _buyResult;
+  }
+
+  @override
+  Future<EquipItemResult> equipItem(String deviceToken, String itemId) async {
+    equipCalls.add(itemId);
+    _refuseItemActionIfAsked();
+
+    _advanceCatalog(itemId, loadout: _equipResult.loadout, equipped: true);
+
+    return _equipResult;
+  }
+
+  @override
+  Future<EquipItemResult> unequipItem(String deviceToken, String itemId) async {
+    unequipCalls.add(itemId);
+    _refuseItemActionIfAsked();
+
+    _advanceCatalog(itemId, loadout: _unequipResult.loadout, equipped: false);
+
+    return _unequipResult;
+  }
+
+  void _refuseItemActionIfAsked() {
+    if (refuseItemActionWith != null) {
+      throw JobRefusedException(
+          refuseItemActionWith!, 'refused: $refuseItemActionWith');
+    }
+  }
+
+  /// Moves the stored catalog on the way the server would after an action on [itemId].
+  ///
+  /// Only the fields an action can change are touched; everything else is carried across, because a
+  /// fake that quietly reset unrelated fields would hide a client that had lost them.
+  void _advanceCatalog(
+    String itemId, {
+    required LoadoutStats loadout,
+    int? cash,
+    int? quantity,
+    bool? equipped,
+  }) {
+    _inventoryResult = InventoryList(
+      items: _inventoryResult.items.map((i) {
+        if (i.id != itemId) {
+          // Equipping one item takes off whatever shared its slot — the same swap the server does.
+          final displaced = equipped == true && i.slot == _slotOf(itemId) && i.equipped;
+          return displaced ? _withState(i, equipped: false) : i;
+        }
+        return _withState(i, quantity: quantity, equipped: equipped);
+      }).toList(growable: false),
+      loadout: loadout,
+      cash: cash ?? _inventoryResult.cash,
+      level: _inventoryResult.level,
+    );
+  }
+
+  String? _slotOf(String itemId) => _inventoryResult.items
+      .where((i) => i.id == itemId)
+      .map((i) => i.slot)
+      .firstOrNull;
+
+  static InventoryItem _withState(
+    InventoryItem i, {
+    int? quantity,
+    bool? equipped,
+  }) {
+    final newQuantity = quantity ?? i.quantity;
+    final newEquipped = equipped ?? i.equipped;
+
+    return InventoryItem(
+      id: i.id,
+      name: i.name,
+      description: i.description,
+      slot: i.slot,
+      levelRequirement: i.levelRequirement,
+      price: i.price,
+      attack: i.attack,
+      defense: i.defense,
+      quantity: newQuantity,
+      equipped: newEquipped,
+      canBuy: i.canBuy,
+      buyUnavailableReason: i.buyUnavailableReason,
+      // The server recomputes these against the new holding; the fake follows the same two rules
+      // the real gating uses, so a screen driven by it sees the states it will see in production.
+      canEquip: newQuantity > 0 && !newEquipped && i.equipUnavailableReason != 'level',
+      equipUnavailableReason: newQuantity == 0
+          ? 'notOwned'
+          : newEquipped
+              ? 'alreadyEquipped'
+              : (i.equipUnavailableReason == 'level' ? 'level' : null),
+    );
   }
 }
 

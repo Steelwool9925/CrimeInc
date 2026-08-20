@@ -284,6 +284,188 @@ class JobResult {
       );
 }
 
+/// A player's effective combat stats, split into what they own and what their gear adds.
+///
+/// Both halves come from the server on every read; nothing here is computed locally. Showing the
+/// split rather than only the total is what lets the Inventory screen say "Attack 14 (10 + 4)" — so
+/// a player can see what comes off the moment they unequip.
+@immutable
+class LoadoutStats {
+  const LoadoutStats({
+    required this.baseAttack,
+    required this.itemAttack,
+    required this.totalAttack,
+    required this.baseDefense,
+    required this.itemDefense,
+    required this.totalDefense,
+  });
+
+  final int baseAttack;
+  final int itemAttack;
+  final int totalAttack;
+  final int baseDefense;
+  final int itemDefense;
+  final int totalDefense;
+
+  factory LoadoutStats.fromJson(Map<String, dynamic> json) => LoadoutStats(
+        baseAttack: json['baseAttack'] as int,
+        itemAttack: json['itemAttack'] as int,
+        totalAttack: json['totalAttack'] as int,
+        baseDefense: json['baseDefense'] as int,
+        itemDefense: json['itemDefense'] as int,
+        totalDefense: json['totalDefense'] as int,
+      );
+}
+
+/// One catalog item as offered to this player: the content definition, their holding, and whether
+/// they may buy or wear it right now.
+///
+/// [canBuy] / [canEquip] and their reason tokens are the server's decisions, never re-derived here.
+/// The Store and the Inventory render the same rows from different angles.
+@immutable
+class InventoryItem {
+  const InventoryItem({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.slot,
+    required this.levelRequirement,
+    required this.price,
+    required this.attack,
+    required this.defense,
+    required this.quantity,
+    required this.equipped,
+    required this.canBuy,
+    required this.canEquip,
+    this.buyUnavailableReason,
+    this.equipUnavailableReason,
+  });
+
+  final String id;
+  final String name;
+  final String description;
+
+  /// 'weapon', 'armor' or 'vehicle' — the vocabulary items.json uses.
+  final String slot;
+
+  final int levelRequirement;
+  final int price;
+  final int attack;
+  final int defense;
+
+  /// Copies owned; zero when the player owns none.
+  final int quantity;
+
+  final bool equipped;
+  final bool canBuy;
+  final bool canEquip;
+
+  /// Stable token from the server: 'level' or 'cash'. Null when [canBuy] is true.
+  final String? buyUnavailableReason;
+
+  /// Stable token from the server: 'notOwned', 'level' or 'alreadyEquipped'. Null when [canEquip]
+  /// is true.
+  final String? equipUnavailableReason;
+
+  /// Whether the player holds at least one copy — what puts a row on the Inventory screen.
+  bool get isOwned => quantity > 0;
+
+  factory InventoryItem.fromJson(Map<String, dynamic> json) => InventoryItem(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        description: json['description'] as String? ?? '',
+        slot: json['slot'] as String? ?? '',
+        levelRequirement: json['levelRequirement'] as int,
+        price: json['price'] as int,
+        attack: json['attack'] as int,
+        defense: json['defense'] as int,
+        quantity: json['quantity'] as int,
+        equipped: json['equipped'] as bool,
+        canBuy: json['canBuy'] as bool,
+        canEquip: json['canEquip'] as bool,
+        buyUnavailableReason: json['buyUnavailableReason'] as String?,
+        equipUnavailableReason: json['equipUnavailableReason'] as String?,
+      );
+}
+
+/// Response to GET /inventory: the whole catalog plus the effective stats it produces.
+@immutable
+class InventoryList {
+  const InventoryList({
+    required this.items,
+    required this.loadout,
+    required this.cash,
+    required this.level,
+  });
+
+  final List<InventoryItem> items;
+  final LoadoutStats loadout;
+  final int cash;
+  final int level;
+
+  factory InventoryList.fromJson(Map<String, dynamic> json) => InventoryList(
+        items: (json['items'] as List<dynamic>)
+            .map((i) => InventoryItem.fromJson(i as Map<String, dynamic>))
+            .toList(growable: false),
+        loadout: LoadoutStats.fromJson(json['loadout'] as Map<String, dynamic>),
+        cash: json['cash'] as int,
+        level: json['level'] as int,
+      );
+}
+
+/// Response to a buy call. Carries the full post-action player, so no follow-up /me is needed.
+@immutable
+class BuyItemResult {
+  const BuyItemResult({
+    required this.itemId,
+    required this.cashSpent,
+    required this.quantityOwned,
+    required this.player,
+    required this.loadout,
+  });
+
+  final String itemId;
+  final int cashSpent;
+  final int quantityOwned;
+  final Me player;
+  final LoadoutStats loadout;
+
+  factory BuyItemResult.fromJson(Map<String, dynamic> json) => BuyItemResult(
+        itemId: json['itemId'] as String,
+        cashSpent: json['cashSpent'] as int,
+        quantityOwned: json['quantityOwned'] as int,
+        player: Me.fromJson(json['player'] as Map<String, dynamic>),
+        loadout: LoadoutStats.fromJson(json['loadout'] as Map<String, dynamic>),
+      );
+}
+
+/// Response to an equip or unequip call — the two differ only in which side of the swap is filled.
+@immutable
+class EquipItemResult {
+  const EquipItemResult({
+    required this.player,
+    required this.loadout,
+    this.equippedItemId,
+    this.unequippedItemId,
+  });
+
+  /// The item now worn, or null after an unequip.
+  final String? equippedItemId;
+
+  /// The item taken off — the displaced incumbent on an equip, or the target on an unequip.
+  final String? unequippedItemId;
+
+  final Me player;
+  final LoadoutStats loadout;
+
+  factory EquipItemResult.fromJson(Map<String, dynamic> json) => EquipItemResult(
+        equippedItemId: json['equippedItemId'] as String?,
+        unequippedItemId: json['unequippedItemId'] as String?,
+        player: Me.fromJson(json['player'] as Map<String, dynamic>),
+        loadout: LoadoutStats.fromJson(json['loadout'] as Map<String, dynamic>),
+      );
+}
+
 /// Response to a do-job call. Carries the full post-action player state, so the client never needs
 /// a follow-up /me after doing a job.
 @immutable
