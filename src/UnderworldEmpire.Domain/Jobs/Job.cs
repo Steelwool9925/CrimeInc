@@ -40,6 +40,92 @@ public sealed record Job
     public required long Xp { get; init; }
 
     /// <summary>
+    /// Minimum <b>effective</b> attack required to attempt this job — the player's own stat plus
+    /// everything they have equipped. Zero means ungated.
+    /// </summary>
+    /// <remarks>
+    /// Effective rather than base so equipping a weapon opens jobs up, which gives items a purpose
+    /// before M4 combat exists and reuses the T3.1 <c>Loadout</c> aggregation rather than inventing a
+    /// second notion of "your attack".
+    /// </remarks>
+    public int AttackRequirement { get; init; }
+
+    /// <summary>Minimum effective defense required to attempt this job. Zero means ungated.</summary>
+    public int DefenseRequirement { get; init; }
+
+    /// <summary>
+    /// The success chance for a player exactly at this job's stat requirements, in <c>[0, 1]</c>.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <c>1.0</c>: a <see cref="Job"/> built in code — by a test, or a future generator —
+    /// must never wander into the failure path because a field was left unset. Content is where the
+    /// strictness lives; the loader treats a missing <c>risk</c> block as a named error rather than
+    /// letting it read as zeros.
+    /// </remarks>
+    public double BaseSuccessChance { get; init; } = 1.0;
+
+    /// <summary>How much one point of surplus stat adds to the success chance.</summary>
+    public double SuccessChancePerSurplusPoint { get; init; }
+
+    /// <summary>Lowest health lost on a failed attempt, inclusive.</summary>
+    public int HealthLossMin { get; init; }
+
+    /// <summary>Highest health lost on a failed attempt, inclusive.</summary>
+    public int HealthLossMax { get; init; }
+
+    /// <summary>
+    /// Whether <paramref name="effectiveAttack"/> and <paramref name="effectiveDefense"/> clear this
+    /// job's stat minimums.
+    /// </summary>
+    /// <remarks>
+    /// A gate, not a penalty: below it the attempt is refused and nothing is spent, exactly like the
+    /// level gate. The comparison is <c>&gt;=</c>, so content saying "attack 5" admits a player with
+    /// attack 5.
+    /// </remarks>
+    public bool MeetsStatRequirements(int effectiveAttack, int effectiveDefense) =>
+        effectiveAttack >= AttackRequirement && effectiveDefense >= DefenseRequirement;
+
+    /// <summary>
+    /// This job's success chance for a player with the given effective stats, under the pack-wide
+    /// ceiling <paramref name="maxSuccessChance"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>chance = base + perPoint × surplus</c>, clamped to
+    /// <c>[base, min(1, maxSuccessChance)]</c>. Each stat's surplus floors at zero
+    /// <b>independently</b> — summed algebraically, a large attack overshoot would cancel a defense
+    /// shortfall and the defense requirement would stop meaning anything.
+    /// </para>
+    /// <para>
+    /// One implementation serves both the read path and the roll: <c>GET /jobs</c> reports the figure
+    /// this returns and the attempt rolls against it, so the odds a player is shown cannot drift from
+    /// the odds they get.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     Thrown when <paramref name="maxSuccessChance"/> is below this job's
+    ///     <see cref="BaseSuccessChance"/>. The loader rejects that pack-wide, so reaching it means a
+    ///     hand-built job disagrees with the rules it was handed — louder is better than silently
+    ///     picking one of the two.
+    /// </exception>
+    public double SuccessChanceFor(int effectiveAttack, int effectiveDefense, double maxSuccessChance)
+    {
+        double ceiling = Math.Min(1.0, maxSuccessChance);
+
+        if (ceiling < BaseSuccessChance)
+            throw new ArgumentOutOfRangeException(nameof(maxSuccessChance), maxSuccessChance,
+                $"Job '{Id}' has a base success chance of {BaseSuccessChance}, above the ceiling of " +
+                $"{ceiling} it was evaluated against.");
+
+        int surplus = Math.Max(0, effectiveAttack - AttackRequirement)
+                    + Math.Max(0, effectiveDefense - DefenseRequirement);
+
+        double chance = BaseSuccessChance + SuccessChancePerSurplusPoint * surplus;
+
+        return Math.Clamp(chance, BaseSuccessChance, ceiling);
+    }
+
+    /// <summary>
     /// Validates the invariants the engine relies on. Called by the content loader after its own
     /// error-collecting pass, and directly by tests that build a <see cref="Job"/> by hand.
     /// </summary>
@@ -66,5 +152,25 @@ public sealed record Job
         if (Xp < 0)
             throw new ArgumentOutOfRangeException(nameof(Xp), Xp,
                 $"Job '{Id}' cannot grant negative XP.");
+        if (AttackRequirement < 0)
+            throw new ArgumentOutOfRangeException(nameof(AttackRequirement), AttackRequirement,
+                $"Job '{Id}' cannot require negative attack.");
+        if (DefenseRequirement < 0)
+            throw new ArgumentOutOfRangeException(nameof(DefenseRequirement), DefenseRequirement,
+                $"Job '{Id}' cannot require negative defense.");
+        if (BaseSuccessChance is < 0.0 or > 1.0)
+            throw new ArgumentOutOfRangeException(nameof(BaseSuccessChance), BaseSuccessChance,
+                $"Job '{Id}' must have a base success chance between 0 and 1.");
+        if (SuccessChancePerSurplusPoint < 0.0)
+            // A negative gain would make gear actively harmful, which no content should be able to say.
+            throw new ArgumentOutOfRangeException(nameof(SuccessChancePerSurplusPoint),
+                SuccessChancePerSurplusPoint,
+                $"Job '{Id}' cannot lose success chance per surplus point.");
+        if (HealthLossMin < 0)
+            throw new ArgumentOutOfRangeException(nameof(HealthLossMin), HealthLossMin,
+                $"Job '{Id}' cannot cost negative health.");
+        if (HealthLossMax < HealthLossMin)
+            throw new ArgumentOutOfRangeException(nameof(HealthLossMax), HealthLossMax,
+                $"Job '{Id}' has healthLossMax below healthLossMin ({HealthLossMin}).");
     }
 }
