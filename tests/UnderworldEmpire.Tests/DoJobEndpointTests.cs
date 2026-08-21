@@ -13,6 +13,7 @@ namespace UnderworldEmpire.Tests;
 public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly HttpClient _client;
+    private readonly CustomWebApplicationFactory _factory;
 
     /// <summary>The 1-energy, level-1 job from the crime pack. 10 XP, 15..30 cash.</summary>
     private const string CheapJob = "shake-down-corner-store";
@@ -23,6 +24,7 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
     public DoJobEndpointTests(CustomWebApplicationFactory factory)
     {
         factory.MigrateDb();
+        _factory = factory;
         _client = factory.CreateClient();
     }
 
@@ -238,18 +240,34 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Ten_runs_of_the_cheap_job_level_the_player_and_refill_meters()
     {
         // The load-bearing CP2 tuning: one full starting energy bar of the cheapest job is exactly
-        // the level-2 threshold and exactly one mastery rank.
+        // the level-2 threshold, and crosses a mastery rank along the way.
+        //
+        // M3R moved the rank. `completionsPerRank` dropped 10 -> 8 so that the first rank stays
+        // reachable in one sitting once attempts can fail, so the rank-up now lands on the eighth
+        // run rather than the tenth. Both instants are checked: the eighth for the rank, the tenth
+        // for the level.
         var token = await NewGuestTokenAsync();
 
+        JsonDocument? eighth = null;
         JsonDocument? tenth = null;
-        for (int i = 0; i < 10; i++)
+        for (int i = 1; i <= 10; i++)
         {
-            tenth?.Dispose();
-            tenth = await BodyAsync(await DoJobAsync(token, CheapJob));
+            var body = await BodyAsync(await DoJobAsync(token, CheapJob));
+            if (i == 8) eighth = body;
+            else if (i == 10) tenth = body;
+            else body.Dispose();
         }
 
+        using var rankDoc = eighth!;
         using var doc = tenth!;
         var root = doc.RootElement;
+
+        // The eighth completion is the first mastery rank.
+        var rankMastery = rankDoc.RootElement.GetProperty("result").GetProperty("mastery");
+        Assert.Equal(8, rankMastery.GetProperty("completions").GetInt32());
+        Assert.Equal(1, rankMastery.GetProperty("rank").GetInt32());
+        Assert.True(rankDoc.RootElement.GetProperty("result")
+            .GetProperty("masteryRankedUp").GetBoolean());
 
         var levelUp = root.GetProperty("levelUp");
         Assert.Equal(JsonValueKind.Object, levelUp.ValueKind);
@@ -265,11 +283,11 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Equal(LevelCurve.XpToReach(2), player.GetProperty("xp").GetInt64());
         Assert.Equal(PlayerDefaults.SkillPointsPerLevel, player.GetProperty("skillPoints").GetInt32());
 
-        // And the tenth completion is exactly the first mastery rank.
+        // And the tenth run is two completions past that rank, not a second rank-up.
         var mastery = root.GetProperty("result").GetProperty("mastery");
         Assert.Equal(10, mastery.GetProperty("completions").GetInt32());
         Assert.Equal(1, mastery.GetProperty("rank").GetInt32());
-        Assert.True(root.GetProperty("result").GetProperty("masteryRankedUp").GetBoolean());
+        Assert.False(root.GetProperty("result").GetProperty("masteryRankedUp").GetBoolean());
     }
 
     [Fact]
@@ -413,5 +431,123 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
         using var me = await GetMeAsync(token);
         Assert.Equal(PlayerDefaults.BaseAttack + PlayerDefaults.StatIncreasePerSkillPoint,
             me.RootElement.GetProperty("attack").GetInt32());
+    }
+
+    // -------------------------------------------------------------------------
+    // Risk: the stat gate and a failed attempt (T3R.5)
+    // -------------------------------------------------------------------------
+
+    /// <summary>A losing success roll, then the cash roll, then the health-loss roll.</summary>
+    private IDisposable ScriptedFailure() => _factory.Random.Scripted(10_000, 30, 1);
+
+    [Fact]
+    public async Task A_job_above_the_players_stats_is_refused_with_the_stats_reason()
+    {
+        // Run Numbers needs 6 attack against a fresh player's 5. Level 2 first, so the level gate is
+        // not the reason reported.
+        var token = await NewGuestTokenAsync();
+        for (int i = 0; i < 10; i++)
+            await DoJobAsync(token, CheapJob);
+
+        var response = await DoJobAsync(token, "run-numbers-for-the-bookie");
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        using var body = await BodyAsync(response);
+        Assert.Equal("stats", body.RootElement.GetProperty("reason").GetString());
+    }
+
+    [Fact]
+    public async Task The_stat_gate_spends_nothing()
+    {
+        var token = await NewGuestTokenAsync();
+        for (int i = 0; i < 10; i++)
+            await DoJobAsync(token, CheapJob);
+
+        using var before = await GetMeAsync(token);
+        long cashBefore = before.RootElement.GetProperty("cash").GetInt64();
+        int energyBefore = before.RootElement.GetProperty("energy").GetProperty("current").GetInt32();
+
+        await DoJobAsync(token, "run-numbers-for-the-bookie");
+
+        using var after = await GetMeAsync(token);
+        Assert.Equal(cashBefore, after.RootElement.GetProperty("cash").GetInt64());
+        Assert.Equal(energyBefore, after.RootElement.GetProperty("energy").GetProperty("current").GetInt32());
+    }
+
+    [Fact]
+    public async Task A_failed_attempt_is_a_200_not_a_409()
+    {
+        // The contract this task exists for. A failure is an outcome, not a refusal: energy was
+        // spent and state changed, so it owes a result body rather than a problem response.
+        var token = await NewGuestTokenAsync();
+
+        using (ScriptedFailure())
+        {
+            var response = await DoJobAsync(token, CheapJob);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var body = await BodyAsync(response);
+            Assert.False(body.RootElement.GetProperty("result").GetProperty("succeeded").GetBoolean());
+        }
+    }
+
+    [Fact]
+    public async Task A_failed_attempt_reports_its_consolation_and_health_loss()
+    {
+        var token = await NewGuestTokenAsync();
+
+        using (ScriptedFailure())
+        {
+            using var body = await BodyAsync(await DoJobAsync(token, CheapJob));
+            var result = body.RootElement.GetProperty("result");
+
+            // 1% of the rolled 30 and 10% of the job's 10 XP, both rounded up.
+            Assert.Equal(1, result.GetProperty("cashEarned").GetInt64());
+            Assert.Equal(1, result.GetProperty("xpEarned").GetInt64());
+            Assert.Equal(1, result.GetProperty("healthLost").GetInt32());
+            Assert.Equal(1, result.GetProperty("energySpent").GetInt32());
+        }
+    }
+
+    [Fact]
+    public async Task A_failed_attempt_does_not_advance_the_mastery_bar()
+    {
+        var token = await NewGuestTokenAsync();
+
+        using (ScriptedFailure())
+        {
+            using var body = await BodyAsync(await DoJobAsync(token, CheapJob));
+            var result = body.RootElement.GetProperty("result");
+
+            Assert.Equal(0, result.GetProperty("mastery").GetProperty("completions").GetInt32());
+            Assert.False(result.GetProperty("masteryRankedUp").GetBoolean());
+        }
+    }
+
+    [Fact]
+    public async Task A_failed_attempt_still_spends_the_energy()
+    {
+        var token = await NewGuestTokenAsync();
+
+        using (ScriptedFailure())
+        {
+            using var body = await BodyAsync(await DoJobAsync(token, CheapJob));
+
+            Assert.Equal(PlayerDefaults.EnergyMax - 1,
+                body.RootElement.GetProperty("player")
+                    .GetProperty("energy").GetProperty("current").GetInt32());
+        }
+    }
+
+    [Fact]
+    public async Task A_successful_attempt_reports_succeeded_and_no_health_loss()
+    {
+        var token = await NewGuestTokenAsync();
+
+        using var body = await BodyAsync(await DoJobAsync(token, CheapJob));
+        var result = body.RootElement.GetProperty("result");
+
+        Assert.True(result.GetProperty("succeeded").GetBoolean());
+        Assert.Equal(0, result.GetProperty("healthLost").GetInt32());
     }
 }

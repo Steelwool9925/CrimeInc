@@ -172,9 +172,17 @@ class _JobCard extends StatelessWidget {
   /// the phrasing lives here.
   String get _lockLabel => switch (job.unavailableReason) {
         'level' => 'Requires level ${job.levelRequirement}',
+        'stats' =>
+          'Needs ${job.attackRequirement} attack / ${job.defenseRequirement} defense',
         'energy' => 'Needs ${job.energyCost} energy',
         _ => 'Unavailable',
       };
+
+  /// The success chance as a whole percentage.
+  ///
+  /// Rounded for display only. The server sends the exact figure it will roll against, so this is
+  /// the one place the number is approximated and it never feeds a decision.
+  String get _chanceLabel => '${(job.successChance * 100).round()}%';
 
   @override
   Widget build(BuildContext context) {
@@ -204,6 +212,13 @@ class _JobCard extends StatelessWidget {
             Text(
               '$cashLabel ${job.cashMin}–${job.cashMax}  ·  ${job.xp} XP',
               style: theme.textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '$_chanceLabel success  ·  needs ${job.attackRequirement} attack / '
+              '${job.defenseRequirement} defense',
+              key: Key('job-odds-${job.id}'),
+              style: theme.textTheme.bodySmall,
             ),
             if (job.mastery.maxRank > 0) ...[
               const SizedBox(height: 8),

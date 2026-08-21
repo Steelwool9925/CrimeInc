@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using UnderworldEmpire.Domain;
+using UnderworldEmpire.Domain.Items;
 using UnderworldEmpire.Domain.Jobs;
 using UnderworldEmpire.Domain.Progression;
 using UnderworldEmpire.Infrastructure.Content;
@@ -29,12 +30,18 @@ public enum JobActionError
 /// <summary>The full result of a do-job request: a transport-level error, a domain refusal, or an outcome.</summary>
 /// <param name="Error">Transport/lookup level problem, or <see cref="JobActionError.None"/>.</param>
 /// <param name="Failure">Domain refusal reason, or <see cref="JobFailure.None"/>.</param>
-/// <param name="Outcome">The outcome when everything succeeded.</param>
+/// <param name="Outcome">
+///     What the attempt produced, when it was applied. Present for a failed attempt too — ask
+///     <see cref="JobOutcome.Succeeded"/> whether the job itself came off.
+/// </param>
 /// <param name="Player">
 ///     The player after the action was applied, so the endpoint can return the post-action
-///     projection without re-reading. Null unless the action succeeded.
+///     projection without re-reading. Null unless the action was applied.
 /// </param>
-/// <param name="LevelUp">What the XP grant did to the player's level. Null unless the action succeeded.</param>
+/// <param name="LevelUp">
+///     What the XP grant did to the player's level. Null unless the action was applied — and a
+///     failed attempt still grants consolation XP, so it can still level a player.
+/// </param>
 public record JobActionResult(
     JobActionError Error,
     JobFailure Failure,
@@ -42,8 +49,16 @@ public record JobActionResult(
     Player? Player = null,
     LevelUpOutcome? LevelUp = null)
 {
-    /// <summary>Whether the job was actually performed and persisted.</summary>
-    public bool Succeeded => Error == JobActionError.None && Failure == JobFailure.None;
+    /// <summary>
+    /// Whether the attempt was applied and persisted — as opposed to refused at a gate.
+    /// </summary>
+    /// <remarks>
+    /// Not <c>Succeeded</c>: since M3R an applied attempt may still have failed its roll, and the
+    /// two answer differently on the wire. This predicate is what separates a <c>200</c> from a
+    /// <c>409</c>; <see cref="JobOutcome.Succeeded"/> is what separates a win from a loss inside
+    /// that <c>200</c>.
+    /// </remarks>
+    public bool WasApplied => Error == JobActionError.None && Failure == JobFailure.None;
 }
 
 /// <summary>
@@ -120,15 +135,25 @@ public class JobActionService
             _db.PlayerJobMasteries.Add(mastery);
         }
 
+        // The stat gate and the odds both read effective stats, so the equipped holdings must be
+        // resolved before the attempt. This is the second query a job attempt now costs; it is the
+        // price of gear mattering outside combat.
+        var loadout = await BuildLoadoutAsync(player, cancellationToken);
+
         var result = _jobs.Attempt(
             player,
             job,
             mastery,
+            loadout,
             catalog.CompletionsPerRank,
             catalog.MaxRank,
+            new JobRiskRules(
+                catalog.MaxSuccessChance,
+                catalog.ConsolationCashFraction,
+                catalog.ConsolationXpFraction),
             nowUtc);
 
-        if (!result.Succeeded)
+        if (!result.WasApplied)
         {
             // The domain refused and mutated nothing. Detach a mastery row we speculatively added so
             // a refusal cannot leave an empty row behind on some later SaveChanges.
@@ -165,4 +190,18 @@ public class JobActionService
             result.LevelUp);
     }
 
+    /// <summary>Reads the player's equipped holdings and aggregates them into a <see cref="Loadout"/>.</summary>
+    /// <remarks>
+    /// The same shape <c>InventoryActionService</c> uses. Duplicated rather than shared because the
+    /// two services own different units of work and neither should reach into the other's tracked
+    /// entities; if a third caller appears, this is worth lifting.
+    /// </remarks>
+    private async Task<Loadout> BuildLoadoutAsync(Player player, CancellationToken cancellationToken)
+    {
+        var equipped = await _db.PlayerItems
+            .Where(h => h.PlayerId == player.Id && h.Equipped)
+            .ToListAsync(cancellationToken);
+
+        return Loadout.For(player, _content.ItemCatalog.ResolveEquipped(equipped));
+    }
 }

@@ -1,3 +1,4 @@
+using UnderworldEmpire.Domain.Items;
 using UnderworldEmpire.Domain.Progression;
 using UnderworldEmpire.Domain.Randomness;
 
@@ -25,35 +26,50 @@ public sealed class JobService
     /// Attempts <paramref name="job"/> for <paramref name="player"/>.
     /// </summary>
     /// <remarks>
-    /// On success this mutates <paramref name="player"/> (energy down, cash and XP up) and
-    /// <paramref name="mastery"/> (one more completion). On refusal <b>nothing is mutated</b> —
-    /// checks run to completion before the first write, so a refused attempt cannot leave a player
-    /// half-charged.
+    /// Three outcomes, not two. On <b>refusal</b> — level, stats or energy — nothing is mutated at
+    /// all: checks run to completion before the first write, so a refused attempt cannot leave a
+    /// player half-charged. On a <b>failed</b> attempt the energy is still spent, a consolation
+    /// share of the cash and XP is still paid, health may drop, and mastery does not move. On a
+    /// <b>successful</b> attempt everything applies in full.
     /// </remarks>
-    /// <param name="player">The acting player; mutated on success.</param>
+    /// <param name="player">The acting player; mutated whenever the attempt is applied.</param>
     /// <param name="job">The job definition from content.</param>
-    /// <param name="mastery">This player's mastery row for this job; mutated on success.</param>
+    /// <param name="mastery">
+    ///     This player's mastery row for this job; mutated only on a <b>successful</b> attempt.
+    /// </param>
+    /// <param name="loadout">
+    ///     The player's effective combat stats — base plus equipped gear. The stat gate and the odds
+    ///     both read this rather than <see cref="Player.Attack"/>, which is what makes equipping a
+    ///     weapon open jobs up.
+    /// </param>
     /// <param name="completionsPerRank">Content-supplied completions per mastery rank.</param>
     /// <param name="maxRank">Content-supplied mastery rank ceiling.</param>
-    /// <param name="nowUtc">The instant to evaluate energy regeneration against.</param>
+    /// <param name="risk">Content-supplied pack-wide risk rules.</param>
+    /// <param name="nowUtc">The instant to evaluate meter regeneration against.</param>
     public JobAttemptResult Attempt(
         Player player,
         Job job,
         PlayerJobMastery mastery,
+        Loadout loadout,
         int completionsPerRank,
         int maxRank,
+        JobRiskRules risk,
         DateTimeOffset nowUtc)
     {
         ArgumentNullException.ThrowIfNull(player);
         ArgumentNullException.ThrowIfNull(job);
         ArgumentNullException.ThrowIfNull(mastery);
+        ArgumentNullException.ThrowIfNull(loadout);
 
         // ---- Validate before mutating anything ----
 
-        // Level is checked first so a job the player cannot yet unlock reports the permanent reason
-        // rather than "come back when your energy refills". Same precedence as GET /jobs.
+        // Precedence is level -> stats -> energy: most permanent reason first, so a player failing
+        // several gates is told the one that will take longest to fix. Same order as GET /jobs.
         if (player.Level < job.LevelRequirement)
             return JobAttemptResult.Refused(JobFailure.LevelTooLow);
+
+        if (!job.MeetsStatRequirements(loadout.TotalAttack, loadout.TotalDefense))
+            return JobAttemptResult.Refused(JobFailure.StatsTooLow);
 
         int currentEnergy = player.Energy.CurrentAt(nowUtc, MeterRates.Energy);
         if (currentEnergy < job.EnergyCost)
@@ -62,27 +78,92 @@ public sealed class JobService
         // ---- Apply ----
 
         // SpendAt re-resolves the current value itself and resets the regen clock, so partial
-        // progress toward the next point is deliberately forfeited on a spend.
+        // progress toward the next point is deliberately forfeited on a spend. Spent on both
+        // branches: energy is what a failed attempt costs, and is the whole risk.
         player.Energy = player.Energy.SpendAt(job.EnergyCost, nowUtc, MeterRates.Energy);
 
-        long cashEarned = _random.NextInclusive(job.CashMin, job.CashMax);
+        // Roll order is part of the contract, because FakeRandomSource.Sequence scripts against it:
+        // (1) success, (2) cash, (3) health loss on the failure branch only.
+        bool succeeded = RollSucceeded(job, loadout, risk);
+
+        // The cash range is rolled on both branches — the consolation is a fraction of what the
+        // attempt *would* have earned, and skipping the roll on a failure would also shift every
+        // later roll in the stream.
+        long rolledCash = _random.NextInclusive(job.CashMin, job.CashMax);
+
+        long cashEarned = succeeded ? rolledCash : Fraction(rolledCash, risk.ConsolationCashFraction);
+        long xpEarned = succeeded ? job.Xp : Fraction(job.Xp, risk.ConsolationXpFraction);
+
+        int healthLost = 0;
+        if (!succeeded)
+        {
+            long rolledLoss = _random.NextInclusive(job.HealthLossMin, job.HealthLossMax);
+
+            // Clamped to what is actually left: Meter.SpendAt throws on an overspend, so it must
+            // never be handed a raw roll. The floor is 0, not a negative bar and not an exception.
+            int currentHealth = player.Health.CurrentAt(nowUtc, MeterRates.Health);
+            healthLost = (int)Math.Min(rolledLoss, currentHealth);
+
+            if (healthLost > 0)
+                player.Health = player.Health.SpendAt(healthLost, nowUtc, MeterRates.Health);
+        }
+
         player.AddCash(cashEarned);
 
+        // Health loss is applied *before* this. A failed attempt still grants consolation XP, which
+        // can still cross a level threshold, and a level-up refills every meter — in the other order
+        // the health penalty would be silently undone by the refill.
+        //
         // Levelling is applied here, inside the same attempt, so the caller persists the level, the
         // granted skill points and the refilled meters in the one SaveChanges as everything else.
-        var levelUp = player.ApplyXpAndLevelUp(job.Xp, nowUtc);
+        var levelUp = player.ApplyXpAndLevelUp(xpEarned, nowUtc);
 
-        bool rankedUp = mastery.RecordCompletion(completionsPerRank, maxRank);
+        // Mastery measures completions, not attempts. A failure advances nothing.
+        bool rankedUp = succeeded && mastery.RecordCompletion(completionsPerRank, maxRank);
 
-        return JobAttemptResult.Success(new JobOutcome(
+        return JobAttemptResult.Applied(new JobOutcome(
             JobId: job.Id,
+            Succeeded: succeeded,
             EnergySpent: job.EnergyCost,
             CashEarned: cashEarned,
-            XpEarned: job.Xp,
+            XpEarned: xpEarned,
+            HealthLost: healthLost,
             Completions: mastery.Completions,
             MasteryRank: mastery.Rank,
             MasteryRankedUp: rankedUp,
             CompletionsUntilNextRank: mastery.CompletionsUntilNextRank(completionsPerRank, maxRank)),
             levelUp);
     }
+
+    /// <summary>
+    /// Rolls the attempt against the job's live success chance, in basis points.
+    /// </summary>
+    /// <remarks>
+    /// Basis points rather than a <c>NextDouble</c> added to <see cref="IRandomSource"/>: that keeps
+    /// the single-method seam, and leaves <c>FakeRandomSource</c>'s scripted and boundary modes
+    /// exactly assertable. The comparison is <c>&lt;=</c>, so a chance of 0.95 wins on a roll of
+    /// 9500 and loses on 9501.
+    /// </remarks>
+    private bool RollSucceeded(Job job, Loadout loadout, JobRiskRules risk)
+    {
+        double chance = job.SuccessChanceFor(
+            loadout.TotalAttack, loadout.TotalDefense, risk.MaxSuccessChance);
+
+        long chanceBasisPoints = (long)Math.Round(chance * BasisPoints, MidpointRounding.AwayFromZero);
+
+        return _random.NextInclusive(1, BasisPoints) <= chanceBasisPoints;
+    }
+
+    /// <summary>
+    /// A consolation share of <paramref name="amount"/>, rounded <b>up</b>.
+    /// </summary>
+    /// <remarks>
+    /// Rounded up so a consolation is never quite nothing: 1% of the cheapest job's 15 cash is 0.15,
+    /// which floors to zero and would make the consolation a lie on every cheap job in the pack.
+    /// </remarks>
+    private static long Fraction(long amount, double fraction) =>
+        (long)Math.Ceiling(amount * fraction);
+
+    /// <summary>One hundred percent, expressed in basis points.</summary>
+    private const int BasisPoints = 10_000;
 }

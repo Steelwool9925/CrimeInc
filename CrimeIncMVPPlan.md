@@ -119,7 +119,7 @@ Attack and see the stat increase on Home.
 income accrues over time up to its cap → collect → cash rises; confirm it stops accruing
 at the cap.
 
-### M3R — Job risk: stat gates & failable jobs
+### M3R — Job risk: stat gates & failable jobs ✅
 
 > Added after M3 was scoped, at the user's request (2026-08-20). Slotted **after** M3 rather than
 > inside M2 because the success chance is measured against *effective* stats — base plus equipped
@@ -202,12 +202,12 @@ test UI at `/swagger`. 22 sessions total.
 | ✅ S3.3 | T3.4 property endpoints (buy/collect), T3.5a Flutter Inventory + Store screens | 40k | Swagger buy/collect property; in app: Store→buy item, Inventory→equip, stats rise |
 | ✅ S3.4 | T3.5b Flutter Properties screen (buy/collect UI + accrual display) | 27k | **CP3**: in app buy a property, watch income accrue to cap, collect → cash↑ |
 
-### M3R — Job risk (3 sessions)
+### M3R — Job risk ✅ (3 sessions, executed as one run)
 | Session | Contents | ~tok | How you test it |
 |---|---|---|---|
-| S3R.1 | T3R.1 `Job` risk fields + chance curve, T3R.2 `jobs.json` balance + README, T3R.3 loader validation | 45k | `dotnet test` → chance-curve and content-validation tests green; host refuses a `jobs.json` with a missing `risk` block, naming it |
-| S3R.2 | T3R.4 `JobService` failure path, T3R.5 `JobActionService` loadout + endpoints | 50k | Swagger: a job under your stat minimum → 409 `"stats"`, nothing spent; a job you qualify for → 200 with `succeeded: true/false` and the right consolation figures |
-| S3R.3 | T3R.6 Flutter jobs UI: requirements, success %, failure result panel | 45k | **CP3R**: in app a stat-locked job is greyed with its requirement; equip a weapon → it unlocks and the % rises; a failed attempt shows the consolation payout and health lost |
+| ✅ S3R.1 | T3R.1 `Job` risk fields + chance curve, T3R.2 `jobs.json` balance + README, T3R.3 loader validation | 45k | `dotnet test` → chance-curve and content-validation tests green; host refuses a `jobs.json` with a missing `risk` block, naming it |
+| ✅ S3R.2 | T3R.4 `JobService` failure path, T3R.5 `JobActionService` loadout + endpoints | 50k | Swagger: a job under your stat minimum → 409 `"stats"`, nothing spent; a job you qualify for → 200 with `succeeded: true/false` and the right consolation figures |
+| ✅ S3R.3 | T3R.6 Flutter jobs UI: requirements, success %, failure result panel | 45k | **CP3R**: in app a stat-locked job is greyed with its requirement; equip a weapon → it unlocks and the % rises; a failed attempt shows the consolation payout and health lost |
 
 ### M4 — Combat, bounty & crew (6 sessions)
 | Session | Contents | ~tok | How you test it |
@@ -910,10 +910,109 @@ starter property, and is what the screen fixtures are built from.
 code, so no migration check was needed and the S3.2 schema stands. The 468 figure required a warm
 Postgres: the first run reported 7 DB-backed failures against a container three seconds old.
 
-### ▶ Next: CP3, then S3R.1
+S3.4 was merged to `main` on 2026-08-21 (`6c2a02d`) with 468 .NET and 190 Flutter tests green.
 
-M3 is code-complete. **CP3 is the user's to run** — the checkpoint below. After it, M3R begins at S3R.1
-(T3R.1 + T3R.2 + T3R.3), which is backend-only and needs no Flutter.
+---
+
+## M3R — Job risk ✅ (executed via `/execute-plan`, pending user CP3R)
+
+Executed 2026-08-21 in worktree `.claude/worktrees/m3r-job-risk` on branch `worktree-m3r-job-risk`,
+from `6c2a02d`. All six tasks in one run rather than three sessions. Single-context executor — no
+subagents. Test-first throughout.
+
+**The balance question § M3R design left open was decided before any code was written:** the third
+option — `completionsPerRank` 10 → 8, and the pinned test rewritten to count *expected completions*
+rather than attempts.
+
+**The plan was wrong about how that test would break.** It predicted the test would fail. It would
+not have: `JobCatalogLoaderTests` asserted `EnergyMax / cheapestEnergyCost >= CompletionsPerRank`,
+which counts *attempts affordable*, not completions achieved. Failable jobs leave that arithmetic
+untouched, so the test would have stayed green while the property it documents — "a fresh player
+reaches a mastery rank on one energy bar" — quietly became false. A silently-stale green test is
+worse than a red one. It now asserts `attempts × baseSuccessChance >= completionsPerRank`: ten
+attempts at the 0.85 floor expect 8.5 completions, clearing 8.
+
+**Reaching level 2 in one bar was not preserved, deliberately.** A bar now expects ~91 XP against a
+100 threshold, so it usually takes an eleventh run. The `LevelCurve` doc comment and the pack README
+both asserted the old certainty and were corrected rather than left to rot. CP2 asks the tester to
+*watch the mastery bar*, so the mastery half is the half that was protected.
+
+### The six tasks
+
+| # | Commit | What |
+|---|---|---|
+| T3R.1 | `6f389cc` | `Job` risk fields, `EnsureValid` guards, `MeetsStatRequirements`, `SuccessChanceFor` |
+| T3R.2 | `8932b20` | `jobs.json` risk blocks, balance pass, README schema and notes |
+| T3R.3 | `6cf1b60` | loader models, `ValidateJobs` rules, `JobCatalog` risk rules |
+| T3R.4 | `2a1cf7d` | `JobService` failure path, stat gate, consolation payouts |
+| T3R.5 | `ce119ee` | endpoints report requirements and odds; a failure is a 200 |
+| T3R.6 | `f551ed3` | Flutter models, jobs UI, failed-attempt result panel |
+
+### Bugs found and fixed during execution
+
+**T3R.1's `SuccessChanceFor` threw where it should have clamped.** It rejected a pack ceiling below
+a job's own base chance. That contradiction is *legitimate* for a hand-built job: the domain default
+is `1.0` so code-built jobs never fail by accident (decision 8), and a real pack caps at `0.95` — so
+every legacy `JobServiceTests` case hit the throw the moment it met real rules. The plan's formula
+says "clamped", not "throws"; the throw was an invention on top of it. It clamps now, and genuine
+*content* contradictions are still caught earlier and louder by the T3R.3 loader check, which names
+the job at startup. Caught by T3R.4's first full run, not by review.
+
+**The endpoint test host used the production RNG.** Every endpoint test that performed ten jobs and
+expected ten completions became a coin flip at roughly a third once attempts could fail — two were
+already failing intermittently by the time T3R.4 ran. The host now pins `IRandomSource` to a
+`SwitchableRandomSource`, always-minimum by default so every attempt succeeds, which a single test
+can point at a scripted sequence for the duration of one case. Without that seam the failure branch
+would have had no endpoint coverage at all.
+
+**`AppState._applyOutcomeToCatalog` would have silently cleared a stats lock.** It re-derives each
+row's gating locally after an attempt, from level and energy only — so a stat-locked job would have
+come back attemptable and lit up a button the server refuses. The stats verdict is carried across
+instead: the client cannot recompute it (that needs the loadout, which `/jobs` does not return), and
+nothing a job attempt does can change it, since gear is untouched and a level-up grants skill points
+without spending them. This is exactly the A.1.2 failure mode, caught before it shipped this time.
+
+**M3R verification:** `dotnet build` 0 warnings / 0 errors · **`dotnet test` 546 pass** (468 before
+this milestone) · `flutter analyze` clean · **`flutter test` 204 pass** (190 before) · `flutter build
+web --release` succeeds · no migration needed — M3R changed no entity.
+
+---
+
+## ▶ CP3R — Milestone M3R checkpoint (please run)
+
+```powershell
+# 1. Postgres + API (fixed port 5080)
+docker compose up -d postgres
+dotnet run --project src/UnderworldEmpire.Api
+
+# 2. API sanity via Swagger:
+#    POST /session   -> copy deviceToken -> Authorize
+#    GET  /jobs      -> shake-down shows attackRequirement 3, defenseRequirement 2,
+#                       successChance 0.90; run-numbers shows unavailableReason "level"
+#    POST /jobs/run-numbers-for-the-bookie/do -> 409, reason "level" (you are level 1)
+#
+# 3. Flutter app — in a second terminal
+#    cd app; flutter run -d chrome
+#    Home -> Jobs. Each card now reads "90% success · needs 3 attack / 2 defense".
+#    Grind Shake Down to level 2. Run Numbers is now greyed with
+#      "Needs 6 attack / 5 defense" -- a STATS lock, not a level lock.
+#    Home -> Store -> buy Brass Knuckles -> Inventory -> Equip.
+#    Back to Jobs: Run Numbers is attemptable, and its displayed % has risen.
+#    Keep tapping Shake Down until one attempt fails (about 1 in 10):
+#      the panel says "It went wrong", pays ~1 cash and 1 XP, may show Health -1,
+#      and the mastery bar does NOT advance.
+```
+
+⚠️ **A failed attempt is a `200`, not an error.** If the app shows a red banner instead of the
+result panel, that is a regression in the client, not the server.
+
+⚠️ **A.5.1 still applies** — Home shows base Attack, Inventory shows effective. Equipping the
+knuckles changes the job odds and the Inventory figure, but not Home's.
+
+### ▶ Next: M4 — Combat, bounty & crew
+
+M3R is code-complete on `worktree-m3r-job-risk` and **not yet merged**. CP3 and CP3R are both
+outstanding and both are the user's to run.
 
 ---
 
@@ -950,7 +1049,7 @@ still open.
 
 ---
 
-## § M3R design — job risk (decided 2026-08-20, not yet built)
+## § M3R design — job risk (decided 2026-08-20, ✅ built 2026-08-21)
 
 The user asked for failable jobs: a stat-derived success chance with a minimum stat requirement per
 job. The design below was settled with them before any code was written, so **S3R.1–S3R.3 execute it
@@ -1054,7 +1153,7 @@ This is tuned so a brand-new 5/5 player clears both level-1 jobs (shake-down at 
 and is one point short of *Run Numbers* — which Brass Knuckles (level 1, 75 cash, +4 attack) closes.
 That is deliberately the CP3R demo: a locked job unlocking because you equipped something.
 
-### ⚠️ Open balance question T3R.2 must resolve
+### ✅ RESOLVED — the balance question T3R.2 had to answer
 
 The CP2 checkpoint is pinned by `JobCatalogLoaderTests` on this property: *ten runs of Shake Down a
 Corner Store — exactly one full starting energy bar — award 100 XP and 10 completions, which is both
@@ -1068,6 +1167,16 @@ guarantee becomes a coin flip. Three ways out, to be chosen when T3R.2 runs:
 
 Whichever is chosen, the pinned test in `JobCatalogLoaderTests` must be updated in the same task —
 leaving it asserting the old certainty would make S3R.1 fail for the right reason and look like a bug.
+
+**Chosen 2026-08-21: the second option, in the sharper form.** `completionsPerRank` dropped 10 → 8,
+and the pinned test now counts expected completions (`attempts × baseSuccessChance`) rather than
+attempts. Ten attempts at Shake Down's 0.85 floor expect 8.5 completions; a 5/5 starting player
+actually sits at 0.90 and clears 8 about 93% of the time.
+
+Note the paragraph above is wrong on one point: **the test would not have failed.** It counted
+attempts affordable, which failable jobs do not change, so it would have stayed green while the
+property it documents became false. That was the more dangerous outcome, and finding it is what
+made the second option the right one rather than the third.
 
 ---
 
@@ -1425,4 +1534,53 @@ Reverting does not stick — the next invocation puts it back — so it is commi
 
 Both `register-scheduled-gru.ps1` and `scheduled-gru.ps1` are present and tracked, and `main`'s working
 tree was clean at the start of this session. The deletions A.4.1 flagged and A.5.5 re-flagged are gone.
+
+---
+
+## A.7 — Raised during M3R (2026-08-21)
+
+Findings from the M3R run that are **not** part of T3R.1–T3R.6. Nothing here is scheduled.
+
+**A.7.1 Every endpoint test now succeeds by construction** · `CustomWebApplicationFactory` · medium
+
+The test host pins `IRandomSource` to always-minimum, so every job attempt over HTTP succeeds unless
+a test explicitly scripts otherwise. That was necessary — the alternative was a suite whose green
+depended on a 0.9^10 coin flip — but it means the *default* path through every endpoint test is now
+the lucky one. The failure branch is covered by five explicit cases in `DoJobEndpointTests`; nothing
+else exercises it. If a later change breaks failure handling in a route those five do not touch, the
+suite will not notice.
+
+**A.7.2 `GET /jobs` costs a third query, and `POST /jobs/{id}/do` a second** · performance · informational
+
+Both routes now resolve the player's equipped holdings to build a `Loadout`. On the do-job route
+that is a second read per attempt, in the tap-once-per-second loop this game is built around. It is
+a primary-key-adjacent filtered read and the count does not grow with catalog size, so it is cheap —
+but it is the first time the job loop's query count went *up*, and worth remembering if the loop is
+ever profiled. A.5.4's reasoning applies: the fix, if one is ever needed, is a server-side change,
+not a client-side cache of effective stats.
+
+**A.7.3 A failed attempt persists an empty mastery row** · `JobActionService` · low
+
+`PerformAsync` speculatively adds a `PlayerJobMastery` row before the attempt and detaches it on a
+refusal. A *failed* attempt is not a refusal, so the row is now persisted with zero completions the
+first time a player fails a job they have never completed. Harmless — it is the row they would get
+on their first success anyway, and the projection reads zero either way — but it is a new state that
+did not exist before M3R, and `GET /jobs` will now report `completions: 0` from a real row rather
+than from the no-row default.
+
+**A.7.4 `_applyOutcomeToCatalog` is now carrying two rules it cannot verify** · `app_state.dart` · medium
+
+It re-derives level and energy gating locally and carries the stats verdict across. Both are
+reasonable today, and the stats one is argued in a comment. But this is the same local
+re-derivation A.1.2 is the cautionary tale for, and it has now grown from two inputs to three. The
+Store and Inventory screens solved this by re-reading the catalog after every action; the Jobs
+screen still does not, because the do-job response was deliberately built to make that unnecessary.
+Worth revisiting as one decision rather than letting a fourth rule accrete.
+
+**A.7.5 The success-chance percentage is rounded on the client** · `jobs_screen.dart` · low
+
+`_chanceLabel` rounds `successChance` to a whole percent for display. The server sends the exact
+figure it rolls against, so a job at 0.904 displays as "90%" and rolls at 90.4%. Display-only and it
+feeds no decision, but a player comparing a displayed 90% against a long-run tally will find it
+slightly off in their favour.
 

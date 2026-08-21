@@ -38,6 +38,12 @@ public sealed class FakeRandomSource : IRandomSource
     /// <summary>The bounds of the most recent roll, for asserting the range the caller asked for.</summary>
     public (long Min, long Max)? LastRange { get; private set; }
 
+    /// <summary>
+    /// Every roll's bounds, in order. Since M3R an attempt takes two or three rolls, so
+    /// <see cref="LastRange"/> alone can no longer say which range the *first* roll used.
+    /// </summary>
+    public List<(long Min, long Max)> Ranges { get; } = [];
+
     public long NextInclusive(long minInclusive, long maxInclusive)
     {
         if (maxInclusive < minInclusive)
@@ -46,6 +52,7 @@ public sealed class FakeRandomSource : IRandomSource
 
         RollCount++;
         LastRange = (minInclusive, maxInclusive);
+        Ranges.Add((minInclusive, maxInclusive));
 
         return _mode switch
         {

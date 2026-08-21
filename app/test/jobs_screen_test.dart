@@ -187,9 +187,11 @@ void main() {
         doJobResult: const DoJobResult(
           result: JobResult(
             jobId: 'shake-down-corner-store',
+            succeeded: true,
             energySpent: 1,
             cashEarned: 25,
             xpEarned: 10,
+            healthLost: 0,
             mastery: JobMastery(
               completions: 10,
               rank: 1,
@@ -223,9 +225,11 @@ void main() {
         doJobResult: const DoJobResult(
           result: JobResult(
             jobId: 'shake-down-corner-store',
+            succeeded: true,
             energySpent: 1,
             cashEarned: 25,
             xpEarned: 10,
+            healthLost: 0,
             mastery: kFakeMastery,
             masteryRankedUp: false,
           ),
@@ -254,9 +258,11 @@ void main() {
         doJobResult: const DoJobResult(
           result: JobResult(
             jobId: 'shake-down-corner-store',
+            succeeded: true,
             energySpent: 1,
             cashEarned: 25,
             xpEarned: 500,
+            healthLost: 0,
             mastery: kFakeMastery,
             masteryRankedUp: false,
           ),
@@ -304,6 +310,113 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(api.jobsCalls, 2);
+    });
+  });
+
+  group('JobsScreen — risk', () {
+    /// A catalog whose second row is stat-locked rather than level- or energy-locked.
+    FakeApiClient withStatLockedJob() => FakeApiClient(
+          jobsResult: const JobList(
+            jobs: [kCheapJob, kStatLockedJob],
+            currentEnergy: 7,
+            level: 2,
+          ),
+        );
+
+    testWidgets('a job shows its success chance as a percentage', (tester) async {
+      await pumpJobs(tester, FakeApiClient());
+
+      final odds = tester.widget<Text>(
+          find.byKey(const Key('job-odds-shake-down-corner-store')));
+
+      expect(odds.data, contains('90%'));
+    });
+
+    testWidgets('a job shows the stats it requires', (tester) async {
+      await pumpJobs(tester, FakeApiClient());
+
+      final odds = tester.widget<Text>(
+          find.byKey(const Key('job-odds-shake-down-corner-store')));
+
+      expect(odds.data, contains('3 attack'));
+      expect(odds.data, contains('2 defense'));
+    });
+
+    testWidgets('a stat-locked job is disabled', (tester) async {
+      await pumpJobs(tester, withStatLockedJob());
+
+      final button = tester.widget<ElevatedButton>(
+          find.byKey(const Key('do-job-run-numbers-for-the-bookie')));
+
+      expect(button.onPressed, isNull);
+    });
+
+    testWidgets('a stat-locked job names the stats it needs, not the level', (tester) async {
+      // The player is level 2 here, so "requires level 2" would be both wrong and useless — the
+      // thing standing in the way is a point of attack, and equipping something fixes it.
+      await pumpJobs(tester, withStatLockedJob());
+
+      final lock = tester.widget<Text>(
+          find.byKey(const Key('job-lock-run-numbers-for-the-bookie')));
+
+      expect(lock.data, contains('6 attack'));
+      expect(lock.data, contains('5 defense'));
+    });
+  });
+
+  group('JobsScreen — a failed attempt', () {
+    FakeApiClient failing() => FakeApiClient(
+          doJobResult: const DoJobResult(
+            result: kFailedJobResult,
+            player: kFakeMe,
+          ),
+        );
+
+    testWidgets('the result panel opens rather than an error', (tester) async {
+      await pumpJobs(tester, failing());
+
+      await tester.tap(find.byKey(const Key('do-job-shake-down-corner-store')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('job-result-panel')), findsOneWidget);
+      expect(find.byKey(const Key('action-message')), findsNothing);
+    });
+
+    testWidgets('it says the job failed', (tester) async {
+      await pumpJobs(tester, failing());
+
+      await tester.tap(find.byKey(const Key('do-job-shake-down-corner-store')));
+      await tester.pumpAndSettle();
+
+      final title = tester.widget<Text>(find.byKey(const Key('job-result-title')));
+      expect(title.data, isNot('Job complete'));
+      expect(find.byKey(const Key('job-result-failed-note')), findsOneWidget);
+    });
+
+    testWidgets('it shows the consolation payout and the health lost', (tester) async {
+      await pumpJobs(tester, failing());
+
+      await tester.tap(find.byKey(const Key('do-job-shake-down-corner-store')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('job-result-health')), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('job-result-health')),
+          matching: find.text('-3'),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a successful attempt draws no health tile', (tester) async {
+      await pumpJobs(tester, FakeApiClient());
+
+      await tester.tap(find.byKey(const Key('do-job-shake-down-corner-store')));
+      await tester.pumpAndSettle();
+
+      // Otherwise every successful job would read "Health -0".
+      expect(find.byKey(const Key('job-result-health')), findsNothing);
     });
   });
 }

@@ -210,4 +210,89 @@ public class JobEndpointTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Equal(0, FirstJobCompletions(first));
         Assert.Equal(0, FirstJobCompletions(second));
     }
+
+    // -------------------------------------------------------------------------
+    // Risk: requirements and live odds (T3R.5)
+    // -------------------------------------------------------------------------
+
+    /// <summary>Finds one job in the listing by its content id.</summary>
+    private static JsonElement Job(JsonDocument doc, string id) =>
+        doc.RootElement.GetProperty("jobs").EnumerateArray().Single(j => j.GetProperty("id").GetString() == id);
+
+    [Fact]
+    public async Task Each_job_reports_its_stat_requirements()
+    {
+        var token = await NewGuestTokenAsync();
+
+        using var doc = await GetJobsAsync(token);
+        var corner = Job(doc, "shake-down-corner-store");
+
+        Assert.Equal(3, corner.GetProperty("attackRequirement").GetInt32());
+        Assert.Equal(2, corner.GetProperty("defenseRequirement").GetInt32());
+    }
+
+    [Fact]
+    public async Task Each_job_reports_the_callers_live_success_chance()
+    {
+        // A fresh 5/5 player against a 3/2 requirement: five points of surplus at 1% over the 0.85
+        // base. The figure is computed by the same Job.SuccessChanceFor the attempt rolls against,
+        // so what is displayed cannot drift from what is rolled.
+        var token = await NewGuestTokenAsync();
+
+        using var doc = await GetJobsAsync(token);
+
+        Assert.Equal(0.90, Job(doc, "shake-down-corner-store").GetProperty("successChance").GetDouble(), precision: 10);
+    }
+
+    [Fact]
+    public async Task The_reported_chance_is_capped_at_the_packs_ceiling()
+    {
+        var token = await NewGuestTokenAsync();
+
+        using var doc = await GetJobsAsync(token);
+
+        foreach (var job in doc.RootElement.GetProperty("jobs").EnumerateArray())
+            Assert.True(job.GetProperty("successChance").GetDouble() <= 0.95);
+    }
+
+    /// <summary>Performs the cheap job once.</summary>
+    private async Task DoCheapJobAsync(string token)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/jobs/shake-down-corner-store/do");
+        request.Headers.Add("Authorization", $"Bearer {token}");
+        await _client.SendAsync(request);
+    }
+
+    [Fact]
+    public async Task A_job_above_the_players_stats_reports_the_stats_reason()
+    {
+        // Run Numbers needs 6 attack and a fresh player has 5 — the one job in the pack a starting
+        // player is a single point short of, and the CP3R demo.
+        //
+        // The player has to reach level 2 first, because the level gate outranks the stats gate and
+        // would otherwise be the reason reported. Ten runs of the cheap job does it: the test host
+        // pins the RNG to always-minimum, so every attempt succeeds.
+        var token = await NewGuestTokenAsync();
+        for (int i = 0; i < 10; i++)
+            await DoCheapJobAsync(token);
+
+        using var doc = await GetJobsAsync(token);
+        var numbers = Job(doc, "run-numbers-for-the-bookie");
+
+        Assert.Equal(2, doc.RootElement.GetProperty("level").GetInt32());
+        Assert.False(numbers.GetProperty("canAttempt").GetBoolean());
+        Assert.Equal("stats", numbers.GetProperty("unavailableReason").GetString());
+    }
+
+    [Fact]
+    public async Task The_level_reason_still_outranks_the_stats_reason()
+    {
+        // Precedence is level -> stats -> energy, so a job failing both reports the level.
+        var token = await NewGuestTokenAsync();
+
+        using var doc = await GetJobsAsync(token);
+        var transport = Job(doc, "rob-an-armored-transport");
+
+        Assert.Equal("level", transport.GetProperty("unavailableReason").GetString());
+    }
 }

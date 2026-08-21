@@ -41,31 +41,83 @@ public class JobCatalogLoaderTests : IDisposable
     private ContentPackLoader Loader() => new(_tempRoot);
 
     /// <summary>A minimal valid catalog; individual tests override the parts they care about.</summary>
-    private static object ValidCatalog(params object[] jobs) => new
-    {
-        packId = "crime",
-        version = 1,
-        mastery = new { completionsPerRank = 10, maxRank = 5 },
-        jobs = jobs.Length > 0 ? jobs : [ValidJob()]
-    };
+    /// <remarks>
+    /// Built as a dictionary rather than an anonymous type since T3R.3, because the <c>risk</c> block
+    /// is required and several tests need it <b>absent</b> rather than merely wrong — an anonymous
+    /// type cannot omit a property conditionally.
+    /// </remarks>
+    private static Dictionary<string, object?> ValidCatalog(params object[] jobs) =>
+        CatalogWith(jobs: jobs);
 
-    private static object ValidJob(
+    private static Dictionary<string, object?> CatalogWith(
+        string packId = "crime",
+        object? mastery = null,
+        object? risk = null,
+        bool omitRisk = false,
+        params object[] jobs)
+    {
+        var catalog = new Dictionary<string, object?>
+        {
+            ["packId"] = packId,
+            ["version"] = 2,
+            ["mastery"] = mastery ?? new { completionsPerRank = 8, maxRank = 5 },
+            ["jobs"] = jobs.Length > 0 ? jobs : [ValidJob()]
+        };
+
+        if (!omitRisk)
+            catalog["risk"] = risk ?? ValidRiskRules();
+
+        return catalog;
+    }
+
+    /// <summary>Pack-wide risk rules in their valid shape.</summary>
+    private static object ValidRiskRules(
+        double maxSuccessChance = 0.95,
+        double consolationCashFraction = 0.01,
+        double consolationXpFraction = 0.10) =>
+        new { maxSuccessChance, consolationCashFraction, consolationXpFraction };
+
+    private static object ValidRequirements(int attack = 0, int defense = 0) =>
+        new { attack, defense };
+
+    private static object ValidJobRisk(
+        double baseSuccessChance = 0.85,
+        double successChancePerSurplusPoint = 0.01,
+        int healthLossMin = 0,
+        int healthLossMax = 1) =>
+        new { baseSuccessChance, successChancePerSurplusPoint, healthLossMin, healthLossMax };
+
+    private static Dictionary<string, object?> ValidJob(
         string id = "mug-a-tourist",
         string name = "Mug a Tourist",
         int energyCost = 1,
         int levelRequirement = 1,
         long cashMin = 10,
         long cashMax = 20,
-        long xp = 5) => new
+        long xp = 5,
+        object? requirements = null,
+        object? risk = null,
+        bool omitRequirements = false,
+        bool omitRisk = false)
+    {
+        var job = new Dictionary<string, object?>
         {
-            id,
-            name,
-            description = "d",
-            area = "downtown",
-            energyCost,
-            levelRequirement,
-            payout = new { cashMin, cashMax, xp }
+            ["id"] = id,
+            ["name"] = name,
+            ["description"] = "d",
+            ["area"] = "downtown",
+            ["energyCost"] = energyCost,
+            ["levelRequirement"] = levelRequirement,
+            ["payout"] = new { cashMin, cashMax, xp }
         };
+
+        if (!omitRequirements)
+            job["requirements"] = requirements ?? ValidRequirements();
+        if (!omitRisk)
+            job["risk"] = risk ?? ValidJobRisk();
+
+        return job;
+    }
 
     // -------------------------------------------------------------------------
     // Happy path
@@ -79,7 +131,7 @@ public class JobCatalogLoaderTests : IDisposable
         var catalog = Loader().LoadJobs("crime");
 
         Assert.Single(catalog.Jobs);
-        Assert.Equal(10, catalog.CompletionsPerRank);
+        Assert.Equal(8, catalog.CompletionsPerRank);
         Assert.Equal(5, catalog.MaxRank);
 
         var job = catalog.Jobs[0];
@@ -145,7 +197,12 @@ public class JobCatalogLoaderTests : IDisposable
           "packId": "crime",
           "version": 1,
           "futureField": { "nested": true },
-          "mastery": { "completionsPerRank": 10, "maxRank": 5 },
+          "mastery": { "completionsPerRank": 8, "maxRank": 5 },
+          "risk": {
+            "maxSuccessChance": 0.95,
+            "consolationCashFraction": 0.01,
+            "consolationXpFraction": 0.10
+          },
           "jobs": [
             {
               "id": "mug-a-tourist",
@@ -153,7 +210,14 @@ public class JobCatalogLoaderTests : IDisposable
               "energyCost": 1,
               "levelRequirement": 1,
               "unknownJobField": 7,
-              "payout": { "cashMin": 10, "cashMax": 20, "xp": 5 }
+              "payout": { "cashMin": 10, "cashMax": 20, "xp": 5 },
+              "requirements": { "attack": 0, "defense": 0 },
+              "risk": {
+                "baseSuccessChance": 0.85,
+                "successChancePerSurplusPoint": 0.01,
+                "healthLossMin": 0,
+                "healthLossMax": 1
+              }
             }
           ]
         }
@@ -317,6 +381,203 @@ public class JobCatalogLoaderTests : IDisposable
             $"Job '{j.Id}' costs {j.EnergyCost} energy but the starting maximum is {PlayerDefaults.EnergyMax}."));
     }
 
+    // -------------------------------------------------------------------------
+    // Risk rules and requirements (T3R.3)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void Valid_catalog_exposes_the_pack_wide_risk_rules()
+    {
+        WriteJobs("crime", ValidCatalog());
+
+        var catalog = Loader().LoadJobs("crime");
+
+        Assert.Equal(0.95, catalog.MaxSuccessChance, precision: 10);
+        Assert.Equal(0.01, catalog.ConsolationCashFraction, precision: 10);
+        Assert.Equal(0.10, catalog.ConsolationXpFraction, precision: 10);
+    }
+
+    [Fact]
+    public void Loaded_jobs_carry_their_requirements_and_risk()
+    {
+        WriteJobs("crime", CatalogWith(jobs: ValidJob(
+            requirements: ValidRequirements(attack: 6, defense: 4),
+            risk: ValidJobRisk(
+                baseSuccessChance: 0.7,
+                successChancePerSurplusPoint: 0.02,
+                healthLossMin: 2,
+                healthLossMax: 9))));
+
+        var job = Loader().LoadJobs("crime").Jobs.Single();
+
+        Assert.Equal(6, job.AttackRequirement);
+        Assert.Equal(4, job.DefenseRequirement);
+        Assert.Equal(0.7, job.BaseSuccessChance, precision: 10);
+        Assert.Equal(0.02, job.SuccessChancePerSurplusPoint, precision: 10);
+        Assert.Equal(2, job.HealthLossMin);
+        Assert.Equal(9, job.HealthLossMax);
+    }
+
+    [Fact]
+    public void A_missing_pack_risk_block_is_a_named_error()
+    {
+        // The JSON models are nullable precisely so this is reportable. Defaulted to zeros it would
+        // read as "every job is impossible" — a silent catastrophe rather than a startup message.
+        WriteJobs("crime", CatalogWith(omitRisk: true));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+        Assert.Contains("'risk' is missing", ex.Message);
+    }
+
+    [Fact]
+    public void A_missing_job_requirements_block_is_a_named_error()
+    {
+        // Absent, this would read as "ungated" — which is exactly what a content author who forgot
+        // the block would fail to notice.
+        WriteJobs("crime", ValidCatalog(ValidJob(omitRequirements: true)));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+        Assert.Contains("'requirements' is missing", ex.Message);
+    }
+
+    [Fact]
+    public void A_missing_job_risk_block_is_a_named_error()
+    {
+        WriteJobs("crime", ValidCatalog(ValidJob(omitRisk: true)));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+        Assert.Contains("'risk' is missing", ex.Message);
+    }
+
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(-0.1)]
+    [InlineData(1.5)]
+    public void An_out_of_range_max_success_chance_throws(double maxSuccessChance)
+    {
+        // Zero is rejected as well as negatives: a pack whose ceiling is zero has made every job
+        // impossible, which is never what was meant.
+        WriteJobs("crime", CatalogWith(risk: ValidRiskRules(maxSuccessChance: maxSuccessChance)));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+        Assert.Contains("'risk.maxSuccessChance'", ex.Message);
+    }
+
+    [Theory]
+    [InlineData(-0.01)]
+    [InlineData(1.01)]
+    public void An_out_of_range_consolation_cash_fraction_throws(double fraction)
+    {
+        WriteJobs("crime", CatalogWith(risk: ValidRiskRules(consolationCashFraction: fraction)));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+        Assert.Contains("'risk.consolationCashFraction'", ex.Message);
+    }
+
+    [Theory]
+    [InlineData(-0.01)]
+    [InlineData(1.01)]
+    public void An_out_of_range_consolation_xp_fraction_throws(double fraction)
+    {
+        WriteJobs("crime", CatalogWith(risk: ValidRiskRules(consolationXpFraction: fraction)));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+        Assert.Contains("'risk.consolationXpFraction'", ex.Message);
+    }
+
+    [Fact]
+    public void A_negative_attack_requirement_throws()
+    {
+        WriteJobs("crime", ValidCatalog(
+            ValidJob(requirements: ValidRequirements(attack: -1))));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+        Assert.Contains("'requirements.attack' must be >= 0", ex.Message);
+    }
+
+    [Fact]
+    public void A_negative_defense_requirement_throws()
+    {
+        WriteJobs("crime", ValidCatalog(
+            ValidJob(requirements: ValidRequirements(defense: -1))));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+        Assert.Contains("'requirements.defense' must be >= 0", ex.Message);
+    }
+
+    [Theory]
+    [InlineData(-0.01)]
+    [InlineData(1.01)]
+    public void An_out_of_range_base_success_chance_throws(double chance)
+    {
+        WriteJobs("crime", ValidCatalog(
+            ValidJob(risk: ValidJobRisk(baseSuccessChance: chance))));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+        Assert.Contains("'risk.baseSuccessChance'", ex.Message);
+    }
+
+    [Fact]
+    public void A_base_success_chance_above_the_pack_ceiling_throws()
+    {
+        // Job.SuccessChanceFor throws on this contradiction at roll time. Catching it at load turns
+        // a request-time crash into a startup message naming the job.
+        WriteJobs("crime", CatalogWith(
+            risk: ValidRiskRules(maxSuccessChance: 0.90),
+            jobs: ValidJob(risk: ValidJobRisk(baseSuccessChance: 0.99))));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+        Assert.Contains("above 'risk.maxSuccessChance'", ex.Message);
+        Assert.Contains("mug-a-tourist", ex.Message);
+    }
+
+    [Fact]
+    public void A_negative_per_surplus_point_gain_throws()
+    {
+        WriteJobs("crime", ValidCatalog(
+            ValidJob(risk: ValidJobRisk(successChancePerSurplusPoint: -0.01))));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+        Assert.Contains("'risk.successChancePerSurplusPoint' must be >= 0", ex.Message);
+    }
+
+    [Fact]
+    public void A_negative_minimum_health_loss_throws()
+    {
+        WriteJobs("crime", ValidCatalog(
+            ValidJob(risk: ValidJobRisk(healthLossMin: -1, healthLossMax: 3))));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+        Assert.Contains("'risk.healthLossMin' must be >= 0", ex.Message);
+    }
+
+    [Fact]
+    public void A_maximum_health_loss_below_the_minimum_throws()
+    {
+        WriteJobs("crime", ValidCatalog(
+            ValidJob(risk: ValidJobRisk(healthLossMin: 5, healthLossMax: 3))));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+        Assert.Contains("is below 'risk.healthLossMin'", ex.Message);
+    }
+
+    [Fact]
+    public void Risk_errors_are_reported_alongside_every_other_error()
+    {
+        // Same contract as the rest of the loader: one fix pass, not one restart per error.
+        WriteJobs("crime", CatalogWith(
+            packId: "wrong",
+            omitRisk: true,
+            jobs: ValidJob(id: "", omitRequirements: true, omitRisk: true)));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+
+        Assert.Contains("'packId' mismatch", ex.Message);
+        Assert.Contains("'risk' is missing", ex.Message);
+        Assert.Contains("'requirements' is missing", ex.Message);
+        Assert.Contains("'id' is missing or empty", ex.Message);
+    }
+
     [Fact]
     public void Real_crime_catalog_lets_a_fresh_player_reach_a_mastery_rank_on_one_energy_bar()
     {
@@ -324,6 +585,12 @@ public class JobCatalogLoaderTests : IDisposable
         // sitting if the cheapest level-1 job can be run enough times on a full starting bar to
         // cross a rank threshold. This test pins that tuning property so a later balance pass
         // cannot silently make the checkpoint untestable.
+        //
+        // Until M3R this counted *attempts*, which was the same thing — every attempt completed.
+        // Now that attempts can fail and a failure does not advance mastery, counting attempts
+        // would leave this test green while the property it names quietly became false. It counts
+        // expected completions instead, against the job's base chance: the floor a player sitting
+        // exactly on the requirements gets, not the better odds a geared one enjoys.
         var catalog = new ContentPackLoader(FindRepoContentRoot()).LoadJobs("crime");
 
         var cheapest = catalog.Jobs
@@ -331,11 +598,14 @@ public class JobCatalogLoaderTests : IDisposable
             .OrderBy(j => j.EnergyCost)
             .First();
 
-        int runsOnAFullBar = PlayerDefaults.EnergyMax / cheapest.EnergyCost;
+        int attemptsOnAFullBar = PlayerDefaults.EnergyMax / cheapest.EnergyCost;
+        double expectedCompletions = attemptsOnAFullBar * cheapest.BaseSuccessChance;
 
-        Assert.True(runsOnAFullBar >= catalog.CompletionsPerRank,
-            $"Cheapest level-1 job '{cheapest.Id}' allows {runsOnAFullBar} runs on a full energy bar, " +
-            $"but {catalog.CompletionsPerRank} completions are needed for a mastery rank.");
+        Assert.True(expectedCompletions >= catalog.CompletionsPerRank,
+            $"Cheapest level-1 job '{cheapest.Id}' allows {attemptsOnAFullBar} attempts on a full " +
+            $"energy bar, expected to yield {expectedCompletions:0.##} completions at its base " +
+            $"chance of {cheapest.BaseSuccessChance}, but {catalog.CompletionsPerRank} completions " +
+            $"are needed for a mastery rank.");
     }
 
     /// <summary>

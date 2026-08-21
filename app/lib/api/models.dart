@@ -176,6 +176,9 @@ class Job {
     required this.cashMin,
     required this.cashMax,
     required this.xp,
+    required this.attackRequirement,
+    required this.defenseRequirement,
+    required this.successChance,
     required this.mastery,
     required this.canAttempt,
     this.unavailableReason,
@@ -190,11 +193,25 @@ class Job {
   final int cashMin;
   final int cashMax;
   final int xp;
+
+  /// Minimum *effective* attack — the player's own stat plus equipped gear.
+  final int attackRequirement;
+
+  /// Minimum effective defense.
+  final int defenseRequirement;
+
+  /// This player's live chance of success, 0..1, already capped by the pack ceiling.
+  ///
+  /// The server computes it with the same method the attempt rolls against, so what is drawn on a
+  /// card is what the attempt actually gets. Sent even for a job that cannot be attempted, so the
+  /// card can show what clearing the gate would buy.
+  final double successChance;
+
   final JobMastery mastery;
   final bool canAttempt;
 
-  /// Stable token from the server: 'level' or 'energy'. Null when [canAttempt] is true. The
-  /// user-facing wording is the client's to choose.
+  /// Stable token from the server: 'level', 'stats' or 'energy'. Null when [canAttempt] is true.
+  /// The user-facing wording is the client's to choose.
   final String? unavailableReason;
 
   factory Job.fromJson(Map<String, dynamic> json) => Job(
@@ -207,6 +224,11 @@ class Job {
         cashMin: json['cashMin'] as int,
         cashMax: json['cashMax'] as int,
         xp: json['xp'] as int,
+        attackRequirement: json['attackRequirement'] as int,
+        defenseRequirement: json['defenseRequirement'] as int,
+        // `as num` then toDouble: System.Text.Json writes a whole-number chance as `1`, not `1.0`,
+        // and `as double` on an int is a runtime type error in Dart rather than a widening.
+        successChance: (json['successChance'] as num).toDouble(),
         mastery: JobMastery.fromJson(json['mastery'] as Map<String, dynamic>),
         canAttempt: json['canAttempt'] as bool,
         unavailableReason: json['unavailableReason'] as String?,
@@ -260,25 +282,41 @@ class LevelUp {
 class JobResult {
   const JobResult({
     required this.jobId,
+    required this.succeeded,
     required this.energySpent,
     required this.cashEarned,
     required this.xpEarned,
+    required this.healthLost,
     required this.mastery,
     required this.masteryRankedUp,
   });
 
   final String jobId;
+
+  /// Whether the attempt came off.
+  ///
+  /// A failed attempt still arrives here as a 200 — it spent energy and changed state, so it is an
+  /// outcome rather than a refusal. On a failure [cashEarned] and [xpEarned] carry the pack's
+  /// consolation fractions and [mastery] is unchanged.
+  final bool succeeded;
+
   final int energySpent;
   final int cashEarned;
   final int xpEarned;
+
+  /// Health deducted; always 0 on a success.
+  final int healthLost;
+
   final JobMastery mastery;
   final bool masteryRankedUp;
 
   factory JobResult.fromJson(Map<String, dynamic> json) => JobResult(
         jobId: json['jobId'] as String,
+        succeeded: json['succeeded'] as bool,
         energySpent: json['energySpent'] as int,
         cashEarned: json['cashEarned'] as int,
         xpEarned: json['xpEarned'] as int,
+        healthLost: json['healthLost'] as int,
         mastery: JobMastery.fromJson(json['mastery'] as Map<String, dynamic>),
         masteryRankedUp: json['masteryRankedUp'] as bool,
       );

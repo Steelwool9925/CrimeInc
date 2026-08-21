@@ -77,7 +77,7 @@ public class JobConcurrencyTests : IClassFixture<CustomWebApplicationFactory>
             serviceA.PerformAsync(playerId, CheapJobId, now),
             serviceB.PerformAsync(playerId, CheapJobId, now));
 
-        int succeeded = results.Count(r => r.Succeeded);
+        int succeeded = results.Count(r => r.WasApplied);
         int conflicted = results.Count(r => r.Error == JobActionError.ConcurrencyConflict);
 
         // Either the writes genuinely raced (one wins, one conflicts) or they serialised cleanly.
@@ -115,8 +115,8 @@ public class JobConcurrencyTests : IClassFixture<CustomWebApplicationFactory>
         var second = await scopeB.ServiceProvider.GetRequiredService<JobActionService>()
             .PerformAsync(playerId, CheapJobId, now);
 
-        Assert.True(first.Succeeded);
-        Assert.True(second.Succeeded);
+        Assert.True(first.WasApplied);
+        Assert.True(second.WasApplied);
 
         var after = await ReadPlayerAsync(playerId);
 
@@ -139,7 +139,7 @@ public class JobConcurrencyTests : IClassFixture<CustomWebApplicationFactory>
             scopeA.ServiceProvider.GetRequiredService<JobActionService>().PerformAsync(playerId, CheapJobId, now),
             scopeB.ServiceProvider.GetRequiredService<JobActionService>().PerformAsync(playerId, CheapJobId, now));
 
-        int succeeded = results.Count(r => r.Succeeded);
+        int succeeded = results.Count(r => r.WasApplied);
 
         using var verifyScope = _factory.Services.CreateScope();
         var db = verifyScope.ServiceProvider.GetRequiredService<GameDbContext>();

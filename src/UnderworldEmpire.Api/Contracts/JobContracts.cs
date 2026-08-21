@@ -30,10 +30,18 @@ public record JobMasteryState(int Completions, int Rank, int MaxRank, int? Compl
 ///     Whether the player may attempt it at this instant, given their level and lazily-regenned
 ///     energy. Computed server-side so the client never re-implements the rule.
 /// </param>
+/// <param name="AttackRequirement">Minimum effective attack — base plus equipped gear.</param>
+/// <param name="DefenseRequirement">Minimum effective defense.</param>
+/// <param name="SuccessChance">
+///     This caller's live chance of success, in <c>[0, 1]</c>, already capped by the pack ceiling.
+///     Computed by the same <c>Job.SuccessChanceFor</c> the attempt rolls against, so the odds shown
+///     on a row cannot drift from the odds it actually gets. Reported even for a job the caller
+///     cannot attempt, so the client can show what clearing the gate would buy.
+/// </param>
 /// <param name="UnavailableReason">
-///     Why <paramref name="CanAttempt"/> is false — <c>"level"</c> or <c>"energy"</c> — or
-///     <see langword="null"/> when it is true. A stable token, not display text: the label is the
-///     client's to localise.
+///     Why <paramref name="CanAttempt"/> is false — <c>"level"</c>, <c>"stats"</c> or
+///     <c>"energy"</c> — or <see langword="null"/> when it is true. A stable token, not display
+///     text: the label is the client's to localise.
 /// </param>
 public record JobDto(
     string Id,
@@ -45,24 +53,44 @@ public record JobDto(
     long CashMin,
     long CashMax,
     long Xp,
+    int AttackRequirement,
+    int DefenseRequirement,
+    double SuccessChance,
     JobMasteryState Mastery,
     bool CanAttempt,
     string? UnavailableReason);
 
 /// <summary>
-/// What one successful job attempt produced, as returned by POST /jobs/{id}/do.
+/// What one <b>applied</b> job attempt produced, as returned by POST /jobs/{id}/do — successful or
+/// not.
 /// </summary>
-/// <param name="JobId">The job performed.</param>
-/// <param name="EnergySpent">Energy deducted.</param>
-/// <param name="CashEarned">Cash rolled server-side from the job's inclusive range.</param>
-/// <param name="XpEarned">Experience granted.</param>
-/// <param name="Mastery">Mastery standing after this attempt.</param>
+/// <remarks>
+/// A failed attempt arrives here, as a <c>200</c>, not as a <c>409</c>. It is an outcome rather than
+/// a refusal: energy was spent and the player's state changed, so there is something to report.
+/// <c>409</c> stays reserved for the three gates — <c>level</c>, <c>stats</c>, <c>energy</c> — which
+/// spend nothing at all.
+/// </remarks>
+/// <param name="JobId">The job attempted.</param>
+/// <param name="Succeeded">Whether the attempt came off. False on a failed-but-applied attempt.</param>
+/// <param name="EnergySpent">Energy deducted. Spent on both branches.</param>
+/// <param name="CashEarned">
+///     Cash rolled server-side from the job's inclusive range, or the pack's consolation fraction of
+///     that same roll on a failure.
+/// </param>
+/// <param name="XpEarned">The job's XP, or the consolation fraction of it on a failure.</param>
+/// <param name="HealthLost">Health deducted; always 0 on a success.</param>
+/// <param name="Mastery">
+///     Mastery standing after this attempt. Unchanged on a failure — mastery counts completions, not
+///     attempts.
+/// </param>
 /// <param name="MasteryRankedUp">Whether this attempt crossed a mastery rank threshold.</param>
 public record JobResultDto(
     string JobId,
+    bool Succeeded,
     int EnergySpent,
     long CashEarned,
     long XpEarned,
+    int HealthLost,
     JobMasteryState Mastery,
     bool MasteryRankedUp);
 

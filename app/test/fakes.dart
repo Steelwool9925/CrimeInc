@@ -23,6 +23,9 @@ const kCheapJob = Job(
   cashMin: 15,
   cashMax: 30,
   xp: 10,
+  attackRequirement: 3,
+  defenseRequirement: 2,
+  successChance: 0.90,
   mastery: kFakeMastery,
   canAttempt: true,
 );
@@ -38,6 +41,9 @@ const kLockedJob = Job(
   cashMin: 700,
   cashMax: 1300,
   xp: 180,
+  attackRequirement: 22,
+  defenseRequirement: 16,
+  successChance: 0.55,
   mastery: kFakeMastery,
   canAttempt: false,
   unavailableReason: 'level',
@@ -54,9 +60,45 @@ const kUnaffordableJob = Job(
   cashMin: 140,
   cashMax: 260,
   xp: 55,
+  attackRequirement: 9,
+  defenseRequirement: 7,
+  successChance: 0.65,
   mastery: kFakeMastery,
   canAttempt: false,
   unavailableReason: 'energy',
+);
+
+/// Level-met but a point short on attack — the CP3R demo row.
+///
+/// The one job in the shipped pack a starting player unlocks by *equipping* rather than levelling.
+const kStatLockedJob = Job(
+  id: 'run-numbers-for-the-bookie',
+  name: 'Run Numbers for the Bookie',
+  description: "Collect the day's slips and skim a little off the top.",
+  area: 'docks',
+  energyCost: 2,
+  levelRequirement: 2,
+  cashMin: 60,
+  cashMax: 110,
+  xp: 26,
+  attackRequirement: 6,
+  defenseRequirement: 5,
+  successChance: 0.72,
+  mastery: kFakeMastery,
+  canAttempt: false,
+  unavailableReason: 'stats',
+);
+
+/// A failed attempt: energy still spent, 1% cash and 10% XP, three health gone, mastery unmoved.
+const kFailedJobResult = JobResult(
+  jobId: 'shake-down-corner-store',
+  succeeded: false,
+  energySpent: 1,
+  cashEarned: 1,
+  xpEarned: 1,
+  healthLost: 3,
+  mastery: kFakeMastery,
+  masteryRankedUp: false,
 );
 
 const kFakeMe = Me(
@@ -415,9 +457,11 @@ class FakeApiClient implements ApiClient {
             const DoJobResult(
               result: JobResult(
                 jobId: 'shake-down-corner-store',
+                succeeded: true,
                 energySpent: 1,
                 cashEarned: 22,
                 xpEarned: 10,
+                healthLost: 0,
                 mastery: JobMastery(
                   completions: 4,
                   rank: 0,
