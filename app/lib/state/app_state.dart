@@ -65,6 +65,9 @@ class AppState extends ChangeNotifier {
   ContentPack? get contentPack => _contentPack;
   String? get errorMessage => _errorMessage;
 
+  /// URL for a pack art asset by logical key — see [ApiClient.assetUrl].
+  String assetUrl(String key) => _apiClient.assetUrl(key);
+
   List<Job> get jobs => _jobs;
   bool get jobsLoading => _jobsLoading;
   String? get jobsError => _jobsError;

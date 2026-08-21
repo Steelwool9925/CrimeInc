@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../api/models.dart';
 import '../state/app_state.dart';
+import '../theme/pack_theme.dart';
+import '../widgets/pack_logo.dart';
 import 'inventory_screen.dart';
 import 'jobs_screen.dart';
 import 'properties_screen.dart';
@@ -13,32 +15,25 @@ class HomeScreen extends StatelessWidget {
 
   final AppState appState;
 
-  Color? _parsePrimaryColor(String? hex) {
-    if (hex == null) return null;
-    final clean = hex.replaceFirst('#', '');
-    final value = int.tryParse(
-      clean.length == 6 ? 'FF$clean' : clean,
-      radix: 16,
-    );
-    if (value == null) return null;
-    return Color(value);
-  }
-
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: appState,
       builder: (context, _) {
         final pack = appState.contentPack;
-        final primaryColor = _parsePrimaryColor(pack?.primaryColorHex);
-        final theme = Theme.of(context);
-        final appBarColor = primaryColor ?? theme.colorScheme.primary;
+        final appBarColor = parsePackColor(
+          pack?.primaryColorHex,
+          Theme.of(context).colorScheme.primary,
+        );
 
         return Scaffold(
           appBar: AppBar(
             backgroundColor: appBarColor,
             foregroundColor: Colors.white,
-            title: const Text('Underworld Empire'),
+            // The pack supplies its own branding: its logo where it ships one, its name where
+            // it does not. Neither is hardcoded, so a different pack rebrands the app without
+            // a code change.
+            title: PackLogo(appState: appState, pack: pack),
           ),
           body: _buildBody(context, appState),
         );

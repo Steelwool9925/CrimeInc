@@ -5,6 +5,7 @@ import 'api/api_client.dart';
 import 'screens/home_screen.dart';
 import 'state/app_state.dart';
 import 'storage/token_store.dart';
+import 'theme/pack_theme.dart';
 
 void main() {
   runApp(const UnderworldEmpireApp());
@@ -39,12 +40,18 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Underworld Empire',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-      ),
-      home: HomeScreen(appState: _appState),
+    // Rebuilt when the pack arrives: the theme is content, so the whole app re-colours the
+    // moment GET /content/pack lands rather than only the one app bar that used to read it.
+    return ListenableBuilder(
+      listenable: _appState,
+      builder: (context, _) {
+        final pack = _appState.contentPack;
+        return MaterialApp(
+          title: pack?.name.isNotEmpty == true ? pack!.name : 'Underworld Empire',
+          theme: packTheme(pack),
+          home: HomeScreen(appState: _appState),
+        );
+      },
     );
   }
 }
