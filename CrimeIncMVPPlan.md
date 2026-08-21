@@ -1828,16 +1828,29 @@ longer answer "how much did this cost".
 
 ## A.9 — Raised during M4 (2026-08-21)
 
-### A.9.1 — a GitHub PAT is embedded in the Flutter SDK's git remote ⚠️
+### A.9.1 — a GitHub PAT was embedded in git config ✅ scrubbed 2026-08-21
 
-`flutter doctor` prints it in plain text. The upstream remote for `C:\Users\jason\flutter` is not
-the public Flutter URL but one carrying a `github_pat_11AOVIE7…` credential, so the token is
-exposed to any tool that shells out to `flutter doctor` and to any log, transcript or CI output
-that captures it. It surfaced here in ordinary command output during the CP4 toolchain check.
+**This restates A.6, which raised the same issue during S3.4 and was never acted on.** It
+resurfaced because `flutter doctor` prints the token in plain text during any toolchain check.
 
-**The token should be revoked**, and the remote reset to `https://github.com/flutter/flutter.git`.
-Nothing in this repository reads or depends on it — this is a workstation issue that this repo's
-build happened to reveal.
+It was in **three** places, not one, and the third was the cause of the other two:
+
+1. A **global URL rewrite** — `url.https://<PAT>@github.com/.insteadOf https://github.com/` — which
+   silently baked the token into *every* GitHub URL git touched, including repos cloned later.
+2. This repository's `origin` remote.
+3. The Flutter SDK's `origin` remote.
+
+**Not in git history.** A scan of `git log --all -p` matched only truncated `github_pat_…`
+references inside A.6 and this appendix. Nothing was ever committed, so no history rewrite is
+needed and nothing was exposed by pushing.
+
+**Scrubbed:** both remotes reset to their public URLs, both config sections removed, and
+`credential.helper = wincred` set so credentials live in the Windows vault instead of in a URL.
+Verified clean across global/local/system git config, `.git-credentials`, `.netrc` and the
+environment. `scripts/doctor.ps1` now checks for this on every run so a third recurrence is caught.
+
+⚠️ **The token itself still needs revoking at github.com/settings/tokens** — removing it locally
+does not invalidate it, and it was exposed in terminal output and transcripts.
 
 ### A.9.2 — the toolchain is not on PATH, and the plan's version note is stale
 
