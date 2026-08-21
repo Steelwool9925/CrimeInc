@@ -200,7 +200,7 @@ test UI at `/swagger`. 22 sessions total.
 | ✅ S3.1 | T3.1 items domain + attack/defense aggregation + tests | 35k | `dotnet test` → loadout aggregation tests green |
 | ✅ S3.2 | T3.2 item endpoints (buy/equip/`GET /inventory`), T3.3 property domain + capped accrual + tests | 50k | Swagger: buy+equip item → attack/defense change; property accrual + cap tests green |
 | ✅ S3.3 | T3.4 property endpoints (buy/collect), T3.5a Flutter Inventory + Store screens | 40k | Swagger buy/collect property; in app: Store→buy item, Inventory→equip, stats rise |
-| S3.4 | T3.5b Flutter Properties screen (buy/collect UI + accrual display) | 27k | **CP3**: in app buy a property, watch income accrue to cap, collect → cash↑ |
+| ✅ S3.4 | T3.5b Flutter Properties screen (buy/collect UI + accrual display) | 27k | **CP3**: in app buy a property, watch income accrue to cap, collect → cash↑ |
 
 ### M3R — Job risk (3 sessions)
 | Session | Contents | ~tok | How you test it |
@@ -593,7 +593,7 @@ regression.
 
 ---
 
-## M3 — Items & properties (in progress)
+## M3 — Items & properties ✅ (code-complete; pending user CP3)
 
 Executed via `/execute-plan` in worktree `.claude/worktrees/m3a-items-loadout` on branch
 `worktree-m3a-items-loadout`. Single-context executor — no subagents, per the session's standing
@@ -848,14 +848,105 @@ entity, so no migration was added and the S3.2 schema stands. A manual HTTP smok
 session's security hook blocks `curl`, so the 28 `PropertyEndpointTests` — real HTTP against real
 Postgres, covering 200/401/404/409 on all three routes — stand in for it. See A.5.3.
 
-### ▶ Next: S3.4 — T3.5b Flutter Properties screen
-
-The property endpoints are complete and unconsumed by the client. S3.4 builds the Properties screen on
-the `/properties` contract that now exists: buy, collect, and an accrual display that fills toward the
-cap. `incomePerHour` and `accrualCapMinutes` are on the wire precisely so that screen can animate the
-bar forward between polls without inventing the rate. That session ends at **CP3**.
-
 S3.3 was merged to `main` on 2026-08-20 (`6748350`) with 468 .NET and 128 Flutter tests green.
+
+### ✅ S3.4 — Flutter Properties screen (T3.5b)
+
+Executed 2026-08-21 via `/execute-plan` in worktree `.claude/worktrees/m3d-flutter-properties-screen`
+on branch `worktree-m3d-flutter-properties-screen`, from `e993306`. Single-context executor — no
+subagents. Test-first throughout: models, `AppState` and screen each went red before their production
+code existed, and the red was read each time to confirm it was the missing feature rather than a typo.
+
+**The machine had no toolchain at all.** Neither prerequisite in `README.md:38` was installed: no
+Flutter SDK anywhere on disk, and `dotnet` was 8.0.300 against four projects targeting `net10.0` — so
+`dotnet build` could not even parse `UnderworldEmpire.slnx`. Whatever machine produced the S3.1–S3.3
+figures, it was not this one. Nothing was written until that was reported and the user chose to install
+both. See A.6.1.
+
+#### T3.5b — Properties screen · commit `6724ac7`
+
+One `GET /properties` renders both halves of the screen, the same rule the Store and Inventory follow.
+Every gating decision drawn is the server's, and `property_gating.dart` is the one place their wording
+lives. Its functions are name-prefixed rather than reusing `item_gating.dart`'s `buyLockLabel`: the two
+take different types, and a screen importing both would have to disambiguate.
+
+**The counter fills between polls, and decides nothing.** `Property.projectedPending` interpolates
+forward at the rate the server published — which is why `incomePerHour` and `accrualCapMinutes` are on
+the wire at all — flooring a part-earned coin exactly as `PropertyIncome.Accrue` does, so the player is
+shown slightly less than they have earned rather than slightly more. Whether a property may be collected
+stays `canCollect` however far the drawn figure has climbed. A client that enabled its own buttons from
+its own arithmetic would be the second copy of a server rule that A.1.2 is the cautionary tale for.
+Pinned by a test that advances a minute and asserts the pawn shop's counter has moved while its collect
+button is still dead.
+
+**So the screen polls instead.** Only the server can say when a climbing counter becomes collectable, so
+the catalog is re-read on an interval (10s in production, injectable for tests). That is safe precisely
+because `GET /properties` settles nothing — the property T3.4 spent a test proving reads 600 times and
+still pays in full. The poll is skipped while an action is in flight, so it cannot be folded into that
+action's own re-read and lost.
+
+**The in-flight guard is held across the post-action re-read**, the S3.3 bug in the shape it would take
+here. This time it was mutation-checked: releasing it early lets a second action through and
+`a second action cannot start while the post-action re-read is outstanding` fails. For this guard, that
+closes the question A.5.2 left open.
+
+### Bug found and fixed during execution
+
+Four screen-test assertions about the third card were **vacuous on first write**. `ListView.builder`
+never builds what is below the 800px test fold, so `findsNothing` for `collect-property-car-wash` was
+satisfied by a card that did not exist — the assertions would have held against a screen that drew a
+collect button on every unowned property. Found by reading a genuine failure in a neighbouring test
+(`findsOneWidget` for the same card, which does not fail silently), then applied to all four: they now
+scroll the card into view and assert it is present before asserting what it lacks.
+
+### Balance tuning that CP3 depends on
+
+Unchanged — no content was retuned. *Street Corner* (level 1, 500 cash, 240/hour over a 15-minute
+window, so one unit caps at 60 and fills at four a minute) is still the observable-in-one-sitting
+starter property, and is what the screen fixtures are built from.
+
+**S3.4 verification:** `flutter test` **190 pass** (128 before this session) · `flutter analyze` clean ·
+`flutter build web --release` succeeds · `dotnet test` **468 pass**, unchanged — T3.5b touched no server
+code, so no migration check was needed and the S3.2 schema stands. The 468 figure required a warm
+Postgres: the first run reported 7 DB-backed failures against a container three seconds old.
+
+### ▶ Next: CP3, then S3R.1
+
+M3 is code-complete. **CP3 is the user's to run** — the checkpoint below. After it, M3R begins at S3R.1
+(T3R.1 + T3R.2 + T3R.3), which is backend-only and needs no Flutter.
+
+---
+
+## ▶ CP3 — Milestone M3 checkpoint (please run)
+
+```powershell
+# 1. Postgres + API (fixed port 5080)
+docker compose up -d postgres
+dotnet run --project src/UnderworldEmpire.Api
+
+# 2. API sanity via Swagger:
+#    POST /session          -> copy deviceToken -> Authorize
+#    GET  /properties       -> 6 properties; street-corner canBuy false "cash" at 100 starting cash
+#    GET  /inventory        -> 6 items; brass-knuckles canBuy true
+#    POST /items/brass-knuckles/buy    then /equip  -> loadout totalAttack 10 -> 14
+#
+# 3. Flutter app — in a second terminal
+#    cd app; flutter run -d chrome
+#    Home -> Store -> buy Brass Knuckles -> Inventory -> Equip -> Attack reads "14 (10 + 4)".
+#    Grind Jobs for cash to 500, then Home -> Properties -> Buy on Street Corner.
+#    Expect: the card gains a counter, the bar fills at four a minute toward 60, and Collect
+#    goes live within ten seconds of the first coin landing. Tap Collect -> cash rises by the
+#    figure shown, counter resets to 0 and starts filling again.
+#    Leave it past 15 minutes -> the bar sits full at 60/60 and stops climbing. That is the cap.
+```
+
+⚠️ **Read A.5.1 before running this.** Home shows *base* Attack and the Inventory shows *effective*
+Attack, unlabelled on both. A tester watching Home during the "equip → Attack rises" step will see an
+unchanged 10 and read it as a failure. It is not; the decision about which screen owns combat stats is
+still open.
+
+**Requires a toolchain this machine did not have until 2026-08-21** — see A.6.1 if `flutter` or
+`dotnet` is not found.
 
 ---
 
@@ -1270,4 +1361,68 @@ Re-checked at the start of this session: `scripts/register-scheduled-gru.ps1` an
 `scripts/scheduled-gru.ps1` are still uncommitted deletions in `main`'s working tree. This session worked
 in a worktree and did not touch them, so the position is exactly as A.4.1 left it — still recoverable
 with `git checkout -- scripts/`, still one `git commit -a` away from permanent.
+
+---
+
+## A.6 — Raised during S3.4 (2026-08-21)
+
+Findings from the S3.4 session that are **not** part of T3.5b. Nothing here is scheduled.
+
+**A.6.1 The build toolchain was absent, and the installs are user-local** · environment · **high**
+
+Neither prerequisite in `README.md:38` was on this machine when the session started. No Flutter SDK
+anywhere on C: or D:, no `~/.pub-cache`, no fvm, nothing on PATH; and `dotnet` was **8.0.300** against
+four projects targeting `net10.0`, which cannot even parse a `.slnx`. No task in the plan was verifiable.
+Execution stopped before any code was written and the user chose to install both.
+
+What is installed now, and the catch in each:
+
+- **.NET 10.0.400** at `%USERPROFILE%\.dotnet`, via `dotnet-install.ps1`. User-local because a
+  `Program Files` install needs an elevation prompt no non-interactive session can answer. **A plain
+  `dotnet` still resolves to the 8.0.300 in `Program Files` and still fails on `.slnx`.** Every .NET
+  command this session ran set `DOTNET_ROOT` and prepended that directory to `PATH` first. To make it
+  stick, put `%USERPROFILE%\.dotnet` **ahead of** `%ProgramFiles%\dotnet` on the user PATH.
+- **Flutter 3.47.1 / Dart 3.13.1** at `C:\Users\jason\flutter`, extracted from the official stable zip.
+  Not on PATH either; commands were run as `C:\Users\jason\flutter\bin\flutter.bat`.
+
+Note the version jump: the project was written against Flutter 3.35, and 3.47.1 is what stable is now.
+All 128 pre-existing tests pass on it unchanged, so nothing is known to be broken — but the two files it
+moved are committed separately (`e365569`) rather than folded into the feature.
+
+**A.6.2 A GitHub PAT is embedded in the git remote, and in a global URL rewrite** · security · **high**
+
+`git remote -v` prints a `github_pat_…` token inline in the `origin` URL, so it is sitting in plaintext
+in `.git/config` and is echoed by any command that lists remotes. It is also being **injected into
+unrelated clones**: `flutter --version` reports the Flutter SDK's own upstream as
+`https://github_pat_…@github.com/flutter/flutter.git`, which means a global `url.<…>.insteadOf` rewrite
+is rewriting every `github.com` URL on this machine to carry the user's credential. The token is
+therefore now written into `C:\Users\jason\flutter\.git\config` as well.
+
+Worth rotating the token and moving to a credential helper, and removing the global rewrite. Not acted
+on: it is the user's credential and their global git config, outside anything this plan authorises.
+(The token value is deliberately not recorded here — this file is committed and pushed.)
+
+**A.6.3 The busy spinner covers both buttons of the acting row** · `properties_screen.dart` · low
+
+`AppState` tracks *which property* is in flight, not which action, so collecting draws a spinner on that
+row's Buy button too. Cosmetic, and the same row-level model the Store already uses. Splitting it would
+mean tracking the verb alongside the id.
+
+**A.6.4 The Properties screen polls, where the item screens do not** · design · informational
+
+The Store and Inventory re-read only after an action. Properties additionally re-reads every ten seconds
+while open, because a counter that climbs on its own has no other way to learn when it has become
+collectable. This is cheap and safe by construction — `GET /properties` settles nothing — but it is the
+first screen in the app that talks to the server while the player does nothing. If the cost is ever felt,
+the fix is a longer interval, not a client-side unlock: A.5.4's reasoning applies unchanged.
+
+**A.6.5 `analysis_options.yaml` is rewritten by the flutter tool** · `app/` · low
+
+Flutter 3.47.1 adds an `analyzer.exclude` block to it on every `pub get` **and** every `analyze`.
+Reverting does not stick — the next invocation puts it back — so it is committed rather than fought.
+
+**A.6.6 A.5.5 is resolved** · `scripts/` · **closed**
+
+Both `register-scheduled-gru.ps1` and `scheduled-gru.ps1` are present and tracked, and `main`'s working
+tree was clean at the start of this session. The deletions A.4.1 flagged and A.5.5 re-flagged are gone.
 
