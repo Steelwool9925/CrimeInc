@@ -118,13 +118,28 @@ public sealed class ContentPackLoader
                 LevelRequirement = entry.LevelRequirement,
                 CashMin = entry.Payout.CashMin,
                 CashMax = entry.Payout.CashMax,
-                Xp = entry.Payout.Xp
+                Xp = entry.Payout.Xp,
+                // ValidateJobs has already proved both blocks are present, so the null-forgiving
+                // access asserts that rather than hoping — the same posture ParseSlot takes in
+                // LoadItems.
+                AttackRequirement = entry.Requirements!.Attack,
+                DefenseRequirement = entry.Requirements.Defense,
+                BaseSuccessChance = entry.Risk!.BaseSuccessChance,
+                SuccessChancePerSurplusPoint = entry.Risk.SuccessChancePerSurplusPoint,
+                HealthLossMin = entry.Risk.HealthLossMin,
+                HealthLossMax = entry.Risk.HealthLossMax
             };
             job.EnsureValid();
             jobs.Add(job);
         }
 
-        return new JobCatalog(jobs, file.Mastery.CompletionsPerRank, file.Mastery.MaxRank);
+        return new JobCatalog(
+            jobs,
+            file.Mastery.CompletionsPerRank,
+            file.Mastery.MaxRank,
+            file.Risk!.MaxSuccessChance,
+            file.Risk.ConsolationCashFraction,
+            file.Risk.ConsolationXpFraction);
     }
 
     /// <summary>
@@ -306,6 +321,24 @@ public sealed class ContentPackLoader
         if (file.Mastery.MaxRank < 0)
             errors.Add($"'mastery.maxRank' must be >= 0, found {file.Mastery.MaxRank}");
 
+        // Risk rules are pack-wide and required. A missing block is reported rather than defaulted:
+        // zeros would read as a ceiling of zero, making every job in the pack impossible.
+        if (file.Risk is null)
+        {
+            errors.Add("'risk' is missing — a pack must define its risk rules");
+        }
+        else
+        {
+            // Zero is rejected alongside negatives: a ceiling of zero has made every job impossible,
+            // which is never what was meant by writing the block at all.
+            if (file.Risk.MaxSuccessChance is <= 0.0 or > 1.0)
+                errors.Add($"'risk.maxSuccessChance' must be > 0 and <= 1, found {file.Risk.MaxSuccessChance}");
+            if (file.Risk.ConsolationCashFraction is < 0.0 or > 1.0)
+                errors.Add($"'risk.consolationCashFraction' must be between 0 and 1, found {file.Risk.ConsolationCashFraction}");
+            if (file.Risk.ConsolationXpFraction is < 0.0 or > 1.0)
+                errors.Add($"'risk.consolationXpFraction' must be between 0 and 1, found {file.Risk.ConsolationXpFraction}");
+        }
+
         if (file.Jobs.Count == 0)
             errors.Add("'jobs' is missing or empty — a pack must define at least one job");
 
@@ -341,6 +374,48 @@ public sealed class ContentPackLoader
 
             if (job.Payout.Xp < 0)
                 errors.Add($"{where}: 'payout.xp' must be >= 0, found {job.Payout.Xp}");
+
+            // Absent, this would read as "ungated" — which is exactly what an author who forgot the
+            // block would fail to notice, since the job would simply work.
+            if (job.Requirements is null)
+            {
+                errors.Add($"{where}: 'requirements' is missing");
+            }
+            else
+            {
+                if (job.Requirements.Attack < 0)
+                    errors.Add($"{where}: 'requirements.attack' must be >= 0, found {job.Requirements.Attack}");
+                if (job.Requirements.Defense < 0)
+                    errors.Add($"{where}: 'requirements.defense' must be >= 0, found {job.Requirements.Defense}");
+            }
+
+            if (job.Risk is null)
+            {
+                errors.Add($"{where}: 'risk' is missing");
+            }
+            else
+            {
+                if (job.Risk.BaseSuccessChance is < 0.0 or > 1.0)
+                    errors.Add($"{where}: 'risk.baseSuccessChance' must be between 0 and 1, found {job.Risk.BaseSuccessChance}");
+
+                // Job.SuccessChanceFor throws on this contradiction at roll time. Catching it here
+                // turns a request-time crash into a startup message naming the job.
+                else if (file.Risk is not null && job.Risk.BaseSuccessChance > file.Risk.MaxSuccessChance)
+                    errors.Add(
+                        $"{where}: 'risk.baseSuccessChance' ({job.Risk.BaseSuccessChance}) is above " +
+                        $"'risk.maxSuccessChance' ({file.Risk.MaxSuccessChance})");
+
+                if (job.Risk.SuccessChancePerSurplusPoint < 0.0)
+                    errors.Add($"{where}: 'risk.successChancePerSurplusPoint' must be >= 0, found {job.Risk.SuccessChancePerSurplusPoint}");
+
+                if (job.Risk.HealthLossMin < 0)
+                    errors.Add($"{where}: 'risk.healthLossMin' must be >= 0, found {job.Risk.HealthLossMin}");
+
+                if (job.Risk.HealthLossMax < job.Risk.HealthLossMin)
+                    errors.Add(
+                        $"{where}: 'risk.healthLossMax' ({job.Risk.HealthLossMax}) is below " +
+                        $"'risk.healthLossMin' ({job.Risk.HealthLossMin})");
+            }
         }
 
         if (errors.Count > 0)

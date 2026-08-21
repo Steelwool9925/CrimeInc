@@ -22,8 +22,59 @@ public sealed record JobCatalogFile
     [JsonPropertyName("mastery")]
     public MasteryRulesJson Mastery { get; init; } = new();
 
+    /// <summary>
+    /// Pack-wide risk rules. <see langword="null"/> when the block is absent — deliberately not
+    /// defaulted.
+    /// </summary>
+    /// <remarks>
+    /// Defaulted to a fresh instance, an omitted block would read as a ceiling of zero: every job in
+    /// the pack impossible, reported by nothing. Nullable makes the omission a named validation error
+    /// instead. Same reasoning as <see cref="JobJson.Requirements"/> and <see cref="JobJson.Risk"/>.
+    /// </remarks>
+    [JsonPropertyName("risk")]
+    public RiskRulesJson? Risk { get; init; }
+
     [JsonPropertyName("jobs")]
     public List<JobJson> Jobs { get; init; } = [];
+}
+
+/// <summary>Pack-wide risk rules, applied to every job.</summary>
+public sealed record RiskRulesJson
+{
+    [JsonPropertyName("maxSuccessChance")]
+    public double MaxSuccessChance { get; init; }
+
+    [JsonPropertyName("consolationCashFraction")]
+    public double ConsolationCashFraction { get; init; }
+
+    [JsonPropertyName("consolationXpFraction")]
+    public double ConsolationXpFraction { get; init; }
+}
+
+/// <summary>Minimum effective stats to attempt a job.</summary>
+public sealed record JobRequirementsJson
+{
+    [JsonPropertyName("attack")]
+    public int Attack { get; init; }
+
+    [JsonPropertyName("defense")]
+    public int Defense { get; init; }
+}
+
+/// <summary>Per-job risk tuning.</summary>
+public sealed record JobRiskJson
+{
+    [JsonPropertyName("baseSuccessChance")]
+    public double BaseSuccessChance { get; init; }
+
+    [JsonPropertyName("successChancePerSurplusPoint")]
+    public double SuccessChancePerSurplusPoint { get; init; }
+
+    [JsonPropertyName("healthLossMin")]
+    public int HealthLossMin { get; init; }
+
+    [JsonPropertyName("healthLossMax")]
+    public int HealthLossMax { get; init; }
 }
 
 /// <summary>Pack-wide mastery thresholds, applied to every job.</summary>
@@ -59,6 +110,21 @@ public sealed record JobJson
 
     [JsonPropertyName("payout")]
     public JobPayoutJson Payout { get; init; } = new();
+
+    /// <summary>
+    /// Stat minimums. <see langword="null"/> when the block is absent — deliberately not defaulted,
+    /// because zeros would read as "ungated", which is exactly what an author who forgot the block
+    /// would fail to notice.
+    /// </summary>
+    [JsonPropertyName("requirements")]
+    public JobRequirementsJson? Requirements { get; init; }
+
+    /// <summary>
+    /// Risk tuning. <see langword="null"/> when absent — zeros would read as "always fails", which is
+    /// worse than loud.
+    /// </summary>
+    [JsonPropertyName("risk")]
+    public JobRiskJson? Risk { get; init; }
 }
 
 /// <summary>The reward block for one job. Cash is a range; XP is fixed.</summary>

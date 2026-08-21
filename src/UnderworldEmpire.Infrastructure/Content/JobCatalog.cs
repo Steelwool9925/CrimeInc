@@ -21,11 +21,23 @@ public sealed class JobCatalog
     /// <param name="jobs">Validated jobs, in the order content declared them.</param>
     /// <param name="completionsPerRank">Completions required per mastery rank.</param>
     /// <param name="maxRank">Mastery rank ceiling.</param>
-    public JobCatalog(IReadOnlyList<Job> jobs, int completionsPerRank, int maxRank)
+    /// <param name="maxSuccessChance">Pack-wide ceiling on any job's success chance.</param>
+    /// <param name="consolationCashFraction">Fraction of the rolled cash paid on a failed attempt.</param>
+    /// <param name="consolationXpFraction">Fraction of the job's XP granted on a failed attempt.</param>
+    public JobCatalog(
+        IReadOnlyList<Job> jobs,
+        int completionsPerRank,
+        int maxRank,
+        double maxSuccessChance,
+        double consolationCashFraction,
+        double consolationXpFraction)
     {
         Jobs = jobs;
         CompletionsPerRank = completionsPerRank;
         MaxRank = maxRank;
+        MaxSuccessChance = maxSuccessChance;
+        ConsolationCashFraction = consolationCashFraction;
+        ConsolationXpFraction = consolationXpFraction;
         _byId = jobs.ToFrozenDictionary(j => j.Id, StringComparer.Ordinal);
     }
 
@@ -37,6 +49,22 @@ public sealed class JobCatalog
 
     /// <summary>Highest attainable mastery rank.</summary>
     public int MaxRank { get; }
+
+    /// <summary>
+    /// Ceiling on any job's success chance. No job is ever a certainty, however much gear is worn.
+    /// </summary>
+    /// <remarks>
+    /// Pack-wide rather than per-job so the "nothing is certain" rule cannot be forgotten on one row.
+    /// <see cref="Job.SuccessChanceFor"/> takes it as an argument for the same reason the mastery
+    /// thresholds are passed to <c>JobService</c>: the domain stays free of content loading.
+    /// </remarks>
+    public double MaxSuccessChance { get; }
+
+    /// <summary>Fraction of the rolled cash paid out on a failed attempt.</summary>
+    public double ConsolationCashFraction { get; }
+
+    /// <summary>Fraction of the job's XP granted on a failed attempt.</summary>
+    public double ConsolationXpFraction { get; }
 
     /// <summary>
     /// Finds a job by content id. Comparison is <see cref="StringComparer.Ordinal"/> — ids are
