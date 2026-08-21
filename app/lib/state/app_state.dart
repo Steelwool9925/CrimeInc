@@ -51,6 +51,15 @@ class AppState extends ChangeNotifier {
   /// The id of the item currently being bought or worn, so the UI can disable just that row.
   String? _itemInFlight;
 
+  // ---- Properties ----
+  List<Property> _properties = const [];
+  bool _propertiesLoading = false;
+  String? _propertiesError;
+
+  /// The id of the property currently being bought or collected from, so the UI can disable just
+  /// that row.
+  String? _propertyInFlight;
+
   LoadStatus get status => _status;
   Me? get me => _me;
   ContentPack? get contentPack => _contentPack;
@@ -81,6 +90,18 @@ class AppState extends ChangeNotifier {
   /// Inventory cannot disagree about an item, and this is the Inventory's view of that one list.
   List<InventoryItem> get ownedItems =>
       _inventory.where((i) => i.isOwned).toList(growable: false);
+
+  List<Property> get properties => _properties;
+  bool get propertiesLoading => _propertiesLoading;
+  String? get propertiesError => _propertiesError;
+  String? get propertyInFlight => _propertyInFlight;
+
+  /// The properties the player actually holds — the collecting half of the screen.
+  ///
+  /// Derived rather than fetched, for the same reason [ownedItems] is: GET /properties sends the
+  /// whole catalog so the two halves cannot disagree, and this is one view of that single list.
+  List<Property> get ownedProperties =>
+      _properties.where((p) => p.isOwned).toList(growable: false);
 
   Future<void> bootstrap() async {
     _status = LoadStatus.loading;
@@ -351,6 +372,97 @@ class AppState extends ChangeNotifier {
         'notOwned' => 'You do not own that item.',
         'alreadyEquipped' => 'You are already wearing that.',
         'notEquipped' => 'You are not wearing that.',
+        _ => e.detail,
+      };
+
+  // -------------------------------------------------------------------------
+  // Properties
+  // -------------------------------------------------------------------------
+
+  /// Loads the property catalog with this player's holdings, takings and gating folded in.
+  ///
+  /// Safe to call repeatedly; concurrent calls are collapsed. The Properties screen calls this on
+  /// a timer, which is safe precisely because the read banks nothing server-side.
+  Future<void> loadProperties() async {
+    final token = _deviceToken;
+    if (token == null || _propertiesLoading) return;
+
+    _propertiesLoading = true;
+    _propertiesError = null;
+    notifyListeners();
+
+    try {
+      final list = await _apiClient.properties(token);
+      _properties = list.properties;
+    } catch (e) {
+      _propertiesError = e.toString();
+    } finally {
+      _propertiesLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Buys one unit of [propertyId].
+  Future<void> buyProperty(String propertyId) => _propertyAction(
+        propertyId,
+        (token) async {
+          final result = await _apiClient.buyProperty(token, propertyId);
+          _me = result.player;
+        },
+      );
+
+  /// Banks everything [propertyId] has earned.
+  Future<void> collectProperty(String propertyId) => _propertyAction(
+        propertyId,
+        (token) async {
+          final result = await _apiClient.collectProperty(token, propertyId);
+          _me = result.player;
+        },
+      );
+
+  /// Runs one property action, then re-reads the catalog it just invalidated.
+  ///
+  /// The same shape as [_itemAction], and for the same reasons. The action response carries the
+  /// authoritative player, so cash moves at once; what it cannot carry is the gating for every
+  /// *other* row, and buying moves the cash all of those were priced against. The in-flight guard
+  /// is held across the refresh rather than released when the action returns — the bug found in
+  /// S3.3, where a second action could be aimed at rows still carrying pre-action gating, and its
+  /// own refresh would then be collapsed into the one already running.
+  ///
+  /// Collecting is the case that makes the guard load-bearing rather than tidy: the server refuses
+  /// a conflicting second collect rather than retrying it, because a retry would settle a holding
+  /// whose payout the winning request had already banked.
+  Future<void> _propertyAction(
+      String propertyId, Future<void> Function(String) act) async {
+    final token = _deviceToken;
+    if (token == null || _propertyInFlight != null) return;
+
+    _propertyInFlight = propertyId;
+    _actionMessage = null;
+    notifyListeners();
+
+    try {
+      await act(token);
+    } on JobRefusedException catch (e) {
+      _actionMessage = _propertyRefusalMessage(e);
+    } catch (e) {
+      _actionMessage = 'Could not do that. $e';
+    }
+
+    try {
+      await loadProperties();
+    } finally {
+      _propertyInFlight = null;
+      notifyListeners();
+    }
+  }
+
+  /// Wording for the server's property tokens. The server sends a stable token, not display text.
+  String _propertyRefusalMessage(JobRefusedException e) => switch (e.reason) {
+        'cash' => 'You cannot afford that.',
+        'level' => 'Your level is too low for that property.',
+        'notOwned' => 'You do not own that property.',
+        'nothingToCollect' => 'That property has not earned anything yet.',
         _ => e.detail,
       };
 

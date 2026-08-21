@@ -488,3 +488,201 @@ class DoJobResult {
             : LevelUp.fromJson(json['levelUp'] as Map<String, dynamic>),
       );
 }
+
+/// One catalog property as GET /properties offers it: the content definition, this player's
+/// holding, what it has earned, and whether they may buy or collect right now.
+@immutable
+class Property {
+  const Property({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.levelRequirement,
+    required this.price,
+    required this.incomePerHour,
+    required this.accrualCapMinutes,
+    required this.quantity,
+    required this.pending,
+    required this.cap,
+    required this.canBuy,
+    required this.canCollect,
+    this.buyUnavailableReason,
+    this.collectUnavailableReason,
+  });
+
+  final String id;
+  final String name;
+  final String description;
+  final int levelRequirement;
+  final int price;
+
+  /// What a *single* unit earns per hour. Per unit rather than per holding, so the figure still
+  /// means something on a property the player does not own yet.
+  final int incomePerHour;
+
+  /// How long one unit takes to fill, in minutes.
+  final int accrualCapMinutes;
+
+  /// Units owned; zero when the player holds none.
+  final int quantity;
+
+  /// Cash collectable at the instant the listing was served, across every unit owned.
+  final int pending;
+
+  /// The ceiling [pending] is filling toward, scaled by units owned. Zero when none are owned.
+  final int cap;
+
+  final bool canBuy;
+  final bool canCollect;
+
+  /// Stable token from the server: 'level' or 'cash'. Null when [canBuy] is true.
+  final String? buyUnavailableReason;
+
+  /// Stable token from the server: 'notOwned' or 'nothingToCollect'. Null when [canCollect] is
+  /// true.
+  final String? collectUnavailableReason;
+
+  /// Whether the player holds at least one unit — what puts a counter on the card.
+  bool get isOwned => quantity > 0;
+
+  /// What the counter should read [secondsElapsed] after the listing was served.
+  ///
+  /// **Display only.** [pending] is stale the moment it is sent, so the screen interpolates forward
+  /// at the rate the server published rather than redrawing a frozen number between polls — which
+  /// is why `incomePerHour` and `accrualCapMinutes` are on the wire at all.
+  ///
+  /// This deliberately does *not* decide anything. Whether a property may be collected stays
+  /// [canCollect], the server's answer, however far this projection has climbed: a client that
+  /// enabled its own buttons from its own arithmetic would be a second copy of a server rule, free
+  /// to drift the moment either side is retuned.
+  ///
+  /// The floor matches the server's: a part-earned coin is not a coin, so the player is shown
+  /// slightly less than they have earned rather than slightly more.
+  int projectedPending(int secondsElapsed) {
+    if (quantity < 1) return 0;
+    if (pending >= cap) return cap;
+
+    final earned = incomePerHour * quantity * secondsElapsed ~/ 3600;
+    final projected = pending + earned;
+
+    return projected > cap ? cap : projected;
+  }
+
+  factory Property.fromJson(Map<String, dynamic> json) => Property(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        description: json['description'] as String? ?? '',
+        levelRequirement: json['levelRequirement'] as int,
+        price: json['price'] as int,
+        incomePerHour: json['incomePerHour'] as int,
+        accrualCapMinutes: json['accrualCapMinutes'] as int,
+        quantity: json['quantity'] as int,
+        pending: json['pending'] as int,
+        cap: json['cap'] as int,
+        canBuy: json['canBuy'] as bool,
+        canCollect: json['canCollect'] as bool,
+        buyUnavailableReason: json['buyUnavailableReason'] as String?,
+        collectUnavailableReason: json['collectUnavailableReason'] as String?,
+      );
+}
+
+/// Response to GET /properties: the whole catalog, held or not.
+///
+/// Carries every property in the pack for the same reason [InventoryList] does — the buy half and
+/// the holdings half of the screen are two views of one list, so a single call serves both and they
+/// cannot disagree about a property.
+@immutable
+class PropertyList {
+  const PropertyList({
+    required this.properties,
+    required this.cash,
+    required this.level,
+  });
+
+  final List<Property> properties;
+
+  /// The cash the affordability gating was computed against.
+  final int cash;
+
+  /// The level the gating was computed against.
+  final int level;
+
+  factory PropertyList.fromJson(Map<String, dynamic> json) => PropertyList(
+        properties: (json['properties'] as List<dynamic>)
+            .map((p) => Property.fromJson(p as Map<String, dynamic>))
+            .toList(growable: false),
+        cash: json['cash'] as int,
+        level: json['level'] as int,
+      );
+}
+
+/// Response to a property purchase. Carries the full post-action player, so no follow-up /me is
+/// needed.
+@immutable
+class BuyPropertyResult {
+  const BuyPropertyResult({
+    required this.propertyId,
+    required this.cashSpent,
+    required this.quantityOwned,
+    required this.pending,
+    required this.cap,
+    required this.player,
+  });
+
+  final String propertyId;
+  final int cashSpent;
+
+  /// Units held after the purchase.
+  final int quantityOwned;
+
+  /// Cash collectable straight after the purchase — normally what the existing units had already
+  /// banked, since buying settles them at the old rate first.
+  final int pending;
+
+  /// The ceiling after the purchase, scaled by the new quantity.
+  final int cap;
+
+  final Me player;
+
+  factory BuyPropertyResult.fromJson(Map<String, dynamic> json) =>
+      BuyPropertyResult(
+        propertyId: json['propertyId'] as String,
+        cashSpent: json['cashSpent'] as int,
+        quantityOwned: json['quantityOwned'] as int,
+        pending: json['pending'] as int,
+        cap: json['cap'] as int,
+        player: Me.fromJson(json['player'] as Map<String, dynamic>),
+      );
+}
+
+/// Response to a collection. [player] carries the cash figure CP3 watches rise.
+@immutable
+class CollectPropertyResult {
+  const CollectPropertyResult({
+    required this.propertyId,
+    required this.cashCollected,
+    required this.pending,
+    required this.cap,
+    required this.player,
+  });
+
+  final String propertyId;
+  final int cashCollected;
+
+  /// What is still pending straight after the collection — normally zero.
+  final int pending;
+
+  /// The ceiling the counter starts filling toward again.
+  final int cap;
+
+  final Me player;
+
+  factory CollectPropertyResult.fromJson(Map<String, dynamic> json) =>
+      CollectPropertyResult(
+        propertyId: json['propertyId'] as String,
+        cashCollected: json['cashCollected'] as int,
+        pending: json['pending'] as int,
+        cap: json['cap'] as int,
+        player: Me.fromJson(json['player'] as Map<String, dynamic>),
+      );
+}
