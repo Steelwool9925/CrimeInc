@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../api/models.dart';
 import '../state/app_state.dart';
 import '../theme/pack_theme.dart';
+import '../widgets/meter_card.dart';
 import '../widgets/pack_logo.dart';
 import 'inventory_screen.dart';
 import 'jobs_screen.dart';
@@ -78,11 +79,11 @@ class HomeScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _MeterCard(label: 'Energy', meter: me.energy),
+          MeterCard(label: 'Energy', meter: me.energy),
           const SizedBox(height: 8),
-          _MeterCard(label: 'Stamina', meter: me.stamina),
+          MeterCard(label: 'Stamina', meter: me.stamina),
           const SizedBox(height: 8),
-          _MeterCard(label: 'Health', meter: me.health),
+          MeterCard(label: 'Health', meter: me.health),
           const SizedBox(height: 16),
           Card(
             child: Padding(
@@ -191,16 +192,19 @@ class _ProgressionCard extends StatelessWidget {
             const SizedBox(height: 8),
             Row(
               children: [
+                // "Base", explicitly: these come from /me and exclude equipped gear, while
+                // Inventory shows the effective total. Unlabelled, the two screens read as a
+                // contradiction and an equip looks like it failed (A.5.1).
                 Expanded(
                   child: Text(
-                    'Attack ${me.attack}',
+                    'Base attack ${me.attack}',
                     key: const Key('home-attack'),
                     style: theme.textTheme.bodyMedium,
                   ),
                 ),
                 Expanded(
                   child: Text(
-                    'Defense ${me.defense}',
+                    'Base defense ${me.defense}',
                     key: const Key('home-defense'),
                     style: theme.textTheme.bodyMedium,
                   ),
@@ -214,52 +218,6 @@ class _ProgressionCard extends StatelessWidget {
                 key: const Key('home-skill-points'),
                 style: theme.textTheme.bodyMedium
                     ?.copyWith(fontWeight: FontWeight.bold),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _MeterCard extends StatelessWidget {
-  const _MeterCard({required this.label, required this.meter});
-
-  final String label;
-  final MeterState meter;
-
-  @override
-  Widget build(BuildContext context) {
-    final progress = meter.max > 0 ? meter.current / meter.max : 0.0;
-    final isFull = meter.current >= meter.max;
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  label,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                Text(
-                  '${meter.current} / ${meter.max}',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            LinearProgressIndicator(value: progress),
-            if (!isFull && meter.secondsUntilNextPoint != null) ...[
-              const SizedBox(height: 4),
-              Text(
-                '+1 in ${meter.secondsUntilNextPoint}s',
-                style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
           ],
