@@ -102,27 +102,29 @@ public sealed record Job
     /// the odds they get.
     /// </para>
     /// </remarks>
-    /// <exception cref="ArgumentOutOfRangeException">
-    ///     Thrown when <paramref name="maxSuccessChance"/> is below this job's
-    ///     <see cref="BaseSuccessChance"/>. The loader rejects that pack-wide, so reaching it means a
-    ///     hand-built job disagrees with the rules it was handed — louder is better than silently
-    ///     picking one of the two.
-    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <b>The ceiling always wins</b>, including over this job's own floor. The two can legitimately
+    /// disagree: the domain default is <c>1.0</c> so a hand-built job never fails by accident, and a
+    /// realistic pack caps at <c>0.95</c> — a job built in a test and evaluated under real pack rules
+    /// meets exactly that. Throwing there would turn the benign default into an exception at roll
+    /// time. Content that genuinely disagrees is caught far earlier and far louder: the loader
+    /// rejects a <c>baseSuccessChance</c> above <c>risk.maxSuccessChance</c> at startup, naming the
+    /// job.
+    /// </para>
+    /// </remarks>
     public double SuccessChanceFor(int effectiveAttack, int effectiveDefense, double maxSuccessChance)
     {
         double ceiling = Math.Min(1.0, maxSuccessChance);
-
-        if (ceiling < BaseSuccessChance)
-            throw new ArgumentOutOfRangeException(nameof(maxSuccessChance), maxSuccessChance,
-                $"Job '{Id}' has a base success chance of {BaseSuccessChance}, above the ceiling of " +
-                $"{ceiling} it was evaluated against.");
 
         int surplus = Math.Max(0, effectiveAttack - AttackRequirement)
                     + Math.Max(0, effectiveDefense - DefenseRequirement);
 
         double chance = BaseSuccessChance + SuccessChancePerSurplusPoint * surplus;
 
-        return Math.Clamp(chance, BaseSuccessChance, ceiling);
+        // The floor is the job's base, but never above the ceiling — otherwise Math.Clamp is handed
+        // an inverted range and throws.
+        return Math.Clamp(chance, Math.Min(BaseSuccessChance, ceiling), ceiling);
     }
 
     /// <summary>

@@ -222,14 +222,26 @@ public class JobTests
     }
 
     [Fact]
-    public void A_ceiling_below_the_jobs_own_floor_is_a_contradiction_and_throws()
+    public void A_ceiling_below_the_jobs_own_floor_still_wins()
     {
-        // The loader validates this pack-wide, so reaching here means a hand-built job disagrees
-        // with the rules it was handed. Failing loudly beats silently picking one of the two.
-        var ex = Assert.Throws<ArgumentOutOfRangeException>(
-            () => RiskyJob().SuccessChanceFor(
-                effectiveAttack: 5, effectiveDefense: 3, maxSuccessChance: 0.5));
+        // The two legitimately disagree for a job built in code: the domain default is 1.0 so a
+        // hand-built job never fails by accident, while a realistic pack caps at 0.95. Throwing here
+        // would turn that benign default into an exception the moment it met real pack rules.
+        // Content that genuinely disagrees is caught at load instead, naming the job — see
+        // JobCatalogLoaderTests.A_base_success_chance_above_the_pack_ceiling_throws.
+        var chance = RiskyJob().SuccessChanceFor(
+            effectiveAttack: 5, effectiveDefense: 3, maxSuccessChance: 0.5);
 
-        Assert.Contains("shake-down-corner-store", ex.Message);
+        Assert.Equal(0.5, chance, precision: 10);
+    }
+
+    [Fact]
+    public void The_permissive_default_survives_a_realistic_pack_ceiling()
+    {
+        // The exact collision that caught this: TestJob's default 1.0 under the shipped 0.95.
+        var chance = TestJob().SuccessChanceFor(
+            effectiveAttack: 5, effectiveDefense: 5, maxSuccessChance: 0.95);
+
+        Assert.Equal(0.95, chance, precision: 10);
     }
 }

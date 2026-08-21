@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using UnderworldEmpire.Domain;
+using UnderworldEmpire.Domain.Items;
 using UnderworldEmpire.Domain.Jobs;
 using UnderworldEmpire.Domain.Progression;
 using UnderworldEmpire.Infrastructure.Content;
@@ -120,15 +121,25 @@ public class JobActionService
             _db.PlayerJobMasteries.Add(mastery);
         }
 
+        // The stat gate and the odds both read effective stats, so the equipped holdings must be
+        // resolved before the attempt. This is the second query a job attempt now costs; it is the
+        // price of gear mattering outside combat.
+        var loadout = await BuildLoadoutAsync(player, cancellationToken);
+
         var result = _jobs.Attempt(
             player,
             job,
             mastery,
+            loadout,
             catalog.CompletionsPerRank,
             catalog.MaxRank,
+            new JobRiskRules(
+                catalog.MaxSuccessChance,
+                catalog.ConsolationCashFraction,
+                catalog.ConsolationXpFraction),
             nowUtc);
 
-        if (!result.Succeeded)
+        if (!result.WasApplied)
         {
             // The domain refused and mutated nothing. Detach a mastery row we speculatively added so
             // a refusal cannot leave an empty row behind on some later SaveChanges.
@@ -165,4 +176,18 @@ public class JobActionService
             result.LevelUp);
     }
 
+    /// <summary>Reads the player's equipped holdings and aggregates them into a <see cref="Loadout"/>.</summary>
+    /// <remarks>
+    /// The same shape <c>InventoryActionService</c> uses. Duplicated rather than shared because the
+    /// two services own different units of work and neither should reach into the other's tracked
+    /// entities; if a third caller appears, this is worth lifting.
+    /// </remarks>
+    private async Task<Loadout> BuildLoadoutAsync(Player player, CancellationToken cancellationToken)
+    {
+        var equipped = await _db.PlayerItems
+            .Where(h => h.PlayerId == player.Id && h.Equipped)
+            .ToListAsync(cancellationToken);
+
+        return Loadout.For(player, _content.ItemCatalog.ResolveEquipped(equipped));
+    }
 }

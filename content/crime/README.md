@@ -121,8 +121,9 @@ It is the reason M3R was scheduled after M3 rather than inside M2 — the requir
 stats, so it depends on the `Loadout` aggregation that T3.1 introduced.
 
 Health loss scales with the job's ambition: the level-1 jobs can cost a point or three, while a
-failed armored-transport robbery costs 8–25 of a 10-point starting bar. The loss is clamped to
-current health, so it floors at 0 rather than throwing.
+failed armored-transport robbery costs 8–25 of a 100-point bar. The loss is clamped to current
+health, so it floors at 0 rather than throwing — `Meter.SpendAt` rejects an overspend, and must
+never be handed a raw roll.
 
 Job ids are compared **ordinally**. They are content keys, not display text, so casing is
 significant and `Boost-A-Parked-Car` is a different id from `boost-a-parked-car`.

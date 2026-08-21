@@ -3,13 +3,44 @@ using UnderworldEmpire.Domain.Progression;
 namespace UnderworldEmpire.Domain.Jobs;
 
 /// <summary>
-/// What one successful job attempt produced. Every figure is the server's decision — the client
-/// receives this, it never proposes it.
+/// Pack-wide risk rules, applied to every job in the pack.
 /// </summary>
-/// <param name="JobId">The job that was completed.</param>
-/// <param name="EnergySpent">Energy deducted, equal to the job's cost.</param>
-/// <param name="CashEarned">Cash rolled from the job's inclusive range.</param>
-/// <param name="XpEarned">Experience granted; fixed per job, not rolled.</param>
+/// <remarks>
+/// Passed into <see cref="JobService.Attempt"/> rather than read from a catalog, the same seam the
+/// mastery thresholds use: the catalog lives in infrastructure, and the domain stays free of
+/// content loading.
+/// </remarks>
+/// <param name="MaxSuccessChance">Ceiling on any job's success chance. No job is ever certain.</param>
+/// <param name="ConsolationCashFraction">Fraction of the rolled cash paid on a failed attempt.</param>
+/// <param name="ConsolationXpFraction">Fraction of the job's XP granted on a failed attempt.</param>
+public readonly record struct JobRiskRules(
+    double MaxSuccessChance,
+    double ConsolationCashFraction,
+    double ConsolationXpFraction);
+
+/// <summary>
+/// What one <b>applied</b> job attempt produced — successful or not. Every figure is the server's
+/// decision; the client receives this, it never proposes it.
+/// </summary>
+/// <remarks>
+/// Since M3R this describes a failed attempt as well as a successful one. A failure is not a
+/// refusal: the energy was spent and the player's state changed, so there is an outcome to report.
+/// The fields differ in what they carry rather than whether they are present — on a failure
+/// <paramref name="CashEarned"/> and <paramref name="XpEarned"/> hold the consolation fractions,
+/// <paramref name="Completions"/> is unchanged because mastery does not advance, and
+/// <paramref name="HealthLost"/> is the only field that can be non-zero.
+/// </remarks>
+/// <param name="JobId">The job that was attempted.</param>
+/// <param name="Succeeded">Whether the attempt succeeded. False on a failed-but-applied attempt.</param>
+/// <param name="EnergySpent">Energy deducted, equal to the job's cost. Spent on both branches.</param>
+/// <param name="CashEarned">
+///     Cash rolled from the job's inclusive range on a success, or the consolation fraction of that
+///     same roll on a failure.
+/// </param>
+/// <param name="XpEarned">
+///     The job's XP on a success, or the consolation fraction of it on a failure.
+/// </param>
+/// <param name="HealthLost">Health deducted; always 0 on a success.</param>
 /// <param name="Completions">The player's total completions of this job after this attempt.</param>
 /// <param name="MasteryRank">Mastery rank after this attempt.</param>
 /// <param name="MasteryRankedUp">Whether this attempt crossed a mastery rank threshold.</param>
@@ -18,9 +49,11 @@ namespace UnderworldEmpire.Domain.Jobs;
 /// </param>
 public record JobOutcome(
     string JobId,
+    bool Succeeded,
     int EnergySpent,
     long CashEarned,
     long XpEarned,
+    int HealthLost,
     int Completions,
     int MasteryRank,
     bool MasteryRankedUp,
@@ -46,19 +79,28 @@ public sealed record JobAttemptResult
     /// <summary>The refusal reason, or <see cref="JobFailure.None"/> on success.</summary>
     public JobFailure Failure { get; }
 
-    /// <summary>The outcome on success; <see langword="null"/> on refusal.</summary>
+    /// <summary>What happened if the attempt was applied; <see langword="null"/> on refusal.</summary>
     public JobOutcome? Outcome { get; }
 
     /// <summary>
-    /// What the XP grant did to the player's level. Non-null on success — check
-    /// <see cref="LevelUpOutcome.LeveledUp"/> to see whether a threshold was actually crossed.
+    /// What the XP grant did to the player's level. Non-null whenever the attempt was applied —
+    /// check <see cref="LevelUpOutcome.LeveledUp"/> to see whether a threshold was actually crossed.
+    /// A failed attempt still grants consolation XP, so it can still level a player.
     /// </summary>
     public LevelUpOutcome? LevelUp { get; }
 
-    /// <summary>Whether the attempt succeeded.</summary>
-    public bool Succeeded => Failure == JobFailure.None;
+    /// <summary>
+    /// Whether the attempt was <b>applied</b> — that is, not refused at a gate.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not called <c>Succeeded</c>. Since M3R those are different questions: an applied
+    /// attempt may still have failed its roll, and the two have different answers on the wire — a
+    /// refusal is a 409 that spent nothing, while a failed attempt is a 200 that spent energy. Ask
+    /// <see cref="JobOutcome.Succeeded"/> for whether the job itself came off.
+    /// </remarks>
+    public bool WasApplied => Failure == JobFailure.None;
 
-    /// <summary>Builds a refusal.</summary>
+    /// <summary>Builds a refusal. Nothing was spent.</summary>
     public static JobAttemptResult Refused(JobFailure failure)
     {
         if (failure == JobFailure.None)
@@ -67,7 +109,9 @@ public sealed record JobAttemptResult
         return new JobAttemptResult(failure, null, null);
     }
 
-    /// <summary>Builds a success.</summary>
-    public static JobAttemptResult Success(JobOutcome outcome, LevelUpOutcome levelUp) =>
+    /// <summary>
+    /// Builds an applied attempt — successful or failed. Both spent energy and changed state.
+    /// </summary>
+    public static JobAttemptResult Applied(JobOutcome outcome, LevelUpOutcome levelUp) =>
         new(JobFailure.None, outcome, levelUp);
 }
