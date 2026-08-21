@@ -1011,8 +1011,17 @@ knuckles changes the job odds and the Inventory figure, but not Home's.
 
 ### ▶ Next: M4 — Combat, bounty & crew
 
-M3R is code-complete on `worktree-m3r-job-risk` and **not yet merged**. CP3 and CP3R are both
-outstanding and both are the user's to run.
+**M3R is merged to `main`** (`67a5e59`, merging `worktree-m3r-job-risk`). CP3 and CP3R are both
+still outstanding and both are the user's to run — merging did not discharge them.
+
+**A balance pass landed after M3R** (`10f9806`, merged as `972271a`): the player now starts at a
+1/1, penniless state with only the first job open. This tightens every CP3R figure above that
+depends on the starting position — read the checkpoint script with that in mind.
+
+**M4 is already underway and is not on `main`.** `worktree-m4a-combat-formula` stands at `cf09e9e`
+(S4.3 / T4.4: `POST /fights`, the fight log, the cash transfer). It is mid-milestone and unverified
+against the checkpoints above; it should not be merged until M4's own tasks and checkpoint are
+complete.
 
 ---
 
