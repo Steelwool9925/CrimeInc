@@ -1869,7 +1869,11 @@ $env:DOTNET_ROOT = "C:\Users\jason\.dotnet"
 $env:PATH = "C:\Users\jason\.dotnet;C:\Users\jason\flutter\bin;$env:PATH"
 ```
 
-**There is no Android SDK on this machine**, so the Android half of CP4 cannot be run here at all.
+**Android SDK — resolved 2026-08-21.** There was none on this machine, which blocked the Android
+half of CP4 entirely. `scripts/setup-android.ps1` now installs it (command-line tools, platform 36,
+build-tools 36, platform-tools) without needing Android Studio. `flutter doctor` reports
+`[√] Android toolchain (Android SDK version 36.0.0)` and **a debug APK builds**, so CP4's Android
+half is now runnable. See A.9.6 for the version drift that surfaced once it could build.
 
 ### A.9.3 — `pack.json` BOM asymmetry between the server and the tooling
 
@@ -1900,3 +1904,28 @@ outside the pack root, and a further test resolves that same file from its own r
 otherwise servable — so the refusals are attributable to containment alone.
 
 **The general lesson:** a negative test proves nothing until you know *which* check refused it.
+
+### A.9.6 — the Android build config had drifted three versions behind the Flutter SDK
+
+Invisible until the Android SDK existed, because nothing could get far enough to check. Once an
+APK build could run, Flutter's dependency validation rejected the project three times in a row —
+each floor only surfacing after the previous was raised, since the gates are sequential:
+
+| Component | Was (M0-era) | Flutter 3.47 minimum | Set to |
+|---|---|---|---|
+| Gradle wrapper | 8.12.0 | 8.14.0 | **8.14.3** |
+| Android Gradle Plugin | 8.9.1 | 8.11.1 | **8.11.1** |
+| Kotlin | 2.1.0 | 2.2.20 | **2.2.20** |
+
+**Cause:** the Flutter SDK on this machine was upgraded from the 3.35.7 this plan records to
+**3.47.1**, while `app/android/` kept the versions `flutter create` scaffolded under 3.35. The web
+build and both test suites never noticed, because neither touches Gradle — so the drift sat
+undetected through M3, M3R and most of M4.
+
+AGP was moved to the stated minimum rather than to 9.x: `gradle.properties` carries
+`android.newDsl=false` (added by a Flutter migrator), and AGP 9 reads only the new DSL, so
+jumping the major version would trade this failure for a different one.
+
+**Worth noting for CP4:** a green `flutter test` and a green `flutter build web` say nothing about
+whether the Android build works. They exercise different toolchains entirely. The APK build is the
+only thing that proves it, which is why `scripts/setup-android.ps1` finishes by pointing at it.

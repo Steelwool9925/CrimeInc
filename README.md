@@ -41,7 +41,7 @@ PostgreSQL                    ── all persistent state, transactional mutatio
 | **Flutter 3.35+** (Dart 3.9+) | app, widget tests | yes |
 | **Docker** | local Postgres | yes |
 | Chrome | `run-app.ps1` web run | for the web run |
-| Android SDK | emulator / APK builds | **optional** |
+| Android SDK | emulator / APK builds | optional — `./scripts/setup-android.ps1` installs it |
 | Python 3 | regenerating pack art | optional |
 
 > **You do not need to put the SDKs on PATH.** `scripts/_toolchain.ps1` locates them and the
@@ -77,6 +77,26 @@ docker compose up -d postgres
 
 **Start with `doctor.ps1`.** It reports the SDKs it found, whether Postgres is up, which
 optional targets are missing, and whether any access token is sitting in plaintext git config.
+
+### Android
+
+Android Studio is **not** required. This installs only the pieces the project needs
+(command-line tools, platform 36, build-tools 36, platform-tools — a few hundred MB):
+
+```powershell
+./scripts/setup-android.ps1                  # APK builds, physical devices
+./scripts/setup-android.ps1 -WithEmulator    # also an emulator (~1.5 GB more)
+
+cd app; flutter build apk --debug            # prove it works
+flutter devices                              # then: ./scripts/run-app.ps1 -d <device>
+```
+
+> Running that script **accepts Google's Android SDK licence agreements** on your behalf —
+> the same ones `flutter doctor --android-licenses` presents interactively.
+
+Everything installs under `%LOCALAPPDATA%\Android\Sdk`, so undoing it is deleting that folder
+and the `ANDROID_HOME` user variable. It needs a JDK (17 or 21); set `JAVA_HOME` if the script
+says it cannot find one.
 
 ### Verifying the core loop without clicking through it
 
