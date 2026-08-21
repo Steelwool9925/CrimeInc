@@ -1098,7 +1098,36 @@ demo — *Run Numbers* unlocking on equip — no longer works: at 1/1 base stats
 5/1, which clears *Boost a Parked Car* (5/1) but not Run Numbers (6/5). The unlock-by-equipping
 demo is *Boost a Parked Car* now.
 
-### ▶ Next: M4 — Art, theming & polish (the last MVP milestone)
+### ✅ M4 — Art, theming & polish (built 2026-08-21, branch `worktree-m4-art-polish`)
+
+All three sessions executed. `dotnet build` 0/0 · `dotnet test` **570** (546 before) ·
+`flutter test` **240** (204 before) · `flutter analyze` clean · no pending model changes ·
+`flutter build web --release` succeeds.
+
+- **S4.1 / T4.1** (`acaf449`, `59d8075`, `0d4e98d`) — the manifest had named `assets/logo.png`
+  and `assets/icon.png` since M1 and neither existed. Both are now generated from the pack's own
+  palette by `scripts/generate-pack-art.py` (pure stdlib; PNG written by hand). `GET
+  /content/assets/{key}` serves **by logical key, never by path**, with the manifest's own
+  declaration confined to the pack folder. The app's theme now comes from the manifest —
+  `main.dart` previously seeded everything from `Colors.deepPurple` while the shipped pack
+  declared red, so five of six screens ignored the pack entirely.
+- **S4.2 / T4.2** (`09a469f`) — the regen countdown was static, rendering the polled figure raw
+  ("+1 in 247s") so it sat frozen and jumped ten at a time. `MeterCard` ticks locally and
+  re-syncs on each fresh figure. Home labels "Base attack"/"Base defense" (see A.5.1).
+- **S4.3 / T4.3** (`d709928`) — `scripts/smoke-core-loop.ps1` drives the live HTTP surface;
+  all checks pass. Three defects were found during it, **all in the smoke script, none in the
+  product**, each of which read as a product failure first.
+
+**🔎 CP4 is half-discharged.** The web half passes and the asset-swap criterion is demonstrated:
+repointing the palette re-themed both assets with nothing under `src/` or `app/lib/` touched, and
+regeneration reproduces the committed PNGs byte-for-byte. **The Android half cannot be run on this
+machine** — `flutter doctor` reports no Android SDK (A.9.2). A full manual playthrough on both
+builds remains the user's checkpoint.
+
+⚠️ **A.9.1 — a GitHub PAT is embedded in the Flutter SDK's git remote** and is printed in plain
+text by `flutter doctor`. It should be revoked. Unrelated to this repo's code, but found by it.
+
+### Context — the 2026-08-21 scope cut
 
 **Scope was cut on 2026-08-21.** Combat, bounty and crew are no longer part of this plan; the MVP
 is the core loop — jobs, cash, gear, levels, properties — and M4 is the art/theming/polish pass
@@ -1116,10 +1145,21 @@ this build that does.
 1/1, penniless state with only the first job open. This tightens every CP3R figure above that
 depends on the starting position — read the checkpoint script with that in mind.
 
-**No combat code exists**, and no branch or worktree matching `m4` exists. An earlier revision of
-this plan claimed `worktree-m4a-combat-formula` stood at `cf09e9e` with `POST /fights` built; that
-was false (`cf09e9e` is not a valid object in this repository) and has been removed. M4 starts from
-scratch at S4.1, on art and polish.
+**No combat code is on `main`** — correct as of `4d441de`, and still correct today.
+
+⚠️ **Corrected 2026-08-21.** This section previously said `cf09e9e` "is not a valid object in this
+repository". That was true of `origin/main`, on which this plan was written, but not of the
+repository as a whole: a **parallel local line had built the combat backend** — `cf0a5fc` →
+`a67a5db` → `cf09e9e`, merged at `c9f3109`, some 4,200 lines with a 9th `AddFights` migration and
+live `/fights` and `/opponents` routes. A `git pull` merged the two lines and produced a tree where
+the code existed and this document denied it.
+
+Neither document was wrong; each was accurate about its own history. The merge was resolved by
+resetting `main` back to `origin/main` rather than by `git revert -m 1` — a revert commit would
+permanently block re-merging that work when R1 is picked up. The combat backend is preserved on
+branch **`combat-r1-backup`** and tag `backup/pre-combat-revert-20260821`, **both local-only**;
+`origin` carries only `main`. See also A.9.4: `roadmap.md` R1 says combat "starts from scratch",
+which now overstates the work left — only the Flutter half (T4.6) was never written.
 
 **Live worktrees are leftovers, not work in progress.** `git worktree list` shows two beyond the
 main checkout — `.claude/worktrees/m2a-jobs-progression` (`a793406`) and
@@ -1783,3 +1823,67 @@ must treat the CP scripts as part of its blast radius, the way `10f9806` treated
 stop at S3.1. M3's later sessions, all of M3R and the balance pass are absent. The ledger notes the
 staleness honestly rather than guessing, which is the right call, but it means the ledger can no
 longer answer "how much did this cost".
+
+---
+
+## A.9 — Raised during M4 (2026-08-21)
+
+### A.9.1 — a GitHub PAT is embedded in the Flutter SDK's git remote ⚠️
+
+`flutter doctor` prints it in plain text. The upstream remote for `C:\Users\jason\flutter` is not
+the public Flutter URL but one carrying a `github_pat_11AOVIE7…` credential, so the token is
+exposed to any tool that shells out to `flutter doctor` and to any log, transcript or CI output
+that captures it. It surfaced here in ordinary command output during the CP4 toolchain check.
+
+**The token should be revoked**, and the remote reset to `https://github.com/flutter/flutter.git`.
+Nothing in this repository reads or depends on it — this is a workstation issue that this repo's
+build happened to reveal.
+
+### A.9.2 — the toolchain is not on PATH, and the plan's version note is stale
+
+`dotnet` resolves to `C:\Program Files\dotnet`, which holds only SDK **8.0.300**. That SDK cannot
+parse the XML `.slnx` solution format and fails with `MSB4068: The element <Solution> is
+unrecognized` — an error that reads like a corrupt solution file but is purely SDK resolution, and
+which cost several minutes to diagnose. The real SDKs live in `C:\Users\jason\.dotnet\sdk`
+(9.0.316 and **10.0.400** — not the 10.0.301 recorded above; the machine has been upgraded).
+`flutter` is not on PATH at all; it is at `C:\Users\jason\flutter\bin`. The Git Bash tool resolves
+a legacy MSBuild that fails identically, so .NET work here should go through PowerShell.
+
+Every build and test command in this repo needs both set explicitly:
+
+```powershell
+$env:DOTNET_ROOT = "C:\Users\jason\.dotnet"
+$env:PATH = "C:\Users\jason\.dotnet;C:\Users\jason\flutter\bin;$env:PATH"
+```
+
+**There is no Android SDK on this machine**, so the Android half of CP4 cannot be run here at all.
+
+### A.9.3 — `pack.json` BOM asymmetry between the server and the tooling
+
+.NET's `File.ReadAllText` strips a UTF-8 BOM silently; Python's `json.loads` rejects it outright.
+A `pack.json` edited from PowerShell (`Set-Content -Encoding utf8` writes a BOM on Windows
+PowerShell 5.1) therefore loads perfectly in the server while breaking the script that generates
+that pack's own art. Fixed in `generate-pack-art.py` by reading `utf-8-sig`; any future pack
+tooling should assume a BOM may be present, because which editor someone used is not a property of
+whether the content is valid.
+
+### A.9.4 — `roadmap.md` R1 overstates what is left to build
+
+R1 says combat is "designed, signed off, **not built**" and "starts from scratch". The backend
+*is* built and preserved on `combat-r1-backup`: power formula, opponent pool with a deterministic
+bot generator, `POST /fights`, the fight log and cash transfer, an `AddFights` migration and seven
+test files. Only the Flutter half (T4.6) was never written. R1's ~213k estimate is therefore far
+too high — roughly the 60k Flutter session plus a re-merge. Worth correcting before R1 is
+scheduled, or it will be planned as six sessions when it is closer to one.
+
+### A.9.5 — the traversal tests were vacuous when first written
+
+Recorded because it is the same failure mode as A.8.1 and it recurred within one milestone. The
+first pass of `PackAssetsTests` aimed its escape attempts at `../../Windows/win.ini` and at a
+climbing path resolving to a file that did not exist. Both were refused by the extension
+allow-list and the existence probe respectively, so the containment guard never executed and both
+tests would have passed with that guard deleted. They now target a real `.png` that genuinely sits
+outside the pack root, and a further test resolves that same file from its own root to prove it is
+otherwise servable — so the refusals are attributable to containment alone.
+
+**The general lesson:** a negative test proves nothing until you know *which* check refused it.
