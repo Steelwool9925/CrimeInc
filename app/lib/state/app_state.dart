@@ -207,6 +207,7 @@ class AppState extends ChangeNotifier {
       _actionMessage = switch (e.reason) {
         'energy' => 'Not enough energy.',
         'level' => 'Your level is too low for that job.',
+        'stats' => 'Your attack or defense is too low for that job.',
         _ => e.detail,
       };
     } catch (e) {
@@ -229,7 +230,19 @@ class AppState extends ChangeNotifier {
 
       final meetsLevel = level == null || level >= job.levelRequirement;
       final affords = energy == null || energy >= job.energyCost;
-      final reason = !meetsLevel ? 'level' : (!affords ? 'energy' : null);
+
+      // The stats gate is carried across rather than re-derived. The client does not know the
+      // player's effective stats here — that needs the loadout, which /jobs does not return — and
+      // nothing a job attempt does can change them: gear is untouched, and a level-up grants skill
+      // points without spending them. Recomputing from level and energy alone would silently clear
+      // a 'stats' lock and light up a button the server will refuse.
+      final wasStatLocked = job.unavailableReason == 'stats';
+
+      final reason = !meetsLevel
+          ? 'level'
+          : wasStatLocked
+              ? 'stats'
+              : (!affords ? 'energy' : null);
 
       return Job(
         id: job.id,
@@ -241,6 +254,9 @@ class AppState extends ChangeNotifier {
         cashMin: job.cashMin,
         cashMax: job.cashMax,
         xp: job.xp,
+        attackRequirement: job.attackRequirement,
+        defenseRequirement: job.defenseRequirement,
+        successChance: job.successChance,
         mastery: mastery,
         canAttempt: reason == null,
         unavailableReason: reason,

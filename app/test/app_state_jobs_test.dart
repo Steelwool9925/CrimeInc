@@ -158,9 +158,11 @@ void main() {
         doJobResult: const DoJobResult(
           result: JobResult(
             jobId: 'shake-down-corner-store',
+            succeeded: true,
             energySpent: 1,
             cashEarned: 20,
             xpEarned: 10,
+            healthLost: 0,
             mastery: kFakeMastery,
             masteryRankedUp: false,
           ),

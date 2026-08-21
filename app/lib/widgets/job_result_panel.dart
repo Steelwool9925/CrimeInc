@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../api/models.dart';
 
-/// Shows what the last job attempt actually paid.
+/// Shows what the last job attempt actually paid — whether or not it came off.
 ///
-/// The payout is a server-side roll from a range, so the player cannot predict it — seeing the
-/// realised figure is the feedback that makes the loop readable.
+/// The payout is a server-side roll from a range, so the player cannot predict it: seeing the
+/// realised figure is the feedback that makes the loop readable. Since M3R an attempt can also
+/// fail, and a failure is reported here rather than as an error, because it is an ordinary outcome —
+/// the energy was still spent and a consolation share was still paid.
 class JobResultPanel extends StatelessWidget {
   const JobResultPanel({
     super.key,
@@ -33,7 +35,13 @@ class JobResultPanel extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: Text('Job complete', style: theme.textTheme.titleMedium),
+                  child: Text(
+                    result.succeeded ? 'Job complete' : 'It went wrong',
+                    key: const Key('job-result-title'),
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: result.succeeded ? null : theme.colorScheme.error,
+                    ),
+                  ),
                 ),
                 IconButton(
                   key: const Key('dismiss-job-result'),
@@ -51,8 +59,24 @@ class JobResultPanel extends StatelessWidget {
                 _Stat(label: cashLabel, value: '+${result.cashEarned}'),
                 _Stat(label: 'XP', value: '+${result.xpEarned}'),
                 _Stat(label: 'Energy', value: '-${result.energySpent}'),
+                // Only ever non-zero on a failure, so the tile appears exactly when it means
+                // something rather than reading "Health -0" after every successful job.
+                if (result.healthLost > 0)
+                  _Stat(
+                    key: const Key('job-result-health'),
+                    label: 'Health',
+                    value: '-${result.healthLost}',
+                  ),
               ],
             ),
+            if (!result.succeeded) ...[
+              const SizedBox(height: 8),
+              Text(
+                'The job failed. You kept a small cut and the energy is gone.',
+                key: const Key('job-result-failed-note'),
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
             if (result.masteryRankedUp) ...[
               const SizedBox(height: 8),
               Text(
@@ -69,7 +93,7 @@ class JobResultPanel extends StatelessWidget {
 }
 
 class _Stat extends StatelessWidget {
-  const _Stat({required this.label, required this.value});
+  const _Stat({super.key, required this.label, required this.value});
 
   final String label;
   final String value;
