@@ -15,6 +15,12 @@ namespace UnderworldEmpire.Tests;
 /// </summary>
 public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 {
+    /// <summary>
+    /// The RNG this host uses. Always-minimum by default; a test that needs the other branch swaps
+    /// it for a scripted sequence via <see cref="SwitchableRandomSource.Scripted"/>.
+    /// </summary>
+    public SwitchableRandomSource Random { get; } = new();
+
     private const string TestConnectionString =
         "Host=localhost;Port=5433;Database=underworld_test;Username=underworld;Password=underworld";
 
@@ -53,7 +59,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
             if (random is not null)
                 services.Remove(random);
 
-            services.AddSingleton<IRandomSource>(FakeRandomSource.AlwaysMin());
+            services.AddSingleton<IRandomSource>(Random);
         });
 
         builder.UseEnvironment("Test");

@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using UnderworldEmpire.Api.Auth;
 using UnderworldEmpire.Api.Contracts;
 using UnderworldEmpire.Domain;
+using UnderworldEmpire.Domain.Items;
 using UnderworldEmpire.Domain.Jobs;
 using UnderworldEmpire.Infrastructure;
 using UnderworldEmpire.Infrastructure.Content;
@@ -44,6 +45,16 @@ public static class JobEndpoints
                 .Where(m => m.PlayerId == playerId)
                 .ToDictionaryAsync(m => m.JobId, StringComparer.Ordinal);
 
+            // The stat gate and the reported odds both read effective stats, so the equipped
+            // holdings are resolved here too. A third query on this route, and the reason equipping
+            // a weapon visibly changes the job list.
+            var equipped = await db.PlayerItems
+                .AsNoTracking()
+                .Where(h => h.PlayerId == playerId && h.Equipped)
+                .ToListAsync();
+
+            var loadout = Loadout.For(player, content.ItemCatalog.ResolveEquipped(equipped));
+
             var now = DateTimeOffset.UtcNow;
             int currentEnergy = player.Energy.CurrentAt(now, MeterRates.Energy);
 
@@ -58,13 +69,17 @@ public static class JobEndpoints
                     ? mastery.CompletionsUntilNextRank(catalog.CompletionsPerRank, catalog.MaxRank)
                     : UntilNextRankForFreshJob(catalog);
 
-                // Level is checked before energy so a locked job reports "level" rather than
-                // "energy" — the level gate is the permanent reason and the more useful one to show.
+                // Precedence is level -> stats -> energy, the same order JobService.Attempt refuses
+                // in: the most permanent reason first, so a row failing several gates shows the one
+                // that will take longest to clear. A mismatch here would let a row look attemptable
+                // and then be refused for a reason the client never displayed.
                 string? unavailableReason = player.Level < job.LevelRequirement
                     ? "level"
-                    : currentEnergy < job.EnergyCost
-                        ? "energy"
-                        : null;
+                    : !job.MeetsStatRequirements(loadout.TotalAttack, loadout.TotalDefense)
+                        ? "stats"
+                        : currentEnergy < job.EnergyCost
+                            ? "energy"
+                            : null;
 
                 jobs.Add(new JobDto(
                     Id: job.Id,
@@ -76,6 +91,12 @@ public static class JobEndpoints
                     CashMin: job.CashMin,
                     CashMax: job.CashMax,
                     Xp: job.Xp,
+                    AttackRequirement: job.AttackRequirement,
+                    DefenseRequirement: job.DefenseRequirement,
+                    // The same method the attempt rolls against — a second implementation here
+                    // would let the displayed odds drift from the real ones.
+                    SuccessChance: job.SuccessChanceFor(
+                        loadout.TotalAttack, loadout.TotalDefense, catalog.MaxSuccessChance),
                     Mastery: new JobMasteryState(
                         Completions: completions,
                         Rank: rank,
@@ -120,13 +141,16 @@ public static class JobEndpoints
                         statusCode: StatusCodes.Status409Conflict);
             }
 
-            if (!result.Succeeded)
+            // Only a *refusal* lands here. A failed attempt was applied — energy spent, consolation
+            // paid — so it carries on to the 200 below and reports itself through result.succeeded.
+            if (!result.WasApplied)
             {
                 // Same token vocabulary GET /jobs uses in unavailableReason, so a client handles a
                 // refusal from either endpoint with one code path.
                 var (reason, detail) = result.Failure switch
                 {
                     JobFailure.LevelTooLow => ("level", "Your level is too low for this job."),
+                    JobFailure.StatsTooLow => ("stats", "Your attack or defense is too low for this job."),
                     JobFailure.InsufficientEnergy => ("energy", "You do not have enough energy for this job."),
                     _ => ("unknown", "The job could not be performed.")
                 };
@@ -147,9 +171,11 @@ public static class JobEndpoints
             return Results.Ok(new DoJobResponse(
                 Result: new JobResultDto(
                     JobId: outcome.JobId,
+                    Succeeded: outcome.Succeeded,
                     EnergySpent: outcome.EnergySpent,
                     CashEarned: outcome.CashEarned,
                     XpEarned: outcome.XpEarned,
+                    HealthLost: outcome.HealthLost,
                     Mastery: new JobMasteryState(
                         Completions: outcome.Completions,
                         Rank: outcome.MasteryRank,
