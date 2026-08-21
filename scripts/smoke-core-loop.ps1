@@ -1,5 +1,7 @@
 # CP4 core-loop smoke: job -> level -> buy/equip -> property -> collect, plus the
 # manifest-driven art route. Exercises the real HTTP surface against a live host.
+#
+# Usage: start the API (./scripts/run-api.ps1) in one terminal, then run this in another.
 $ErrorActionPreference = 'Stop'
 $base = 'http://localhost:5080'
 $fail = 0
