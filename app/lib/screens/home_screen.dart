@@ -4,6 +4,7 @@ import '../api/models.dart';
 import '../state/app_state.dart';
 import 'inventory_screen.dart';
 import 'jobs_screen.dart';
+import 'properties_screen.dart';
 import 'skills_screen.dart';
 import 'store_screen.dart';
 
@@ -134,6 +135,16 @@ class HomeScreen extends StatelessWidget {
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(
                   builder: (_) => InventoryScreen(appState: appState)),
+            ),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            key: const Key('go-to-properties'),
+            icon: const Icon(Icons.location_city_outlined),
+            label: const Text('Properties'),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                  builder: (_) => PropertiesScreen(appState: appState)),
             ),
           ),
           const SizedBox(height: 8),

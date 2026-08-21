@@ -192,6 +192,125 @@ const kLockedWeapon = InventoryItem(
   equipUnavailableReason: 'level',
 );
 
+/// Owned, earning, and with takings on the counter — the row CP3 collects from.
+///
+/// The shipped starter property: level 1, 500 cash, 240/hour over a 15-minute window, so one unit
+/// caps at 60 and fills at four a minute.
+const kCollectableProperty = Property(
+  id: 'street-corner',
+  name: 'Street Corner',
+  description: 'A patch of pavement nobody works without your say-so.',
+  levelRequirement: 1,
+  price: 500,
+  incomePerHour: 240,
+  accrualCapMinutes: 15,
+  quantity: 1,
+  pending: 30,
+  cap: 60,
+  canBuy: true,
+  canCollect: true,
+);
+
+/// Owned but with nothing on the counter, and priced past the fixture player's cash.
+///
+/// Carries the two refusals a held property can show at once: 'cash' on the buy, and
+/// 'nothingToCollect' on the collect.
+const kEmptyProperty = Property(
+  id: 'pawn-shop',
+  name: 'Pawn Shop',
+  description: 'Buys low, asks nothing, and keeps no paperwork worth subpoenaing.',
+  levelRequirement: 2,
+  price: 1800,
+  incomePerHour: 300,
+  accrualCapMinutes: 120,
+  quantity: 1,
+  pending: 0,
+  cap: 600,
+  canBuy: false,
+  buyUnavailableReason: 'cash',
+  canCollect: false,
+  collectUnavailableReason: 'nothingToCollect',
+);
+
+/// Locked behind a level the fixture player has not reached, and so owned by nobody.
+const kLockedProperty = Property(
+  id: 'car-wash',
+  name: 'Car Wash',
+  description: 'Twelve dollars a wash and a great deal more than twelve dollars a day.',
+  levelRequirement: 4,
+  price: 6000,
+  incomePerHour: 640,
+  accrualCapMinutes: 240,
+  quantity: 0,
+  pending: 0,
+  cap: 0,
+  canBuy: false,
+  buyUnavailableReason: 'level',
+  canCollect: false,
+  collectUnavailableReason: 'notOwned',
+);
+
+/// The player the buy endpoint returns: the fixture's 600 less the corner's 500.
+///
+/// A different cash figure from [kFakeMe], so a test reading cash after a purchase can only pass if
+/// the client took the server's post-action player.
+const kPropertyBoughtMe = Me(
+  playerId: 'player-guid-123',
+  energy: MeterState(
+    current: 7,
+    max: 10,
+    regenSecondsPerPoint: 300,
+    secondsUntilNextPoint: 42,
+  ),
+  stamina: MeterState(
+    current: 5,
+    max: 10,
+    regenSecondsPerPoint: 300,
+    secondsUntilNextPoint: 120,
+  ),
+  health: MeterState(
+    current: 10,
+    max: 10,
+    regenSecondsPerPoint: 300,
+  ),
+  cash: 100,
+  premiumCurrency: 0,
+  level: 2,
+  xp: 0,
+  skillPoints: 0,
+  attack: 10,
+  defense: 10,
+);
+
+/// The player the collect endpoint returns: the fixture's 600 plus the corner's 30 takings.
+const kPropertyCollectedMe = Me(
+  playerId: 'player-guid-123',
+  energy: MeterState(
+    current: 7,
+    max: 10,
+    regenSecondsPerPoint: 300,
+    secondsUntilNextPoint: 42,
+  ),
+  stamina: MeterState(
+    current: 5,
+    max: 10,
+    regenSecondsPerPoint: 300,
+    secondsUntilNextPoint: 120,
+  ),
+  health: MeterState(
+    current: 10,
+    max: 10,
+    regenSecondsPerPoint: 300,
+  ),
+  cash: 630,
+  premiumCurrency: 0,
+  level: 2,
+  xp: 0,
+  skillPoints: 0,
+  attack: 10,
+  defense: 10,
+);
+
 class FakeApiClient implements ApiClient {
   FakeApiClient({
     SessionResult? sessionResult,
@@ -209,9 +328,14 @@ class FakeApiClient implements ApiClient {
     EquipItemResult? equipResult,
     EquipItemResult? unequipResult,
     bool throwOnInventory = false,
+    PropertyList? propertiesResult,
+    BuyPropertyResult? buyPropertyResult,
+    CollectPropertyResult? collectPropertyResult,
+    bool throwOnProperties = false,
     this.refuseDoJobWith,
     this.refuseAllocateWith,
     this.refuseItemActionWith,
+    this.refusePropertyActionWith,
   })  : _inventoryResult = inventoryResult ??
             const InventoryList(
               items: [kOwnedWeapon, kUnaffordableArmor, kLockedWeapon],
@@ -240,6 +364,34 @@ class FakeApiClient implements ApiClient {
               loadout: kBareLoadout,
             ),
         _throwOnInventory = throwOnInventory,
+        _propertiesResult = propertiesResult ??
+            const PropertyList(
+              properties: [
+                kCollectableProperty,
+                kEmptyProperty,
+                kLockedProperty,
+              ],
+              cash: 600,
+              level: 2,
+            ),
+        _buyPropertyResult = buyPropertyResult ??
+            const BuyPropertyResult(
+              propertyId: 'street-corner',
+              cashSpent: 500,
+              quantityOwned: 2,
+              pending: 30,
+              cap: 120,
+              player: kPropertyBoughtMe,
+            ),
+        _collectPropertyResult = collectPropertyResult ??
+            const CollectPropertyResult(
+              propertyId: 'street-corner',
+              cashCollected: 30,
+              pending: 0,
+              cap: 60,
+              player: kPropertyCollectedMe,
+            ),
+        _throwOnProperties = throwOnProperties,
         _sessionResult = sessionResult ??
             const SessionResult(
               deviceToken: 'fake-token-abc',
@@ -306,6 +458,19 @@ class FakeApiClient implements ApiClient {
   final EquipItemResult _unequipResult;
   final bool _throwOnInventory;
 
+  /// The catalog the next GET /properties returns. Advanced by each action below for the same
+  /// reason [_inventoryResult] is: a fake that ignored writes would let a client that never
+  /// re-reads pass every test about re-reading.
+  PropertyList _propertiesResult;
+
+  final BuyPropertyResult _buyPropertyResult;
+  final CollectPropertyResult _collectPropertyResult;
+  final bool _throwOnProperties;
+
+  /// When set, every property action (buy, collect) throws a [JobRefusedException] with this
+  /// reason — the shape a 409 from the property endpoints takes.
+  final String? refusePropertyActionWith;
+
   /// When set, doJob throws a [JobRefusedException] with this reason.
   final String? refuseDoJobWith;
 
@@ -321,6 +486,9 @@ class FakeApiClient implements ApiClient {
   int contentPackCalls = 0;
   int jobsCalls = 0;
   int inventoryCalls = 0;
+  int propertiesCalls = 0;
+  final List<String> buyPropertyCalls = [];
+  final List<String> collectPropertyCalls = [];
   final List<String> doJobCalls = [];
   final List<String> allocateCalls = [];
   final List<String> buyCalls = [];
@@ -427,6 +595,109 @@ class FakeApiClient implements ApiClient {
       throw JobRefusedException(
           refuseItemActionWith!, 'refused: $refuseItemActionWith');
     }
+  }
+
+  /// When set, every GET /properties waits on this before returning.
+  ///
+  /// Lets a test hold the post-action re-read open and observe what the client permits while the
+  /// catalog on screen still predates the action.
+  Completer<void>? propertiesGate;
+
+  @override
+  Future<PropertyList> properties(String deviceToken) async {
+    propertiesCalls++;
+    if (_throwOnProperties) throw const ApiException(500, 'properties error');
+    if (propertiesGate != null) await propertiesGate!.future;
+    return _propertiesResult;
+  }
+
+  @override
+  Future<BuyPropertyResult> buyProperty(
+      String deviceToken, String propertyId) async {
+    buyPropertyCalls.add(propertyId);
+    _refusePropertyActionIfAsked();
+
+    _advanceProperties(
+      propertyId,
+      cash: _buyPropertyResult.player.cash,
+      quantity: _buyPropertyResult.quantityOwned,
+      pending: _buyPropertyResult.pending,
+      cap: _buyPropertyResult.cap,
+    );
+
+    return _buyPropertyResult;
+  }
+
+  @override
+  Future<CollectPropertyResult> collectProperty(
+      String deviceToken, String propertyId) async {
+    collectPropertyCalls.add(propertyId);
+    _refusePropertyActionIfAsked();
+
+    _advanceProperties(
+      propertyId,
+      cash: _collectPropertyResult.player.cash,
+      pending: _collectPropertyResult.pending,
+      cap: _collectPropertyResult.cap,
+    );
+
+    return _collectPropertyResult;
+  }
+
+  void _refusePropertyActionIfAsked() {
+    if (refusePropertyActionWith != null) {
+      throw JobRefusedException(
+          refusePropertyActionWith!, 'refused: $refusePropertyActionWith');
+    }
+  }
+
+  /// Moves the stored catalog on the way the server would after an action on [propertyId].
+  ///
+  /// Only the fields an action can change are touched. The gating is recomputed from the new
+  /// holding rather than carried across, so a screen driven by this fake sees the same states it
+  /// will see in production — in particular a collect button that goes dead once the counter is
+  /// empty.
+  void _advanceProperties(
+    String propertyId, {
+    required int cash,
+    int? quantity,
+    int? pending,
+    int? cap,
+  }) {
+    _propertiesResult = PropertyList(
+      properties: _propertiesResult.properties.map((p) {
+        if (p.id != propertyId) return p;
+
+        final newQuantity = quantity ?? p.quantity;
+        final newPending = pending ?? p.pending;
+        final newCap = cap ?? p.cap;
+
+        return Property(
+          id: p.id,
+          name: p.name,
+          description: p.description,
+          levelRequirement: p.levelRequirement,
+          price: p.price,
+          incomePerHour: p.incomePerHour,
+          accrualCapMinutes: p.accrualCapMinutes,
+          quantity: newQuantity,
+          pending: newPending,
+          cap: newCap,
+          canBuy: p.buyUnavailableReason == 'level'
+              ? false
+              : cash >= p.price,
+          buyUnavailableReason: p.buyUnavailableReason == 'level'
+              ? 'level'
+              : (cash >= p.price ? null : 'cash'),
+          canCollect: newQuantity > 0 && newPending > 0,
+          collectUnavailableReason: newQuantity < 1
+              ? 'notOwned'
+              : (newPending > 0 ? null : 'nothingToCollect'),
+        );
+      }).toList(growable: false),
+      cash: cash,
+      level: _propertiesResult.level,
+    );
   }
 
   /// Moves the stored catalog on the way the server would after an action on [itemId].

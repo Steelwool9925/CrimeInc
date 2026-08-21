@@ -65,6 +65,21 @@ abstract class ApiClient {
   /// Takes [itemId] off, keeping the copies owned. Throws [JobRefusedException] with reason
   /// `notEquipped` when it was not being worn.
   Future<EquipItemResult> unequipItem(String deviceToken, String itemId);
+
+  /// The property catalog with this player's holdings, takings and gating folded in.
+  ///
+  /// One call serves both halves of the Properties screen: the server sends the whole catalog, not
+  /// only held rows. Reading it banks nothing — the pending figures are computed for the response
+  /// and thrown away, so polling this route never costs the player a part-earned coin.
+  Future<PropertyList> properties(String deviceToken);
+
+  /// Buys one unit of [propertyId]. Throws [JobRefusedException] on a refusal ('level', 'cash').
+  Future<BuyPropertyResult> buyProperty(String deviceToken, String propertyId);
+
+  /// Banks everything [propertyId] has earned. Throws [JobRefusedException] on a refusal
+  /// ('notOwned', 'nothingToCollect').
+  Future<CollectPropertyResult> collectProperty(
+      String deviceToken, String propertyId);
 }
 
 class HttpApiClient implements ApiClient {
@@ -196,6 +211,33 @@ class HttpApiClient implements ApiClient {
   Future<EquipItemResult> unequipItem(String deviceToken, String itemId) async {
     final response = await _post(deviceToken, '/items/$itemId/unequip');
     return EquipItemResult.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  @override
+  Future<PropertyList> properties(String deviceToken) async {
+    final response = await _client.get(
+      Uri.parse('$_baseUrl/properties'),
+      headers: {'Authorization': 'Bearer $deviceToken'},
+    );
+    _checkStatus(response);
+    return PropertyList.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  @override
+  Future<BuyPropertyResult> buyProperty(
+      String deviceToken, String propertyId) async {
+    final response = await _post(deviceToken, '/properties/$propertyId/buy');
+    return BuyPropertyResult.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  @override
+  Future<CollectPropertyResult> collectProperty(
+      String deviceToken, String propertyId) async {
+    final response = await _post(deviceToken, '/properties/$propertyId/collect');
+    return CollectPropertyResult.fromJson(
         jsonDecode(response.body) as Map<String, dynamic>);
   }
 

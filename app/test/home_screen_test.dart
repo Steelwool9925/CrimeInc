@@ -222,5 +222,38 @@ void main() {
 
       expect(find.byKey(const Key('inv-card-brass-knuckles')), findsOneWidget);
     });
+
+    testWidgets('offers a way into Properties', (tester) async {
+      final state = AppState(
+          apiClient: FakeApiClient(), tokenStore: InMemoryTokenStore());
+      await state.bootstrap();
+
+      await tester.pumpWidget(_wrap(state));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('go-to-properties')), findsOneWidget);
+    });
+
+    testWidgets('the Properties button opens Properties', (tester) async {
+      final api = FakeApiClient();
+      final state = AppState(apiClient: api, tokenStore: InMemoryTokenStore());
+      await state.bootstrap();
+
+      await tester.pumpWidget(_wrap(state));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.byKey(const Key('go-to-properties')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('go-to-properties')));
+
+      // Not pumpAndSettle past this point: the Properties screen keeps a ticker running to draw
+      // its counters filling, so there is no frame after which nothing is scheduled.
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.byKey(const Key('property-card-street-corner')), findsOneWidget);
+
+      addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
+    });
   });
 }
