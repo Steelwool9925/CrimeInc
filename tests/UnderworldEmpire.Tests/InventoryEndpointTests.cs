@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using UnderworldEmpire.Domain;
 using UnderworldEmpire.Infrastructure;
 
 namespace UnderworldEmpire.Tests;
@@ -81,13 +82,18 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
     /// at once should not have to grind jobs to get there, and grinding would make it depend on a random
     /// payout range.
     /// </summary>
-    private async Task GrantAsync(string deviceToken, long cash = 0, int? level = null)
+    /// <remarks>
+    /// Sets an <b>absolute</b> balance rather than adding to whatever a new player happens to start
+    /// with. Written as a top-up, every call site here silently encoded <c>StartingCash</c>, and all
+    /// of them broke the day it changed. An absolute figure says what the test means.
+    /// </remarks>
+    private async Task SetCashAsync(string deviceToken, long cash, int? level = null)
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<GameDbContext>();
 
         var player = await db.Players.SingleAsync(p => p.DeviceToken == deviceToken);
-        player.AddCash(cash);
+        player.AddCash(cash - player.Cash);
         if (level is not null)
             player.Level = level.Value;
 
@@ -149,7 +155,9 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task An_affordable_in_level_item_is_reported_as_buyable()
     {
+        // Funded first: a new player starts with nothing, so affordability needs earned cash.
         var token = await NewGuestTokenAsync();
+        await SetCashAsync(token, 100);
 
         using var doc = await BodyAsync(await GetInventoryAsync(token));
         var knuckles = ItemNamed(doc.RootElement, CheapWeapon);
@@ -202,12 +210,12 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
         using var doc = await BodyAsync(await GetInventoryAsync(token));
         var loadout = doc.RootElement.GetProperty("loadout");
 
-        Assert.Equal(5, loadout.GetProperty("baseAttack").GetInt32());
+        Assert.Equal(PlayerDefaults.BaseAttack, loadout.GetProperty("baseAttack").GetInt32());
         Assert.Equal(0, loadout.GetProperty("itemAttack").GetInt32());
-        Assert.Equal(5, loadout.GetProperty("totalAttack").GetInt32());
-        Assert.Equal(5, loadout.GetProperty("baseDefense").GetInt32());
+        Assert.Equal(PlayerDefaults.BaseAttack, loadout.GetProperty("totalAttack").GetInt32());
+        Assert.Equal(PlayerDefaults.BaseDefense, loadout.GetProperty("baseDefense").GetInt32());
         Assert.Equal(0, loadout.GetProperty("itemDefense").GetInt32());
-        Assert.Equal(5, loadout.GetProperty("totalDefense").GetInt32());
+        Assert.Equal(PlayerDefaults.BaseDefense, loadout.GetProperty("totalDefense").GetInt32());
     }
 
     [Fact]
@@ -219,7 +227,7 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
 
         // Sent so the client can render affordability without a second call to /me, exactly as
         // GET /jobs sends currentEnergy and level.
-        Assert.Equal(100, doc.RootElement.GetProperty("cash").GetInt64());
+        Assert.Equal(PlayerDefaults.StartingCash, doc.RootElement.GetProperty("cash").GetInt64());
         Assert.Equal(1, doc.RootElement.GetProperty("level").GetInt32());
     }
 
@@ -239,6 +247,7 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Buying_an_unknown_item_returns_404()
     {
         var token = await NewGuestTokenAsync();
+        await SetCashAsync(token, 100);
 
         var response = await BuyAsync(token, "no-such-item");
 
@@ -250,6 +259,7 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
     {
         // Ids are content keys. Accepting a different casing would quietly admit a second spelling.
         var token = await NewGuestTokenAsync();
+        await SetCashAsync(token, 100);
 
         var response = await BuyAsync(token, CheapWeapon.ToUpperInvariant());
 
@@ -260,6 +270,7 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Buying_an_item_charges_its_price_and_adds_a_copy()
     {
         var token = await NewGuestTokenAsync();
+        await SetCashAsync(token, 100);
 
         var response = await BuyAsync(token, CheapWeapon);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -269,7 +280,7 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Equal(CheapWeapon, doc.RootElement.GetProperty("itemId").GetString());
         Assert.Equal(75, doc.RootElement.GetProperty("cashSpent").GetInt64());
         Assert.Equal(1, doc.RootElement.GetProperty("quantityOwned").GetInt32());
-        Assert.Equal(25, doc.RootElement.GetProperty("player").GetProperty("cash").GetInt64());
+        Assert.Equal(25, doc.RootElement.GetProperty("player").GetProperty("cash").GetInt64()); // 100 funded less the 75 price
     }
 
     [Fact]
@@ -277,17 +288,19 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
     {
         // A cheap item bought to hold must not silently displace something better.
         var token = await NewGuestTokenAsync();
+        await SetCashAsync(token, 100);
 
         using var doc = await BodyAsync(await BuyAsync(token, CheapWeapon));
 
         Assert.Equal(0, doc.RootElement.GetProperty("loadout").GetProperty("itemAttack").GetInt32());
-        Assert.Equal(5, doc.RootElement.GetProperty("loadout").GetProperty("totalAttack").GetInt32());
+        Assert.Equal(PlayerDefaults.BaseAttack, doc.RootElement.GetProperty("loadout").GetProperty("totalAttack").GetInt32());
     }
 
     [Fact]
     public async Task A_purchase_survives_into_the_next_inventory_read()
     {
         var token = await NewGuestTokenAsync();
+        await SetCashAsync(token, 100);
         await BuyAsync(token, CheapWeapon);
 
         using var doc = await BodyAsync(await GetInventoryAsync(token));
@@ -302,6 +315,7 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Buying_something_unaffordable_is_refused_with_the_cash_reason()
     {
         var token = await NewGuestTokenAsync();
+        await SetCashAsync(token, 100);
 
         var response = await BuyAsync(token, UnaffordableArmor);
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
@@ -318,7 +332,7 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
         await BuyAsync(token, UnaffordableArmor);
 
         using var doc = await BodyAsync(await GetInventoryAsync(token));
-        Assert.Equal(100, doc.RootElement.GetProperty("cash").GetInt64());
+        Assert.Equal(PlayerDefaults.StartingCash, doc.RootElement.GetProperty("cash").GetInt64());
         Assert.Equal(0, ItemNamed(doc.RootElement, UnaffordableArmor).GetProperty("quantity").GetInt32());
     }
 
@@ -326,7 +340,7 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Buying_above_your_level_is_refused_with_the_level_reason()
     {
         var token = await NewGuestTokenAsync();
-        await GrantAsync(token, cash: 10_000);
+        await SetCashAsync(token, 10_000);
 
         var response = await BuyAsync(token, GatedWeapon);
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
@@ -338,14 +352,15 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task A_second_copy_raises_the_quantity_rather_than_adding_a_row()
     {
+        // Exactly two copies' worth, so the second purchase spends the last of it.
         var token = await NewGuestTokenAsync();
-        await GrantAsync(token, cash: 75);
+        await SetCashAsync(token, 150);
 
         await BuyAsync(token, CheapWeapon);
         using var doc = await BodyAsync(await BuyAsync(token, CheapWeapon));
 
         Assert.Equal(2, doc.RootElement.GetProperty("quantityOwned").GetInt32());
-        Assert.Equal(25, doc.RootElement.GetProperty("player").GetProperty("cash").GetInt64());
+        Assert.Equal(0, doc.RootElement.GetProperty("player").GetProperty("cash").GetInt64());
     }
 
     // -------------------------------------------------------------------------
@@ -356,6 +371,7 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Equipping_a_weapon_raises_effective_attack()
     {
         var token = await NewGuestTokenAsync();
+        await SetCashAsync(token, 100);
         await BuyAsync(token, CheapWeapon);
 
         var response = await EquipAsync(token, CheapWeapon);
@@ -365,9 +381,9 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
         var loadout = doc.RootElement.GetProperty("loadout");
 
         Assert.Equal(CheapWeapon, doc.RootElement.GetProperty("equippedItemId").GetString());
-        Assert.Equal(5, loadout.GetProperty("baseAttack").GetInt32());
+        Assert.Equal(PlayerDefaults.BaseAttack, loadout.GetProperty("baseAttack").GetInt32());
         Assert.Equal(4, loadout.GetProperty("itemAttack").GetInt32());
-        Assert.Equal(9, loadout.GetProperty("totalAttack").GetInt32());
+        Assert.Equal(PlayerDefaults.BaseAttack + 4, loadout.GetProperty("totalAttack").GetInt32());
     }
 
     [Fact]
@@ -376,11 +392,12 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
         // Gear is a bonus computed on read, never written onto the player: a retune of items.json has
         // to move every player's numbers, which a stored effective stat would silently outlive.
         var token = await NewGuestTokenAsync();
+        await SetCashAsync(token, 100);
         await BuyAsync(token, CheapWeapon);
 
         using var doc = await BodyAsync(await EquipAsync(token, CheapWeapon));
 
-        Assert.Equal(5, doc.RootElement.GetProperty("player").GetProperty("attack").GetInt32());
+        Assert.Equal(PlayerDefaults.BaseAttack, doc.RootElement.GetProperty("player").GetProperty("attack").GetInt32());
     }
 
     [Fact]
@@ -399,6 +416,7 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Equipping_something_already_worn_is_refused()
     {
         var token = await NewGuestTokenAsync();
+        await SetCashAsync(token, 100);
         await BuyAsync(token, CheapWeapon);
         await EquipAsync(token, CheapWeapon);
 
@@ -413,7 +431,7 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Gear_in_different_slots_stacks()
     {
         var token = await NewGuestTokenAsync();
-        await GrantAsync(token, cash: 200);
+        await SetCashAsync(token, 300);
 
         await BuyAsync(token, CheapWeapon);
         await BuyAsync(token, CheapArmor);
@@ -421,8 +439,8 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
         using var doc = await BodyAsync(await EquipAsync(token, CheapArmor));
 
         var loadout = doc.RootElement.GetProperty("loadout");
-        Assert.Equal(9, loadout.GetProperty("totalAttack").GetInt32());   // 5 base + 4 knuckles
-        Assert.Equal(10, loadout.GetProperty("totalDefense").GetInt32()); // 5 base + 5 jacket
+        Assert.Equal(PlayerDefaults.BaseAttack + 4, loadout.GetProperty("totalAttack").GetInt32());   // 5 base + 4 knuckles
+        Assert.Equal(PlayerDefaults.BaseDefense + 5, loadout.GetProperty("totalDefense").GetInt32());
     }
 
     [Fact]
@@ -431,7 +449,7 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
         // The invariant with no database constraint behind it: two weapons worn at once would hand the
         // player both bonuses.
         var token = await NewGuestTokenAsync();
-        await GrantAsync(token, cash: 500, level: 2);
+        await SetCashAsync(token, 600, level: 2);
 
         await BuyAsync(token, CheapWeapon);
         await BuyAsync(token, GatedWeapon);
@@ -450,7 +468,7 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
     public async Task The_displaced_item_is_reported_as_unworn_by_the_next_inventory_read()
     {
         var token = await NewGuestTokenAsync();
-        await GrantAsync(token, cash: 500, level: 2);
+        await SetCashAsync(token, 600, level: 2);
 
         await BuyAsync(token, CheapWeapon);
         await BuyAsync(token, GatedWeapon);
@@ -471,6 +489,7 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Unequipping_removes_the_bonus_and_keeps_the_item()
     {
         var token = await NewGuestTokenAsync();
+        await SetCashAsync(token, 100);
         await BuyAsync(token, CheapWeapon);
         await EquipAsync(token, CheapWeapon);
 
@@ -480,7 +499,7 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
         using var doc = await BodyAsync(response);
         Assert.Equal(CheapWeapon, doc.RootElement.GetProperty("unequippedItemId").GetString());
         Assert.Equal(JsonValueKind.Null, doc.RootElement.GetProperty("equippedItemId").ValueKind);
-        Assert.Equal(5, doc.RootElement.GetProperty("loadout").GetProperty("totalAttack").GetInt32());
+        Assert.Equal(PlayerDefaults.BaseAttack, doc.RootElement.GetProperty("loadout").GetProperty("totalAttack").GetInt32());
 
         using var inventory = await BodyAsync(await GetInventoryAsync(token));
         Assert.Equal(1, ItemNamed(inventory.RootElement, CheapWeapon).GetProperty("quantity").GetInt32());
@@ -490,6 +509,7 @@ public class InventoryEndpointTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Unequipping_something_you_are_not_wearing_is_refused()
     {
         var token = await NewGuestTokenAsync();
+        await SetCashAsync(token, 100);
         await BuyAsync(token, CheapWeapon);
 
         var response = await UnequipAsync(token, CheapWeapon);

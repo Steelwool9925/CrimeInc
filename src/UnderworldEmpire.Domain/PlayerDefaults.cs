@@ -16,8 +16,15 @@ public static class PlayerDefaults
     /// <summary>Default maximum Health for a new player.</summary>
     public const int HealthMax = 100;
 
-    /// <summary>Soft-currency balance awarded to every new player. Tunable balance value.</summary>
-    public const long StartingCash = 100;
+    /// <summary>
+    /// Soft-currency balance awarded to every new player. Tunable balance value.
+    /// </summary>
+    /// <remarks>
+    /// Zero: a new player owns nothing and must work the first job before they can buy anything.
+    /// The cheapest item in the crime pack (Brass Knuckles, 75) is therefore several successful
+    /// jobs away rather than affordable on the first tap.
+    /// </remarks>
+    public const long StartingCash = 0;
 
     /// <summary>Hard-currency balance awarded to every new player. Tunable balance value.</summary>
     public const long StartingPremiumCurrency = 5;
@@ -36,10 +43,15 @@ public static class PlayerDefaults
     public const int StartingSkillPoints = 0;
 
     /// <summary>Base attack stat for a new player. Tunable balance value.</summary>
-    public const int BaseAttack = 5;
+    /// <remarks>
+    /// A new player starts at 1, not 5, so the stat gates in <c>jobs.json</c> have somewhere to
+    /// climb from. Only the pack's first job is reachable at 1/1; everything else is gated on
+    /// stats, levels, or both.
+    /// </remarks>
+    public const int BaseAttack = 1;
 
-    /// <summary>Base defense stat for a new player. Tunable balance value.</summary>
-    public const int BaseDefense = 5;
+    /// <summary>Base defense stat for a new player. Tunable balance value. See <see cref="BaseAttack"/>.</summary>
+    public const int BaseDefense = 1;
 
     /// <summary>
     /// Highest attainable level. Bounds the level-up loop so a pathological XP grant cannot spin,

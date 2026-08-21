@@ -329,7 +329,7 @@ void main() {
       final odds = tester.widget<Text>(
           find.byKey(const Key('job-odds-shake-down-corner-store')));
 
-      expect(odds.data, contains('90%'));
+      expect(odds.data, contains('65%'));
     });
 
     testWidgets('a job shows the stats it requires', (tester) async {
@@ -338,8 +338,8 @@ void main() {
       final odds = tester.widget<Text>(
           find.byKey(const Key('job-odds-shake-down-corner-store')));
 
-      expect(odds.data, contains('3 attack'));
-      expect(odds.data, contains('2 defense'));
+      expect(odds.data, contains('1 attack'));
+      expect(odds.data, contains('1 defense'));
     });
 
     testWidgets('a stat-locked job is disabled', (tester) async {

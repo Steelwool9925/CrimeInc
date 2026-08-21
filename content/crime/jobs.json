@@ -2,7 +2,7 @@
   "packId": "crime",
   "version": 2,
   "mastery": {
-    "completionsPerRank": 8,
+    "completionsPerRank": 6,
     "maxRank": 5
   },
   "risk": {
@@ -24,11 +24,11 @@
         "xp": 10
       },
       "requirements": {
-        "attack": 3,
-        "defense": 2
+        "attack": 1,
+        "defense": 1
       },
       "risk": {
-        "baseSuccessChance": 0.85,
+        "baseSuccessChance": 0.65,
         "successChancePerSurplusPoint": 0.010,
         "healthLossMin": 0,
         "healthLossMax": 1
@@ -48,7 +48,7 @@
       },
       "requirements": {
         "attack": 5,
-        "defense": 3
+        "defense": 1
       },
       "risk": {
         "baseSuccessChance": 0.75,

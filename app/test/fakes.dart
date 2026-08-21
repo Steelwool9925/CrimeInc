@@ -23,9 +23,9 @@ const kCheapJob = Job(
   cashMin: 15,
   cashMax: 30,
   xp: 10,
-  attackRequirement: 3,
-  defenseRequirement: 2,
-  successChance: 0.90,
+  attackRequirement: 1,
+  defenseRequirement: 1,
+  successChance: 0.65,
   mastery: kFakeMastery,
   canAttempt: true,
 );
