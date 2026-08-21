@@ -17,9 +17,16 @@ namespace UnderworldEmpire.Domain.Progression;
 /// <b>The formula.</b> Cumulative XP to reach level <c>L</c> is
 /// <c>XpPerLevelStep × (L − 1) × L</c>, so thresholds run 0, 100, 300, 600, 1000, 1500 … and the
 /// gap between consecutive levels grows linearly (100, 200, 300 …). Level 2 landing at exactly 100
-/// is load-bearing: the crime pack is tuned so ten runs of its cheapest job — one full starting
-/// energy bar — award exactly 100 XP, which is what makes the CP2 checkpoint reachable without
-/// waiting on energy regeneration.
+/// was chosen against the crime pack's cheapest job: ten runs of it are one full starting energy
+/// bar, and at 10 XP each that was exactly the level-2 threshold.
+/// </para>
+/// <para>
+/// <b>M3R weakened that, deliberately.</b> Jobs can now fail, and a failure grants only the pack's
+/// consolation fraction of the XP, so one bar of *Shake Down a Corner Store* expects roughly 91 XP
+/// rather than exactly 100 — level 2 usually takes an eleventh run once energy ticks back. The
+/// curve was left alone rather than retuned to chase the old guarantee. What CP2 asks the tester to
+/// *watch* is the mastery bar, and that half was protected instead, by dropping the pack's
+/// <c>completionsPerRank</c> from 10 to 8. See <c>content/crime/README.md</c>.
 /// </para>
 /// </remarks>
 public static class LevelCurve

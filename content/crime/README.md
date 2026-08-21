@@ -23,6 +23,10 @@ version  schema version of this file
 mastery  pack-wide mastery rules, applied to every job
   completionsPerRank  completions needed per mastery rank (>= 1)
   maxRank             rank ceiling (0 disables mastery entirely)
+risk     pack-wide risk rules, applied to every job — required, not optional
+  maxSuccessChance         ceiling on any job's success chance (0..1); no job is ever certain
+  consolationCashFraction  fraction of the rolled cash paid on a failed attempt (0..1)
+  consolationXpFraction    fraction of the job's xp granted on a failed attempt (0..1)
 jobs[]   the catalog, in display order — the engine does not sort
   id                content id, unique within the pack; the route value for POST /jobs/{id}/do
   name              player-facing name
@@ -33,7 +37,33 @@ jobs[]   the catalog, in display order — the engine does not sort
   payout
     cashMin/cashMax inclusive cash range, rolled server-side per attempt
     xp              fixed experience per completion (not rolled)
+  requirements      minimum EFFECTIVE stats to attempt — base plus equipped gear
+    attack          minimum effective attack (>= 0; 0 means ungated)
+    defense         minimum effective defense (>= 0)
+  risk              per-job risk tuning — required, not optional
+    baseSuccessChance             chance for a player exactly at the requirements (0..1)
+    successChancePerSurplusPoint  added per point of surplus stat (>= 0)
+    healthLossMin/healthLossMax   inclusive health lost on a failure, rolled per attempt
 ```
+
+**`risk` and `requirements` are required blocks.** A job missing either is a named load error, not a
+job that quietly reads as zeros — zeros would mean "ungated and certain", which is precisely the
+mistake a content author would not notice. This is the one place the pack is stricter than the
+domain: `Job` itself defaults to certain-and-ungated so hand-built definitions in tests cannot fall
+into the failure path by accident.
+
+The success chance for a given player is:
+
+```
+surplus = max(0, effectiveAttack  - requirements.attack)
+        + max(0, effectiveDefense - requirements.defense)
+
+chance  = baseSuccessChance + successChancePerSurplusPoint * surplus
+          clamped to [baseSuccessChance, min(1, risk.maxSuccessChance)]
+```
+
+Each stat's surplus floors at **zero independently**. Summed algebraically, a large attack overshoot
+would cancel a defense shortfall and the defense requirement would stop meaning anything.
 
 Validation reports **every** problem at once rather than stopping at the first, so a content edit
 needs one fix pass rather than one restart per error. Unknown fields are ignored, so a newer pack
@@ -47,11 +77,52 @@ All numbers here are tunable without touching code. Two properties are load-bear
 - At least one job sits at `levelRequirement: 1` with an `energyCost` within the starting energy
   maximum, so a brand-new player is never shown an entirely locked list.
 - The cheapest level-1 job can be run enough times on one full starting energy bar to cross a
-  mastery rank, so "watch the mastery bar tick up" is observable in a single sitting.
+  mastery rank *even allowing for failures*, so "watch the mastery bar tick up" is observable in a
+  single sitting.
 
-The current tuning makes ten runs of *Shake Down a Corner Store* — exactly one full starting energy
-bar — award 100 XP and 10 completions, which is both the level-2 threshold and the first mastery
-rank. That is deliberate: it makes the whole CP2 loop reachable without waiting on regen.
+One full starting energy bar buys **ten** runs of *Shake Down a Corner Store*. Since M3R those runs
+can fail, so what a bar yields is now a distribution rather than a guarantee:
+
+| | before M3R | since M3R |
+|---|---|---|
+| completions in one bar | exactly 10 | ~9 expected (0.90 at 5/5 stats) |
+| mastery rank at | 10 completions | **8** completions |
+| XP in one bar | exactly 100 | ~91 expected |
+
+`completionsPerRank` dropped 10 → 8 to keep the first mastery rank reachable in one sitting: ten
+attempts at the job's 0.85 *floor* still expect 8.5 completions, and a 5/5 starting player actually
+sits at 0.90, which clears 8 about 93% of the time.
+
+**Reaching level 2 in one bar is no longer guaranteed** and was not preserved. Level 2 costs 100 XP
+(`LevelCurve`), and a bar now expects ~91, so it usually takes an eleventh run once energy ticks
+back. That is the intended cost of making jobs failable; the mastery half of CP2 is the half that
+was protected, because it is the half the checkpoint asks the tester to *watch*.
+
+### Risk balance
+
+| job | lvl | req atk/def | base | per surplus pt | health loss |
+|---|---|---|---|---|---|
+| shake-down-corner-store | 1 | 3 / 2 | 0.85 | 0.010 | 0–1 |
+| boost-a-parked-car | 1 | 5 / 3 | 0.75 | 0.010 | 0–3 |
+| run-numbers-for-the-bookie | 2 | 6 / 5 | 0.72 | 0.010 | 0–4 |
+| hijack-a-delivery-truck | 3 | 9 / 7 | 0.65 | 0.008 | 2–8 |
+| torch-a-rival-warehouse | 5 | 14 / 10 | 0.60 | 0.006 | 4–14 |
+| rob-an-armored-transport | 8 | 22 / 16 | 0.55 | 0.005 | 8–25 |
+
+Tuned against a fresh player at attack 5 / defense 5, where a skill point is worth +1:
+
+- *Shake Down* sits at **0.90** (5 points of surplus) — the safe grind.
+- *Boost a Parked Car* sits at **0.77** (2 points of surplus) — same level, meaningfully riskier.
+- *Run Numbers* is **one point of attack short** and refuses with `"stats"`, spending nothing.
+  Equipping *Brass Knuckles* (level 1, 75 cash, +4 attack) takes attack to 9 and unlocks it at 0.75.
+
+That last row is the **CP3R demo**: a job that is locked, and unlocks because you equipped something.
+It is the reason M3R was scheduled after M3 rather than inside M2 — the requirement reads *effective*
+stats, so it depends on the `Loadout` aggregation that T3.1 introduced.
+
+Health loss scales with the job's ambition: the level-1 jobs can cost a point or three, while a
+failed armored-transport robbery costs 8–25 of a 10-point starting bar. The loss is clamped to
+current health, so it floors at 0 rather than throwing.
 
 Job ids are compared **ordinally**. They are content keys, not display text, so casing is
 significant and `Boost-A-Parked-Car` is a different id from `boost-a-parked-car`.

@@ -1,9 +1,14 @@
 {
   "packId": "crime",
-  "version": 1,
+  "version": 2,
   "mastery": {
-    "completionsPerRank": 10,
+    "completionsPerRank": 8,
     "maxRank": 5
+  },
+  "risk": {
+    "maxSuccessChance": 0.95,
+    "consolationCashFraction": 0.01,
+    "consolationXpFraction": 0.10
   },
   "jobs": [
     {
@@ -17,6 +22,16 @@
         "cashMin": 15,
         "cashMax": 30,
         "xp": 10
+      },
+      "requirements": {
+        "attack": 3,
+        "defense": 2
+      },
+      "risk": {
+        "baseSuccessChance": 0.85,
+        "successChancePerSurplusPoint": 0.010,
+        "healthLossMin": 0,
+        "healthLossMax": 1
       }
     },
     {
@@ -30,6 +45,16 @@
         "cashMin": 40,
         "cashMax": 75,
         "xp": 22
+      },
+      "requirements": {
+        "attack": 5,
+        "defense": 3
+      },
+      "risk": {
+        "baseSuccessChance": 0.75,
+        "successChancePerSurplusPoint": 0.010,
+        "healthLossMin": 0,
+        "healthLossMax": 3
       }
     },
     {
@@ -43,6 +68,16 @@
         "cashMin": 60,
         "cashMax": 110,
         "xp": 26
+      },
+      "requirements": {
+        "attack": 6,
+        "defense": 5
+      },
+      "risk": {
+        "baseSuccessChance": 0.72,
+        "successChancePerSurplusPoint": 0.010,
+        "healthLossMin": 0,
+        "healthLossMax": 4
       }
     },
     {
@@ -56,6 +91,16 @@
         "cashMin": 140,
         "cashMax": 260,
         "xp": 55
+      },
+      "requirements": {
+        "attack": 9,
+        "defense": 7
+      },
+      "risk": {
+        "baseSuccessChance": 0.65,
+        "successChancePerSurplusPoint": 0.008,
+        "healthLossMin": 2,
+        "healthLossMax": 8
       }
     },
     {
@@ -69,6 +114,16 @@
         "cashMin": 320,
         "cashMax": 580,
         "xp": 95
+      },
+      "requirements": {
+        "attack": 14,
+        "defense": 10
+      },
+      "risk": {
+        "baseSuccessChance": 0.60,
+        "successChancePerSurplusPoint": 0.006,
+        "healthLossMin": 4,
+        "healthLossMax": 14
       }
     },
     {
@@ -82,6 +137,16 @@
         "cashMin": 700,
         "cashMax": 1300,
         "xp": 180
+      },
+      "requirements": {
+        "attack": 22,
+        "defense": 16
+      },
+      "risk": {
+        "baseSuccessChance": 0.55,
+        "successChancePerSurplusPoint": 0.005,
+        "healthLossMin": 8,
+        "healthLossMax": 25
       }
     }
   ]
