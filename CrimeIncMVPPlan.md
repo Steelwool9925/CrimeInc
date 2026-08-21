@@ -141,6 +141,12 @@ rises. Grind it until one attempt fails → energy still spent, ~1% cash and ~10
 health may drop, mastery bar does **not** advance.
 
 ### M4 — Combat, bounty & crew
+
+> **Design settled before code, as M3R was.** The formula, the bot model, the fight-log and bounty
+> rules and the content schema are specified in **§ M4 design** below (drafted 2026-08-21). The rows
+> here are the executable tasks; they do not re-decide any of it. Four questions in that section are
+> still open and gate T4.2.
+
 | # | Task | Band | ~tokens |
 |---|------|------|--------|
 | T4.1 | Crew domain: recruit, cap grows with level, gear/power contribution. TDD. | M | 25k |
@@ -190,9 +196,9 @@ test UI at `/swagger`. 22 sessions total.
 ### M2 — Jobs & progression (3 sessions)
 | Session | Contents | ~tok | How you test it |
 |---|---|---|---|
-| S2.1 | T2.1 jobs domain + JobService (RNG payout, mastery) + tests | 45k | `dotnet test` → seeded payout + mastery tests green |
-| S2.2 | T2.2 do-job endpoint, T2.3 leveling + skill-point allocation | 42k | Swagger: `POST /jobs/{id}/do` → energy↓, cash+XP↑; grind to level-up → skill point; `POST /skills/allocate` → stat↑ |
-| S2.3 | T2.4 Flutter Jobs list + result panel + level-up + skill UI | 45k | **CP2**: in app do a job, watch meters/cash/XP, level up, allocate a skill point |
+| ✅ S2.1 | T2.1 jobs domain + JobService (RNG payout, mastery) + tests | 45k | `dotnet test` → seeded payout + mastery tests green |
+| ✅ S2.2 | T2.2 do-job endpoint, T2.3 leveling + skill-point allocation | 42k | Swagger: `POST /jobs/{id}/do` → energy↓, cash+XP↑; grind to level-up → skill point; `POST /skills/allocate` → stat↑ |
+| ✅ S2.3 | T2.4 Flutter Jobs list + result panel + level-up + skill UI | 45k | **CP2**: in app do a job, watch meters/cash/XP, level up, allocate a skill point |
 
 ### M3 — Items & properties (4 sessions)
 | Session | Contents | ~tok | How you test it |
@@ -320,6 +326,73 @@ proceed. (Full worktree gate needs git, which T0.1 initializes.)
 
 ---
 
+## Repository state — audited 2026-08-21
+
+A direct inventory of the working tree, taken by reading the code rather than the log below. `main`
+is at `082c6fc`. Everything here was verified this session; where it contradicts an older entry in
+the execution log, this section is right.
+
+### What is built
+
+| Layer | Present |
+|---|---|
+| `UnderworldEmpire.Api` | 7 endpoint files, 7 contract files, device-token auth handler, `Program.cs`, `.http` scratch file |
+| `UnderworldEmpire.Domain` | `Player`, `Meter`, `MeterRates`, `PlayerDefaults`, `BuildInfo`; `Items/` (8 files incl. `InventoryService`, `Loadout`), `Jobs/` (5 files incl. `JobService`), `Progression/` (`LevelCurve`, `LevelUpOutcome`, `SkillTarget`), `Properties/` (6 files incl. `PropertyService`, `PropertyIncome`), `Randomness/IRandomSource` |
+| `UnderworldEmpire.Infrastructure` | `GameDbContext`, 8 migrations + snapshot, `Content/` loader (11 files: pack, job, item and property catalogs), `EconomyService`, `JobActionService`, `InventoryActionService`, `PropertyActionService`, `ProgressionService`, `DeviceTokenGenerator`, `WriteConflicts`, `SystemRandomSource` |
+| `UnderworldEmpire.Tests` | 34 test files — domain, loaders, endpoints, persistence and three concurrency suites (`JobConcurrencyTests`, `InventoryConcurrencyTests`, `PropertyConcurrencyTests`) |
+| `app/lib` | `main.dart`, `api/` (client + models), `state/app_state.dart` (single `ChangeNotifier`), `storage/token_store.dart`, 6 screens (Home, Jobs, Skills, Inventory, Store, Properties), 4 widgets (`job_result_panel`, `level_up_dialog`, `item_gating`, `property_gating`) |
+| `app/test` | 14 test files — state, models and one per screen |
+| `content/crime` | `pack.json`, `jobs.json` (6), `items.json` (**9**), `properties.json` (6), `README.md` (schema + balance notes) |
+| `scripts/` | `run-api.ps1`, `run-app.ps1`, `test.ps1` |
+
+### The HTTP surface, in full
+
+```
+GET  /health              GET  /health/db          GET  /content/pack   (anonymous)
+POST /session             GET  /whoami             GET  /me
+GET  /jobs                POST /jobs/{id}/do
+POST /skills/allocate
+GET  /inventory           POST /items/{id}/buy     POST /items/{id}/equip
+                          POST /items/{id}/unequip
+GET  /properties          POST /properties/{id}/buy POST /properties/{id}/collect
+```
+
+No `/fights`, `/opponents`, `/bounties` or crew route exists — M4 is entirely unstarted.
+
+### Migrations on disk (8)
+
+`InitialCreate` → `AddPlayerMeters` → `AddPlayerCurrencies` → `AddPlayerDeviceToken` →
+`AddPlayerProgression` → `AddPlayerJobMastery` → `AddPlayerItems` → `AddPlayerProperties`.
+M3R added none: job risk is content and pure domain logic, and changed no entity.
+
+### Live balance constants (`PlayerDefaults`, `MeterRates`, `LevelCurve`)
+
+Energy 10 (1 per 5 min) · Stamina 5 (1 per 5 min) · Health 100 (1 per min) · **cash 0** ·
+premium 5 · level 1, max 100 · **attack 1 / defense 1** · 1 skill point per level, +1 stat per
+point · XP to reach level L = `50 × (L−1) × L` → 0, 100, 300, 600, 1000 …
+
+### Verification run this session
+
+`dotnet test` **546 pass / 0 fail** · `flutter test` **204 pass** · Postgres container
+`underworld-postgres` healthy on 5433. Both figures match what `10f9806` recorded, and no source
+file has changed since.
+
+### Uncommitted and untracked
+
+- **Deleted, not yet committed:** `scripts/register-scheduled-gru.ps1` and
+  `scripts/scheduled-gru.ps1`. The scheduled-`/gru` runner has been removed from the working tree;
+  the deletion is still unstaged. `gru-ledger.md` remains and still tracks the build.
+- Nothing else is modified. `main` is level with `origin/main`.
+
+### Known content gaps against the plan's own schema
+
+- `strings.json` is specified in *Architecture* and in `README.md` but **has never been created**;
+  all display text lives inline in the other four pack files and in the Flutter widgets.
+- The pack manifest points at `assets/logo.png` and `assets/icon.png`; `content/crime/assets/`
+  does not exist. Both are M5 (T5.1) work, not a defect.
+
+---
+
 ## Execution log (gru)
 
 Session-by-session record of the actual build. Env: Windows 11 · .NET 10.0.301 · Flutter
@@ -405,7 +478,7 @@ dispatch (worktree-isolated, model ≤ Sonnet).
 
 ---
 
-## M1 — Foundation ✅ (executed via /gru; pending user CP1)
+## M1 — Foundation ✅ (CP1 covered 2026-08-21)
 
 Real minion dispatch began here: **5 Sonnet minions** across 4 sessions, each independently
 verified by the Opus controller (diff review + `dotnet build`/`dotnet test` + migration apply
@@ -454,7 +527,7 @@ verified by the Opus controller (diff review + `dotnet build`/`dotnet test` + mi
 
 ---
 
-## ▶ CP1 — Milestone M1 checkpoint (please run)
+## ✅ CP1 — Milestone M1 checkpoint (covered by the 2026-08-21 sign-off)
 
 Prereq: Docker Desktop running; dev DB migrated (from CP0 — or run `dotnet ef database update
 --project src/UnderworldEmpire.Infrastructure --startup-project src/UnderworldEmpire.Api`).
@@ -465,25 +538,31 @@ docker compose up -d --wait
 ./scripts/run-api.ps1               # http://localhost:5080  (Swagger at /swagger)
 
 # 2. (optional API sanity via Swagger) POST /session -> copy deviceToken -> Authorize ->
-#    GET /me returns meters + cash 100; GET /content/pack -> crime manifest
+#    GET /me returns meters + cash 0; GET /content/pack -> crime manifest
 
 # 3. Flutter app — in a second terminal
 ./scripts/run-app.ps1               # web (Chrome)
-#    Expect: app auto-creates a guest, Home shows Energy/Stamina/Health bars + Cash 100.
+#    Expect: app auto-creates a guest, Home shows Energy/Stamina/Health bars + Cash 0.
 #    Close & reopen the app -> SAME guest (token persisted), state unchanged.
 #    Android: cd app; flutter run -d <emulator>   (uses 10.0.2.2:5080 automatically)
 ```
+
+⚠️ **Rebalanced since this checkpoint was written.** The 2026-08-21 balance pass (`10f9806`)
+took starting cash 100 → **0** and base attack/defense 5 → **1**. A fresh guest is penniless; the
+figures above have been corrected to match. See *Repository state* for the current defaults.
 
 Note: with no spend action yet in M1, meters start full; **visible regen is easiest to see
 after M2 jobs spend energy.** CP1's core assertions — guest auto-create, Home shows meters +
 cash, and the **same guest persists across restart** — are all testable now.
 
-Green CP1 = M1 done. Approve and I'll start **M2** (jobs, RNG payouts, mastery, leveling,
-skill allocation, Jobs UI).
+Green CP1 = M1 done. **Covered by the 2026-08-21 sign-off** — the user reported testing everything
+through M3R. CP1 was never run in isolation, but each of its assertions is exercised by the later
+flows that were: guest auto-create and token persistence on every app launch, and the meter/cash
+display on Home throughout CP2 and CP3.
 
 ---
 
-## M2 — Jobs & progression ✅ (executed via /execute-plan; pending user CP2)
+## M2 — Jobs & progression ✅ (CP2 passed 2026-08-21)
 
 Executed from `.claude/plans/FEATURE_PLAN_JobsProgression.md`, **Tier 2 (Localized
 Optimization)**, in worktree `.claude/worktrees/m2a-jobs-progression` on branch
@@ -492,7 +571,8 @@ session's standing instructions bar them unless asked. Milestones M2-A → M2-D.
 
 ### ✅ M2-A — Job catalog as content (T2.1, content half)
 - `content/crime/jobs.json`: 6 jobs, level gates 1/2/3/5/8, energy costs 1–9, inclusive cash
-  ranges, fixed XP, pack-wide mastery (10 completions/rank, max rank 5).
+  ranges, fixed XP, pack-wide mastery (10 completions/rank, max rank 5 — `completionsPerRank`
+  is **6** today: M3R took it to 8, the 1/1 balance pass to 6).
 - `ContentPackLoader.LoadJobs` + `ValidateJobs` — collects **all** errors in one message like
   `pack.json` does, naming each bad entry by array index *and* id. Loaded at startup inside
   `AddInfrastructure`, so invalid content fails the host rather than the first request.
@@ -562,7 +642,7 @@ violations at once.
 
 ---
 
-## ▶ CP2 — Milestone M2 checkpoint (please run)
+## ✅ CP2 — Milestone M2 checkpoint (passed — user-reported 2026-08-21)
 
 ```powershell
 # 1. Postgres + API (fixed port 5080)
@@ -571,11 +651,16 @@ docker compose up -d
 
 # 2. API sanity via Swagger or UnderworldEmpire.Api.http:
 #    POST /session       -> copy deviceToken -> Authorize
-#    GET  /jobs          -> 6 jobs; level-1 ones attemptable, others "unavailableReason": "level"
-#    POST /jobs/shake-down-corner-store/do  -> energy down 1, cash +15..30, xp +10, mastery 1
-#    repeat x10          -> levelUp {newLevel: 2, skillPointsGranted: 1, metersRefilled: true}
-#                           and mastery rank 1; meters back to full
-#    POST /skills/allocate {"target":"attack"} -> attack 5 -> 6
+#    GET  /jobs          -> 6 jobs; ONLY shake-down is attemptable. Boost a Parked Car is the
+#                           same level but wants 5 attack -> "unavailableReason": "stats";
+#                           the rest are "level"
+#    POST /jobs/shake-down-corner-store/do  -> energy down 1; on a success cash +15..30, xp +10,
+#                           mastery +1. About one attempt in three fails (0.65 base chance):
+#                           still a 200, ~1 cash, 1 xp, no mastery
+#    repeat x10          -> ~6 completions (one mastery rank at completionsPerRank 6) and ~91 xp,
+#                           so level 2 usually needs an 11th run once energy ticks back:
+#                           levelUp {newLevel: 2, skillPointsGranted: 1, metersRefilled: true}
+#    POST /skills/allocate {"target":"attack"} -> attack 1 -> 2
 #    GET  /me            -> the higher attack persists
 
 # 3. Flutter app — in a second terminal
@@ -587,13 +672,17 @@ docker compose up -d
 #    Android: cd app; flutter run -d <emulator>   (uses 10.0.2.2:5080 automatically)
 ```
 
+⚠️ **Rebalanced since this checkpoint was written** (`10f9806`): base stats are 1/1, shake-down
+is a 1/1 requirement at a **0.65** base chance (it can fail), and `completionsPerRank` is **6**.
+The figures above are the post-balance ones.
+
 Green CP2 = M2 done. Note **CP1 was never run** — M2 was built on M1 unverified, at the user's
 direction; if anything in CP1 fails, treat it as an M1 defect surfacing late rather than an M2
 regression.
 
 ---
 
-## M3 — Items & properties ✅ (code-complete; pending user CP3)
+## M3 — Items & properties ✅ (CP3 passed 2026-08-21)
 
 Executed via `/execute-plan` in worktree `.claude/worktrees/m3a-items-loadout` on branch
 `worktree-m3a-items-loadout`. Single-context executor — no subagents, per the session's standing
@@ -914,7 +1003,7 @@ S3.4 was merged to `main` on 2026-08-21 (`6c2a02d`) with 468 .NET and 190 Flutte
 
 ---
 
-## M3R — Job risk ✅ (executed via `/execute-plan`, pending user CP3R)
+## M3R — Job risk ✅ (CP3R passed 2026-08-21)
 
 Executed 2026-08-21 in worktree `.claude/worktrees/m3r-job-risk` on branch `worktree-m3r-job-risk`,
 from `6c2a02d`. All six tasks in one run rather than three sessions. Single-context executor — no
@@ -922,7 +1011,8 @@ subagents. Test-first throughout.
 
 **The balance question § M3R design left open was decided before any code was written:** the third
 option — `completionsPerRank` 10 → 8, and the pinned test rewritten to count *expected completions*
-rather than attempts.
+rather than attempts. (It has since gone **8 → 6** in the 1/1 balance pass, for the same reason
+against a lower base chance.)
 
 **The plan was wrong about how that test would break.** It predicted the test would fail. It would
 not have: `JobCatalogLoaderTests` asserted `EnergyMax / cheapestEnergyCost >= CompletionsPerRank`,
@@ -936,6 +1026,10 @@ attempts at the 0.85 floor expect 8.5 completions, clearing 8.
 100 threshold, so it usually takes an eleventh run. The `LevelCurve` doc comment and the pack README
 both asserted the old certainty and were corrected rather than left to rot. CP2 asks the tester to
 *watch the mastery bar*, so the mastery half is the half that was protected.
+
+> Both figures moved again the same day: after the 1/1 balance pass a bar of Shake Down expects
+> about **66** XP, not 91, and `completionsPerRank` is **6**, not 8. `LevelCurve`'s doc comment was
+> not updated with it — see A.8.2.
 
 ### The six tasks
 
@@ -978,7 +1072,7 @@ web --release` succeeds · no migration needed — M3R changed no entity.
 
 ---
 
-## ▶ CP3R — Milestone M3R checkpoint (please run)
+## ✅ CP3R — Milestone M3R checkpoint (passed — user-reported 2026-08-21)
 
 ```powershell
 # 1. Postgres + API (fixed port 5080)
@@ -987,18 +1081,24 @@ dotnet run --project src/UnderworldEmpire.Api
 
 # 2. API sanity via Swagger:
 #    POST /session   -> copy deviceToken -> Authorize
-#    GET  /jobs      -> shake-down shows attackRequirement 3, defenseRequirement 2,
-#                       successChance 0.90; run-numbers shows unavailableReason "level"
+#    GET  /jobs      -> shake-down shows attackRequirement 1, defenseRequirement 1,
+#                       successChance 0.65 (a 1/1 player sits exactly on the gate, so
+#                       there is no surplus and they get the job's floor);
+#                       boost-a-parked-car shows unavailableReason "stats" (wants 5 attack
+#                       at the same level 1); run-numbers and below show "level"
+#    POST /jobs/boost-a-parked-car/do -> 409, reason "stats" (you are 1/1), nothing spent
 #    POST /jobs/run-numbers-for-the-bookie/do -> 409, reason "level" (you are level 1)
 #
 # 3. Flutter app — in a second terminal
 #    cd app; flutter run -d chrome
-#    Home -> Jobs. Each card now reads "90% success · needs 3 attack / 2 defense".
-#    Grind Shake Down to level 2. Run Numbers is now greyed with
-#      "Needs 6 attack / 5 defense" -- a STATS lock, not a level lock.
-#    Home -> Store -> buy Brass Knuckles -> Inventory -> Equip.
-#    Back to Jobs: Run Numbers is attemptable, and its displayed % has risen.
-#    Keep tapping Shake Down until one attempt fails (about 1 in 10):
+#    Home -> Jobs. Shake Down reads "65% success · needs 1 attack / 1 defense".
+#      Boost a Parked Car is greyed with "Needs 5 attack / 1 defense" -- a STATS lock at
+#      level 1, not a level lock. That is the M3R gate doing the work.
+#    Grind Shake Down until you can afford Brass Knuckles (75 cash; you start at 0).
+#    Home -> Store -> buy Brass Knuckles -> Inventory -> Equip  (+4 attack -> you are 5/1).
+#    Back to Jobs: Boost a Parked Car is now attemptable at 75%, and Shake Down's displayed
+#      % has risen 65% -> 69% (four surplus attack at 0.010 each).
+#    Keep tapping Shake Down until one attempt fails (about 1 in 3 at 0.65):
 #      the panel says "It went wrong", pays ~1 cash and 1 XP, may show Health -1,
 #      and the mastery bar does NOT advance.
 ```
@@ -1009,23 +1109,38 @@ result panel, that is a regression in the client, not the server.
 ⚠️ **A.5.1 still applies** — Home shows base Attack, Inventory shows effective. Equipping the
 knuckles changes the job odds and the Inventory figure, but not Home's.
 
+⚠️ **This script has been rewritten for the post-balance content** (`10f9806`). The original CP3R
+demo — *Run Numbers* unlocking on equip — no longer works: at 1/1 base stats Brass Knuckles reach
+5/1, which clears *Boost a Parked Car* (5/1) but not Run Numbers (6/5). The unlock-by-equipping
+demo is *Boost a Parked Car* now.
+
 ### ▶ Next: M4 — Combat, bounty & crew
 
-**M3R is merged to `main`** (`67a5e59`, merging `worktree-m3r-job-risk`). CP3 and CP3R are both
-still outstanding and both are the user's to run — merging did not discharge them.
+**M3R is merged to `main`** (`67a5e59`, merging `worktree-m3r-job-risk`).
+
+**✅ CP2, CP3 and CP3R are discharged.** The user reported on 2026-08-21, at the start of the M4
+run, that they had tested everything up to and including M3R. Recorded as user-reported sign-off —
+no defects were raised against any of the three. M4 therefore starts on verified ground, which is
+the first milestone in this build that does.
 
 **A balance pass landed after M3R** (`10f9806`, merged as `972271a`): the player now starts at a
 1/1, penniless state with only the first job open. This tightens every CP3R figure above that
 depends on the starting position — read the checkpoint script with that in mind.
 
-**M4 is already underway and is not on `main`.** `worktree-m4a-combat-formula` stands at `cf09e9e`
-(S4.3 / T4.4: `POST /fights`, the fight log, the cash transfer). It is mid-milestone and unverified
-against the checkpoints above; it should not be merged until M4's own tasks and checkpoint are
-complete.
+**No M4 code exists.** An earlier revision of this plan claimed `worktree-m4a-combat-formula` stood
+at `cf09e9e` with `POST /fights` built. That is false and has been removed: `cf09e9e` is not a valid
+object in this repository, no branch or worktree matching `m4` exists, and nothing under `src/` or
+`app/lib/` mentions a fight, crew or bounty. M4 starts from scratch at S4.1.
+
+**Live worktrees are leftovers, not work in progress.** `git worktree list` shows two beyond the
+main checkout — `.claude/worktrees/m2a-jobs-progression` (`a793406`) and
+`.claude/worktrees/m3c-property-endpoints-flutter` (`102e65d`). Both are merged ancestors of `main`
+and can be pruned. `.claude/worktrees/m3b-item-endpoints-properties` is an empty directory that is
+no longer a registered worktree, and the `m3r-job-risk` worktree has already been cleaned up.
 
 ---
 
-## ▶ CP3 — Milestone M3 checkpoint (please run)
+## ✅ CP3 — Milestone M3 checkpoint (passed — user-reported 2026-08-21)
 
 ```powershell
 # 1. Postgres + API (fixed port 5080)
@@ -1034,13 +1149,15 @@ dotnet run --project src/UnderworldEmpire.Api
 
 # 2. API sanity via Swagger:
 #    POST /session          -> copy deviceToken -> Authorize
-#    GET  /properties       -> 6 properties; street-corner canBuy false "cash" at 100 starting cash
-#    GET  /inventory        -> 6 items; brass-knuckles canBuy true
-#    POST /items/brass-knuckles/buy    then /equip  -> loadout totalAttack 10 -> 14
+#    GET  /properties       -> 6 properties; street-corner canBuy false "cash" (you start at 0)
+#    GET  /inventory        -> 9 items; brass-knuckles canBuy FALSE at 0 cash — grind Shake Down
+#                              for ~75 cash first, then it flips true
+#    POST /items/brass-knuckles/buy    then /equip  -> loadout totalAttack 1 -> 5
 #
 # 3. Flutter app — in a second terminal
 #    cd app; flutter run -d chrome
-#    Home -> Store -> buy Brass Knuckles -> Inventory -> Equip -> Attack reads "14 (10 + 4)".
+#    Home -> Jobs -> grind Shake Down to 75 cash.
+#    Home -> Store -> buy Brass Knuckles -> Inventory -> Equip -> Attack reads "5 (1 + 4)".
 #    Grind Jobs for cash to 500, then Home -> Properties -> Buy on Street Corner.
 #    Expect: the card gains a counter, the bar fills at four a minute toward 60, and Collect
 #    goes live within ten seconds of the first coin landing. Tap Collect -> cash rises by the
@@ -1052,6 +1169,10 @@ dotnet run --project src/UnderworldEmpire.Api
 Attack, unlabelled on both. A tester watching Home during the "equip → Attack rises" step will see an
 unchanged 10 and read it as a failure. It is not; the decision about which screen owns combat stats is
 still open.
+
+⚠️ **This script has been rewritten for the post-balance content** (`10f9806`): a new player has
+**0** cash and **1/1** stats, so every "buy" step now needs a grind in front of it, and the catalog
+is **9** items, not 6.
 
 **Requires a toolchain this machine did not have until 2026-08-21** — see A.6.1 if `flutter` or
 `dotnet` is not found.
@@ -1145,7 +1266,12 @@ as specified rather than re-deciding it.** Nothing here is implemented yet.
 }]
 ```
 
-### Proposed starting balance
+### Proposed starting balance ⚠️ superseded
+
+> **This table is the M3R *proposal*, kept for the reasoning. It is not what ships.** The balance
+> pass of 2026-08-21 (`10f9806`, merged `972271a`) moved the starting player to **1/1 and 0 cash**
+> and retuned the first two jobs around it. The shipped figures are in the table below this one,
+> and `content/crime/README.md` is the live source of truth.
 
 A fresh player is attack 5 / defense 5, and a skill point is worth +1.
 
@@ -1161,6 +1287,36 @@ A fresh player is attack 5 / defense 5, and a skill point is worth +1.
 This is tuned so a brand-new 5/5 player clears both level-1 jobs (shake-down at 0.90, boost at 0.77)
 and is one point short of *Run Numbers* — which Brass Knuckles (level 1, 75 cash, +4 attack) closes.
 That is deliberately the CP3R demo: a locked job unlocking because you equipped something.
+
+### ✅ Shipped starting balance (2026-08-21, `10f9806`)
+
+A fresh player is **attack 1 / defense 1, 0 cash, 5 gold bars**, level 1, energy 10 / stamina 5 /
+health 100. A skill point is still worth +1.
+
+| job | lvl | req atk | req def | base | per surplus pt | health loss | open at 1/1? |
+|---|---|---|---|---|---|---|---|
+| shake-down-corner-store | 1 | **1** | **1** | **0.65** | 0.010 | 0–1 | ✅ the only one |
+| boost-a-parked-car | 1 | 5 | **1** | 0.75 | 0.010 | 0–3 | ✗ stats |
+| run-numbers-for-the-bookie | 2 | 6 | 5 | 0.72 | 0.010 | 0–4 | ✗ level |
+| hijack-a-delivery-truck | 3 | 9 | 7 | 0.65 | 0.008 | 2–8 | ✗ level |
+| torch-a-rival-warehouse | 5 | 14 | 10 | 0.60 | 0.006 | 4–14 | ✗ level |
+| rob-an-armored-transport | 8 | 22 | 16 | 0.55 | 0.005 | 8–25 | ✗ level |
+
+Pack-wide rules are unchanged: `maxSuccessChance` 0.95, `consolationCashFraction` 0.01,
+`consolationXpFraction` 0.10, `maxRank` 5. `completionsPerRank` is **6**.
+
+What the retune bought, and what it cost:
+
+- **Only the first job is open**, and no level requirement moved to achieve it — the M3R stat gate
+  does the work. *Boost a Parked Car* is level 1 and refuses on `"stats"`.
+- **A new player sits exactly on shake-down's gate**, so there is no surplus and they see the job's
+  floor (0.65) rather than a surplus-inflated 0.90. Failure is visible from the first bar.
+- **`completionsPerRank` 8 → 6** was forced: ten attempts at 0.65 expect 6.5 completions, so a
+  threshold of 8 would have put the first mastery rank out of reach of one energy bar and broken
+  the property CP2 is pinned on.
+- **boost-a-parked-car's defense requirement 3 → 1** was also forced: Brass Knuckles give +4 attack
+  and no defense, so a 1/1 player equipping them reaches 5/1 and would still have been refused on
+  defense — which would have broken the CP3R unlock-by-equipping demo outright.
 
 ### ✅ RESOLVED — the balance question T3R.2 had to answer
 
@@ -1182,10 +1338,291 @@ and the pinned test now counts expected completions (`attempts × baseSuccessCha
 attempts. Ten attempts at Shake Down's 0.85 floor expect 8.5 completions; a 5/5 starting player
 actually sits at 0.90 and clears 8 about 93% of the time.
 
+**Superseded the same day.** The 1/1 balance pass dropped Shake Down's floor to 0.65, so ten
+attempts now expect 6.5 completions and `completionsPerRank` went **8 → 6**. The rewritten test
+carried the change without further edits — which is the point of counting expected completions
+rather than attempts.
+
 Note the paragraph above is wrong on one point: **the test would not have failed.** It counted
 attempts affordable, which failable jobs do not change, so it would have stayed green while the
 property it documents became false. That was the more dangerous outcome, and finding it is what
 made the second option the right one rather than the third.
+
+---
+
+## § M4 design — combat, bounty & crew (drafted and ✅ signed off 2026-08-21)
+
+M4 arrives without the design work M3R had, and M3R is the evidence that settling it first is what
+makes a milestone run cleanly: every decision below was a thing that run did **not** have to
+re-litigate mid-task. This section is that same artefact for combat. **Nothing here is implemented.**
+The numbered decisions are what T4.1–T4.6 execute rather than invent; the four questions at the end
+are the ones I will not answer on your behalf.
+
+### What already exists that M4 must not break
+
+- **`Loadout` is base stat + equipped gear, and job odds are pinned to it.** M3R's whole balance —
+  a 1/1 player on shake-down's 1/1 gate at exactly 0.65 — is arithmetic over that figure. Anything
+  M4 adds to a player's effective stats reaches the job loop unless it is deliberately kept out.
+- **Stamina exists and nothing spends it.** Max 5, one point per five minutes, untouched since M1.
+  Combat is what it was reserved for.
+- **Health is already a spendable meter.** Failed jobs take 0–1 from it. `Meter.SpendAt` throws on
+  an overspend, so every loss must be clamped to what is left before it is applied.
+- **Every action service has the same shape:** resolve content → load tracked rows → delegate the
+  rules to a pure domain service → one `SaveChangesAsync` → `DbUpdateConcurrencyException` becomes
+  a typed conflict, never a retry.
+- **Refusals are `409` with a `reason` token and spend nothing; applied outcomes are `200` carrying
+  the post-action player projection.** M3R decision 9 in force.
+- **RNG is one method — `long NextInclusive(long, long)` — and roll order is a contract**, because
+  `FakeRandomSource.Sequence(...)` scripts against it. Negative bounds are legal.
+
+### The decisions
+
+1. **Crew feeds combat power only. It never touches job odds.** Crew is the obvious thing to fold
+   into `Loadout`, and folding it in would silently re-tune every job in the pack: a player with
+   three crew would walk through stat gates M3R balanced against gear, and shake-down's 0.65 floor
+   would drift upward the moment they recruited. So crew is a **separate addend applied inside the
+   combat formula**, and `Loadout` keeps meaning exactly what it means today. The cost is that
+   "your attack" now has two values depending on what is asking — the same wart A.5.1 already
+   records for Home vs Inventory, widened. Revisit as one decision, not by accretion.
+
+2. **A fight mutates both sides.** CP4 asks the tester to watch *their* health drop, so the defender
+   cannot be a read-only snapshot. A fight loads both player rows tracked, applies the attacker's
+   stamina spend, both sides' health loss and the cash transfer, and persists all of it in one
+   `SaveChangesAsync`. Both rows carry `xmin`, so either side losing a race is the ordinary `409`.
+   The defender is never asked for consent and is never notified — that is what "async PvP" means
+   here, and it is why decisions 8 and 9 bound what an offline player can lose.
+
+3. **The power formula, and why it never divides.**
+   ```
+   attackPower  = Loadout(attacker).TotalAttack  + crewAttack(attacker)
+   defensePower = Loadout(defender).TotalDefense + crewDefense(defender)
+
+   swingA = NextInclusive(-swingBasisPoints, +swingBasisPoints)
+   swingD = NextInclusive(-swingBasisPoints, +swingBasisPoints)
+
+   attacker wins  iff  attackPower × (10_000 + swingA)  >  defensePower × (10_000 + swingD)
+   ```
+   The two scaled products are compared **directly, without dividing back down**. A formula written
+   the natural way — `power × (1 + swing)`, floored to an int — is *deterministic* at the powers
+   this game actually starts at: ±15% of an attack of 1 rounds to zero, so every early fight would
+   resolve identically and the randomizer T4.2 exists to provide would not appear until double
+   digits. Comparing the scaled products keeps every point of precision at every scale, in integer
+   arithmetic, with no floating point anywhere in the win/lose decision.
+
+   **Ties go to the defender.** Equal products means the attack did not beat the defense.
+
+   **Attack is measured against defense, not against a symmetric power score.** The defender's own
+   attack is irrelevant to a fight they did not start. A counter-attack model where both sides
+   contribute both stats is a legitimate alternative and is explicitly post-MVP.
+
+4. **Roll order is a contract, and every conditional roll goes last.** M3R learned this the
+   expensive way: a roll skipped on one branch shifts every later roll in the stream and silently
+   invalidates a scripted test. The order is:
+   1. attacker swing · 2. defender swing · 3. winner's health loss · 4. loser's health loss ·
+   5. **bot cash roll — only when the target is a bot**, and last precisely so branches 1–4 script
+   identically whoever the target is.
+
+5. **Bots have no database rows. The id is the entire opponent.** A bot id like
+   `bot:3:brick-mahoney` carries an index and a name seed and nothing else — **its stats are derived
+   from the attacker's level at fight time, not from anything in the id.** That is the anti-tamper
+   property: a client that forges a bot id cannot conjure a weak target, because the id contributes
+   no numbers. No bot table, no snapshot store, no generator state to keep in sync with the ladder,
+   and the pool is guaranteed non-empty at any population — which is the whole reason T4.3 exists.
+
+6. **The opponent list shows a strength band, not a win percentage.** M3R decision 10 said report
+   the real odds and compute them once; combat reads the same way but arrives at the opposite
+   answer, so the difference is worth stating. A job's odds are a property of the *job* and cannot
+   be shopped — every player sees the same number and the honest figure helps them choose. A
+   defender's odds are a property of *that defender right now*, and publishing them turns the
+   opponent list into a search for the weakest player online. So `GET /opponents` returns
+   `weaker | even | stronger`, computed from the **same** `CombatPower` function with the swing
+   omitted. One implementation, two presentations — the thing decision 10 was actually protecting.
+
+7. **Gates spend nothing; precedence is level → stamina → health → target.** Four new reason tokens
+   on the existing 409 vocabulary: `"level"` (below the pack's combat minimum — reuses the job
+   token deliberately, so a client handles it with one code path), `"stamina"`, `"health"` (you are
+   too hurt to fight), `"target"` (unknown id, yourself, outside the level band, or a defender who
+   is already below the health floor). Most permanent first, as in `JobService.Attempt`.
+
+   The last of those is not politeness: without it, a player found at 3 health is farmable forever
+   by anyone who can beat them, and the health meter's one-point-per-minute regen makes that a
+   twelve-hour sentence.
+
+8. **A win takes a capped fraction of the loser's cash; a bot pays a rolled range instead.** Against
+   a real player, `min(cashStealFraction × loser.Cash, cashStealCap)` moves from loser to winner —
+   a fraction so a broke player is not worth hunting, a cap so a whale is not emptied by one lucky
+   tap. Against a bot there is no loser to take from, so content supplies an inclusive range and the
+   cash is minted. Bots are therefore mildly inflationary by construction; that is accepted for MVP
+   and named here so it is not discovered later as a bug.
+
+9. **Health floors at zero on both sides. Nobody is killed.** The rolled loss is clamped to the
+   side's current health before `SpendAt` sees it — the M3R rule, now applied twice per fight. There
+   is no death state, no hospital timer, no revive cost in the MVP; a player at 0 health simply
+   cannot fight (decision 7) until the meter ticks back.
+
+10. **A fight can level you up, and health loss is applied first.** Straight reuse of
+    `Player.ApplyXpAndLevelUp`, and of M3R decision 7's ordering rule: a level-up refills every
+    meter, so applying the health loss afterwards would silently undo it. Both sides gain XP — the
+    winner `xpPerWin`, the loser `xpPerLoss` — which means **an offline defender can level up while
+    being attacked**. That is intended and slightly odd, so it is written down rather than left to
+    be found.
+
+11. **`POST /fights/{targetId}`, not `POST /fights` with a body.** A deviation from the plan's
+    shorthand, and the only one in M4. Every existing action route puts the subject in the path and
+    carries no body at all (`/jobs/{id}/do`, `/items/{id}/buy`, `/properties/{id}/collect`); the
+    reason is that a request body is a surface a client can put numbers in, and this API has
+    deliberately never had one. `GET /fights` remains the log.
+
+12. **A write deadlock is a conflict, not a fault.** A fight is the first two-row write in the
+    codebase, so it is the first place where two concurrent requests can grab the same pair of rows
+    in opposite orders — A attacks B while B attacks A. Postgres resolves that by killing one
+    transaction with SQLSTATE `40P01`. `WriteConflicts` grows an `IsDeadlock` test alongside
+    `IsUniqueViolation`, and the loser gets the same `409` as any other lost race rather than a 500.
+
+13. **One row per fight, read from both sides.** A `Fight` row records attacker, defender (a player
+    id **or** a bot id, never both), who won, cash moved, health lost by each side, XP, and the
+    instant. `GET /fights` returns the most recent 20 in which the caller was *either* participant,
+    which is how a defender discovers they were robbed while offline. Indexed on
+    `(AttackerId, ResolvedAtUtc)` and `(DefenderId, ResolvedAtUtc)`. No pruning in MVP; the table
+    grows unbounded and that is a named post-MVP item, not an oversight.
+
+14. **Bounties are derived from the fight log, not stored.** A bounty entity would need placement,
+    funding, expiry and settlement — four rules and a migration for a list CP4 only asks to *see*.
+    Instead `GET /bounties` is a read over `Fights`: players who have **won** a fight in the last 24
+    hours, ordered by a score of `wins × level`, excluding the caller. Hunting one is an ordinary
+    fight; beating a listed target pays a content-tuned prize on top of the normal transfer.
+    The trade-off is that this is a *heat list*, not the player-placed bounty of the genre — see the
+    open questions.
+
+15. **Two migrations: `AddPlayerCrew`, then `AddFights`.** `PlayerCrew` keys on
+    `(PlayerId, CrewMemberId)` and `Fight` on a surrogate `Id` — the first fight-shaped table with no
+    natural key, since a player can fight the same target repeatedly within a second. Both cascade
+    from `Player`. Content ids stay `varchar(64)` non-FK columns, as with every catalog before them.
+
+### Proposed content schema
+
+Two new files, following the existing convention that a catalog file carries its own pack-wide rules
+block (as `jobs.json` carries `mastery` and `risk`).
+
+`content/crime/crew.json`
+```jsonc
+{
+  "packId": "crime", "version": 1,
+  "cap": { "base": 2, "perLevel": 1 },        // slots = base + perLevel × (level − 1)
+  "members": [
+    { "id": "lookout", "name": "Lookout", "levelRequirement": 1,
+      "price": 150, "stats": { "attack": 2, "defense": 3 } }
+    // …
+  ]
+}
+```
+
+`content/crime/combat.json`
+```jsonc
+{
+  "packId": "crime", "version": 1,
+  "rules": {
+    "minLevel": 2,                 // combat opens after the first job grind
+    "staminaCost": 1,
+    "minHealthToFight": 10,        // gate for BOTH sides — see decision 7
+    "swingFraction": 0.15,         // ±15%, applied as basis points, never divided
+    "opponentLevelBand": 2,        // real targets within ±2 levels
+    "opponentPoolSize": 8,
+    "cashStealFraction": 0.10,
+    "cashStealCap": 5000,
+    "healthLossWinner": { "min": 2, "max": 6 },
+    "healthLossLoser":  { "min": 6, "max": 15 },
+    "xpPerWin": 20,
+    "xpPerLoss": 5
+  },
+  "bots": {
+    "count": 4,                    // blended into every pool, after real targets
+    "levelOffsets": [-1, 0, 0, 1], // relative to the ATTACKER's level (decision 5)
+    "attackPerLevel": 3.0,
+    "defensePerLevel": 2.5,
+    "cash": { "min": 40, "max": 120, "perLevel": 25 },
+    "names": ["Brick Mahoney", "Sal the Hook", "Wire Kowalski", "Dutch Vega"]
+  },
+  "bounty": { "windowHours": 24, "listSize": 10, "prizePerLevel": 150 }
+}
+```
+
+Every block is **nullable in the loader models** so an omitted block is a named startup error rather
+than a silent read of zeros — M3R decision 8, which is now the house rule for content.
+
+### Proposed starting balance, and the property to preserve
+
+Numbers are a **balance pass inside T4.2/T4.3**, exactly as T3R.2 was for job risk, not something to
+freeze here. What the pass must hold true:
+
+> **A level-appropriate bot is a coin flip, tipped slightly to the player** — around 55–60% at
+> parity — and **a fight is worth roughly one job's cash but costs a scarcer meter.** Stamina is 5
+> deep and refills at one per five minutes; energy is 10 deep at the same rate. Combat must not
+> out-earn the job loop per unit of *time*, or the jobs M2/M3R built stop being the game.
+
+Reference points it has to sit against: a level-2 player is attack ~2 base, ~6 with Brass Knuckles,
+plus ~2–5 from one or two crew; *Shake Down* pays 15–30 cash for 1 energy; *Boost a Parked Car* pays
+40–75 for 2. So a win against a level-2 bot paying 40–120 + 25/level is in the right postcode and
+will need a pass, not a guess.
+
+### Task shape
+
+| # | Session | Touches | Ends green at |
+|---|---|---|---|
+| T4.2 | S4.1 | `Domain/Combat/`: `CombatPower`, `FightOutcome`, `FightFailure`, `CombatRules`; pure, no I/O | `dotnet test` — scripted-swing win/lose/tie/clamp cases |
+| T4.3 | S4.2 | `Content/CombatCatalog*`, `BotFactory`, `GET /opponents` | Swagger: a pool that is never empty, bands correct |
+| T4.4 | S4.3 | `Fight` entity + `AddFights`, `FightActionService`, `POST /fights/{targetId}`, `GET /fights` | Swagger: attack a bot, then a real second player |
+| T4.1 | S4.4a | `Crew`/`PlayerCrew` + `AddPlayerCrew`, `crew.json`, `GET /crew`, `POST /crew/{id}/recruit` | Swagger: recruit → the same fight resolves stronger |
+| T4.5 | S4.4b | `GET /bounties` over the fight log | Swagger: win a fight, appear on another player's list |
+| T4.6 | S4.5–4.6 | Flutter: Opponents, fight result panel, fight log, Crew, Bounties | `flutter test` + CP4 |
+
+**T4.2 runs before T4.1 even though the formula consumes crew.** The plan's own session order does
+this, and it is right: `CombatPower` takes crew attack/defense as **arguments**, so it is written and
+fully tested against scripted numbers before any crew entity exists, and T4.1 simply starts passing
+real ones. Same seam as `JobService` taking mastery thresholds rather than a catalog.
+
+### ✅ RESOLVED 2026-08-21 — all four confirmed as recommended
+
+The user signed off on every recommendation below without amendment, so **decisions 1–15 above are
+binding on T4.1–T4.6**. The four questions and their answers, kept because the reasoning is what a
+later reader will want:
+
+| # | Question | Answer |
+|---|---|---|
+| 1 | Offline defender loses health and cash? | **Yes** — decision 2 stands; PvP is real, not cosmetic |
+| 2 | Bounties derived or player-placed? | **Derived** heat list for MVP; player-placed is post-MVP |
+| 3 | Combat opens at level 2? | **Yes** — `minLevel: 2` in `combat.json` |
+| 4 | Crew combat-only? | **Yes** — crew never reaches `Loadout`, so no job re-balance |
+
+<details>
+<summary>The questions as they were put</summary>
+
+
+1. **Does an offline defender really lose health and cash?** Decision 2 says yes, because CP4 asks
+   the tester to watch it. The alternative — the defender is a pure snapshot and only the attacker's
+   state changes — is gentler and much simpler (one row, no deadlock case, no decision 12), but it
+   makes PvP cosmetic. *Recommend: yes, as designed.*
+2. **Bounties: derived heat list, or player-placed?** Decision 14 builds the derived list — no
+   entity, no migration, ~18k of work. Player-placed bounties (you pay cash to put a price on
+   someone who beat you, the hunter collects) is the genre-faithful version and is roughly a session
+   on its own. *Recommend: derived for MVP, player-placed as a post-MVP increment.*
+3. **Combat opens at level 2. Right gate?** It means a brand-new player must clear roughly one
+   energy bar of jobs first, which keeps the tutorial ordering clean and gives the ±2 level band
+   something to work with. Level 1 would open PvP immediately at 1/1 stats. *Recommend: 2.*
+4. **Crew is combat-only (decision 1). Confirm?** Letting crew feed `Loadout` would make it matter
+   everywhere and is closer to the genre, but it silently re-tunes every job gate M3R balanced and
+   would need a jobs re-balance in the same run. *Recommend: combat-only, revisit in M5.*
+
+</details>
+
+### Execution mode for M4
+
+Subagents are **permitted and capped at Haiku 4.5**, effort up to `max` (user instruction,
+2026-08-21). That collapses the skill's Haiku → Sonnet → Sonnet → controller ladder into
+**Haiku → Haiku at max effort → controller**: there is no Sonnet tier, so every task the skill would
+class as *judgment* is implemented by the controller directly. Mechanical work — content JSON,
+DTOs, endpoint plumbing, screens that mirror an existing one — goes to Haiku. The controller
+verifies **every** diff either way; a subagent never grades its own work.
 
 ---
 
@@ -1593,3 +2030,41 @@ figure it rolls against, so a job at 0.904 displays as "90%" and rolls at 90.4%.
 feeds no decision, but a player comparing a displayed 90% against a long-run tally will find it
 slightly off in their favour.
 
+---
+
+## A.8 — Raised during the 2026-08-21 plan audit
+
+Findings from reconciling this document against the working tree. Nothing here is scheduled.
+
+**A.8.1 The plan claimed M4 work that does not exist** · this document · high (now fixed)
+
+The *Next: M4* section stated that `worktree-m4a-combat-formula` stood at `cf09e9e` with
+`POST /fights`, the fight log and the cash transfer built. `cf09e9e` is not a valid object in this
+repository and no such branch, worktree or source file exists. The claim has been removed. It is
+worth knowing *how* a fabricated commit hash reached a document whose whole purpose is to be the
+record: nothing in the workflow verifies a hash before it is written down.
+
+**A.8.2 `LevelCurve`'s doc comment is stale** · `Progression/LevelCurve.cs` · low
+
+Its remarks still say the mastery threshold was protected "by dropping the pack's
+`completionsPerRank` from 10 to 8". It is **6** since the 1/1 balance pass. The prose reasoning
+around it is still correct; only the number is wrong. The same paragraph's "roughly 91 XP per bar"
+figure is also pre-balance — at 0.65 a bar of Shake Down expects about 66 XP.
+
+**A.8.3 Every CP script in this document was written against a balance that has moved** ·
+checkpoints CP1–CP3R · medium (now fixed)
+
+Starting cash 100, base stats 5/5, `attackRequirement 3`, "90% success", "6 items", "attack 5 → 6",
+"totalAttack 10 → 14" — all quoted figures predated `10f9806` and would have read as failures to a
+tester following them literally. All four scripts have been corrected and carry a warning banner.
+The underlying problem is structural: the checkpoints hard-code balance figures that live in
+content, so any retune silently invalidates them. Deriving the numbers from `content/crime/README.md`
+at read time is not possible in a markdown file — the practical mitigation is that a balance change
+must treat the CP scripts as part of its blast radius, the way `10f9806` treated the test helpers.
+
+**A.8.4 The gru ledger's rollup stats are stale by four milestones** · `gru-ledger.md` · low
+
+`gru-ledger.md` still says its rollup was last recomputed at the end of M1, and its `STAT` lines
+stop at S3.1. M3's later sessions, all of M3R and the balance pass are absent. The ledger notes the
+staleness honestly rather than guessing, which is the right call, but it means the ledger can no
+longer answer "how much did this cost".
