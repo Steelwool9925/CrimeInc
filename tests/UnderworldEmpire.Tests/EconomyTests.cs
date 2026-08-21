@@ -27,9 +27,10 @@ public class EconomyTests
     }
 
     [Fact]
-    public void PlayerDefaults_starting_cash_is_100()
+    public void PlayerDefaults_starting_cash_is_zero()
     {
-        Assert.Equal(100L, PlayerDefaults.StartingCash);
+        // A new player owns nothing and must work the first job before they can buy anything.
+        Assert.Equal(0L, PlayerDefaults.StartingCash);
     }
 
     [Fact]
@@ -74,7 +75,10 @@ public class EconomyTests
     [Fact]
     public void SpendCash_decreases_cash_by_amount()
     {
+        // Funded explicitly: a new player now starts at zero, so there is nothing to spend until
+        // they have earned some.
         var player = new Player { CreatedAtUtc = DateTimeOffset.UtcNow };
+        player.AddCash(100);
         long before = player.Cash;
         player.SpendCash(30);
         Assert.Equal(before - 30, player.Cash);

@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using UnderworldEmpire.Domain;
 using UnderworldEmpire.Infrastructure;
 
 namespace UnderworldEmpire.Tests;
@@ -87,13 +88,19 @@ public class PropertyEndpointTests : IClassFixture<CustomWebApplicationFactory>
     /// cash by design, so a test about owning one should not have to grind a random-payout job to get
     /// there.
     /// </summary>
-    private async Task GrantAsync(string deviceToken, long cash = 0, int? level = null)
+    /// <remarks>
+    /// Sets an <b>absolute</b> balance rather than adding to whatever a new player happens to start
+    /// with. Written as a top-up, every call site here silently encoded <c>StartingCash</c> — the
+    /// comments literally read "100 + 400 = the 500 price exactly" — and all of them broke the day
+    /// it changed. An absolute figure says what the test means.
+    /// </remarks>
+    private async Task SetCashAsync(string deviceToken, long cash, int? level = null)
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<GameDbContext>();
 
         var player = await db.Players.SingleAsync(p => p.DeviceToken == deviceToken);
-        player.AddCash(cash);
+        player.AddCash(cash - player.Cash);
         if (level is not null)
             player.Level = level.Value;
 
@@ -136,7 +143,7 @@ public class PropertyEndpointTests : IClassFixture<CustomWebApplicationFactory>
     private async Task<string> OwnerOfStarterAsync(long spareCash = 0)
     {
         var token = await NewGuestTokenAsync();
-        await GrantAsync(token, cash: 500 + spareCash - 100);
+        await SetCashAsync(token, 500 + spareCash);
         var response = await BuyAsync(token, Starter);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return token;
@@ -199,7 +206,7 @@ public class PropertyEndpointTests : IClassFixture<CustomWebApplicationFactory>
 
         using var doc = await BodyAsync(await GetPropertiesAsync(token));
 
-        Assert.Equal(100, doc.RootElement.GetProperty("cash").GetInt64());
+        Assert.Equal(PlayerDefaults.StartingCash, doc.RootElement.GetProperty("cash").GetInt64());
         Assert.Equal(1, doc.RootElement.GetProperty("level").GetInt32());
     }
 
@@ -233,7 +240,7 @@ public class PropertyEndpointTests : IClassFixture<CustomWebApplicationFactory>
     public async Task An_affordable_property_reports_no_obstacle()
     {
         var token = await NewGuestTokenAsync();
-        await GrantAsync(token, cash: 400); // 100 + 400 = the 500 price exactly
+        await SetCashAsync(token, 500); // the price exactly
 
         using var doc = await BodyAsync(await GetPropertiesAsync(token));
         var corner = PropertyNamed(doc.RootElement, Starter);
@@ -314,7 +321,7 @@ public class PropertyEndpointTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Buying_a_property_charges_its_price_and_returns_the_new_state()
     {
         var token = await NewGuestTokenAsync();
-        await GrantAsync(token, cash: 400); // 500 exactly
+        await SetCashAsync(token, 500); // the price exactly
 
         var response = await BuyAsync(token, Starter);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -381,7 +388,7 @@ public class PropertyEndpointTests : IClassFixture<CustomWebApplicationFactory>
         await BuyAsync(token, Starter);
 
         using var doc = await BodyAsync(await GetPropertiesAsync(token));
-        Assert.Equal(100, doc.RootElement.GetProperty("cash").GetInt64());
+        Assert.Equal(PlayerDefaults.StartingCash, doc.RootElement.GetProperty("cash").GetInt64());
         Assert.Equal(0, PropertyNamed(doc.RootElement, Starter).GetProperty("quantity").GetInt32());
     }
 
@@ -389,7 +396,7 @@ public class PropertyEndpointTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Buying_a_property_above_the_players_level_returns_409_level()
     {
         var token = await NewGuestTokenAsync();
-        await GrantAsync(token, cash: 100_000);
+        await SetCashAsync(token, 100_000);
 
         var response = await BuyAsync(token, GatedProperty);
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);

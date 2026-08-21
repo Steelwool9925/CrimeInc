@@ -242,29 +242,29 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
         // The load-bearing CP2 tuning: one full starting energy bar of the cheapest job is exactly
         // the level-2 threshold, and crosses a mastery rank along the way.
         //
-        // M3R moved the rank. `completionsPerRank` dropped 10 -> 8 so that the first rank stays
-        // reachable in one sitting once attempts can fail, so the rank-up now lands on the eighth
-        // run rather than the tenth. Both instants are checked: the eighth for the rank, the tenth
-        // for the level.
+        // The rank has moved twice. M3R dropped `completionsPerRank` 10 -> 8 so the first rank
+        // stayed reachable once attempts could fail; lowering the first job base chance to 0.65
+        // dropped it again, 8 -> 6. So the rank-up lands on the sixth run. Both instants are
+        // checked: the sixth for the rank, the tenth for the level.
         var token = await NewGuestTokenAsync();
 
-        JsonDocument? eighth = null;
+        JsonDocument? sixth = null;
         JsonDocument? tenth = null;
         for (int i = 1; i <= 10; i++)
         {
             var body = await BodyAsync(await DoJobAsync(token, CheapJob));
-            if (i == 8) eighth = body;
+            if (i == 6) sixth = body;
             else if (i == 10) tenth = body;
             else body.Dispose();
         }
 
-        using var rankDoc = eighth!;
+        using var rankDoc = sixth!;
         using var doc = tenth!;
         var root = doc.RootElement;
 
-        // The eighth completion is the first mastery rank.
+        // The sixth completion is the first mastery rank.
         var rankMastery = rankDoc.RootElement.GetProperty("result").GetProperty("mastery");
-        Assert.Equal(8, rankMastery.GetProperty("completions").GetInt32());
+        Assert.Equal(6, rankMastery.GetProperty("completions").GetInt32());
         Assert.Equal(1, rankMastery.GetProperty("rank").GetInt32());
         Assert.True(rankDoc.RootElement.GetProperty("result")
             .GetProperty("masteryRankedUp").GetBoolean());
@@ -283,7 +283,7 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Equal(LevelCurve.XpToReach(2), player.GetProperty("xp").GetInt64());
         Assert.Equal(PlayerDefaults.SkillPointsPerLevel, player.GetProperty("skillPoints").GetInt32());
 
-        // And the tenth run is two completions past that rank, not a second rank-up.
+        // And the tenth run is four completions past that rank, not a second rank-up.
         var mastery = root.GetProperty("result").GetProperty("mastery");
         Assert.Equal(10, mastery.GetProperty("completions").GetInt32());
         Assert.Equal(1, mastery.GetProperty("rank").GetInt32());

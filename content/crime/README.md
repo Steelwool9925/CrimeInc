@@ -83,42 +83,59 @@ All numbers here are tunable without touching code. Two properties are load-bear
 One full starting energy bar buys **ten** runs of *Shake Down a Corner Store*. Since M3R those runs
 can fail, so what a bar yields is now a distribution rather than a guarantee:
 
-| | before M3R | since M3R |
-|---|---|---|
-| completions in one bar | exactly 10 | ~9 expected (0.90 at 5/5 stats) |
-| mastery rank at | 10 completions | **8** completions |
-| XP in one bar | exactly 100 | ~91 expected |
+| | before M3R | M3R | since the 1/1 start |
+|---|---|---|---|
+| starting stats | 5 / 5 | 5 / 5 | **1 / 1** |
+| starting cash | 100 | 100 | **0** |
+| first job success | always | 0.90 | **0.65** |
+| completions in one bar | exactly 10 | ~9 expected | ~6.5 expected |
+| mastery rank at | 10 completions | 8 completions | **6** completions |
+| XP in one bar | exactly 100 | ~91 expected | ~68 expected |
 
-`completionsPerRank` dropped 10 → 8 to keep the first mastery rank reachable in one sitting: ten
-attempts at the job's 0.85 *floor* still expect 8.5 completions, and a 5/5 starting player actually
-sits at 0.90, which clears 8 about 93% of the time.
+`completionsPerRank` has dropped twice, each time to keep the first mastery rank reachable in one
+sitting. M3R took it 10 → 8 when attempts became failable; the 1/1 start took it 8 → 6, because ten
+attempts at 0.65 expect 6.5 completions.
 
-**Reaching level 2 in one bar is no longer guaranteed** and was not preserved. Level 2 costs 100 XP
-(`LevelCurve`), and a bar now expects ~91, so it usually takes an eleventh run once energy ticks
-back. That is the intended cost of making jobs failable; the mastery half of CP2 is the half that
-was protected, because it is the half the checkpoint asks the tester to *watch*.
+**Reaching level 2 in one bar is not guaranteed** and was not preserved. Level 2 costs 100 XP
+(`LevelCurve`) and a bar now expects ~68, so it takes roughly two bars. That is the intended cost of
+a harder opening; the mastery half of CP2 is the half that was protected, because it is the half the
+checkpoint asks the tester to *watch*.
+
+**A new player owns nothing.** Starting cash is 0, so the first *Brass Knuckles* (75) is roughly one
+energy bar of successful work away — about 97 cash expected at the job's 15 floor. `ItemCatalogLoaderTests`
+pins that reachability, so a later price rise cannot quietly put the first item out of reach of a
+first sitting.
 
 ### Risk balance
 
 | job | lvl | req atk/def | base | per surplus pt | health loss |
 |---|---|---|---|---|---|
-| shake-down-corner-store | 1 | 3 / 2 | 0.85 | 0.010 | 0–1 |
-| boost-a-parked-car | 1 | 5 / 3 | 0.75 | 0.010 | 0–3 |
+| shake-down-corner-store | 1 | 1 / 1 | 0.65 | 0.010 | 0–1 |
+| boost-a-parked-car | 1 | 5 / 1 | 0.75 | 0.010 | 0–3 |
 | run-numbers-for-the-bookie | 2 | 6 / 5 | 0.72 | 0.010 | 0–4 |
 | hijack-a-delivery-truck | 3 | 9 / 7 | 0.65 | 0.008 | 2–8 |
 | torch-a-rival-warehouse | 5 | 14 / 10 | 0.60 | 0.006 | 4–14 |
 | rob-an-armored-transport | 8 | 22 / 16 | 0.55 | 0.005 | 8–25 |
 
-Tuned against a fresh player at attack 5 / defense 5, where a skill point is worth +1:
+Tuned against a fresh player at **attack 1 / defense 1**, where a skill point is worth +1:
 
-- *Shake Down* sits at **0.90** (5 points of surplus) — the safe grind.
-- *Boost a Parked Car* sits at **0.77** (2 points of surplus) — same level, meaningfully riskier.
-- *Run Numbers* is **one point of attack short** and refuses with `"stats"`, spending nothing.
-  Equipping *Brass Knuckles* (level 1, 75 cash, +4 attack) takes attack to 9 and unlocks it at 0.75.
+- *Shake Down* is the **only job a new player can attempt**. They sit exactly on its 1/1 requirement,
+  so there is no surplus and the chance is the job's floor: **0.65**.
+- *Boost a Parked Car* is the same level but wants 5 attack, so it refuses with `"stats"` — the
+  second job is an aspiration, not an alternative. Every other job is gated on level as well.
+  Its defense requirement is **1, not 3**, so that a weapon alone can open it: Brass Knuckles add
+  attack and no defense, and a 3-defense gate would have made the first unlock impossible without
+  also buying armour at 120.
+- *Run Numbers* (level 2, 6 attack) is the next unlock and needs both a level and some gear.
 
-That last row is the **CP3R demo**: a job that is locked, and unlocks because you equipped something.
-It is the reason M3R was scheduled after M3 rather than inside M2 — the requirement reads *effective*
-stats, so it depends on the `Loadout` aggregation that T3.1 introduced.
+**Only the first job is open at the start, and it is deliberately not a sure thing.** Every route out
+of that opening — a skill point, a weapon, a level — visibly moves either the odds on *Shake Down* or
+the gate on something better.
+
+The **CP3R demo** is unchanged in shape: *Brass Knuckles* (level 1, 75 cash, +4 attack) takes a
+starting player from 1 attack to 5 and opens *Boost a Parked Car*. That is a job unlocked by
+equipping rather than levelling, and it is why M3R was scheduled after M3 — the requirement reads
+*effective* stats, so it depends on the `Loadout` aggregation T3.1 introduced.
 
 Health loss scales with the job's ambition: the level-1 jobs can cost a point or three, while a
 failed armored-transport robbery costs 8–25 of a 100-point bar. The loss is clamped to current

@@ -380,20 +380,36 @@ public class ItemCatalogLoaderTests : IDisposable
     [Fact]
     public void Real_crime_catalog_lets_a_fresh_player_buy_and_feel_their_first_item()
     {
-        // CP3 asks the tester to buy + equip a weapon and watch Attack/Defense rise. That is only
-        // reachable in one sitting if some level-1 item costs no more than the starting cash and
-        // actually moves a stat. This test pins that tuning so a later balance pass cannot silently
-        // make the checkpoint untestable.
-        var catalog = new ContentPackLoader(FindRepoContentRoot()).LoadItems("crime");
+        // CP3 asks the tester to buy + equip a weapon and watch Attack/Defense rise, in one sitting.
+        //
+        // That used to mean "some level-1 item costs no more than the starting cash". A new player
+        // now starts with nothing, so the honest version of the property is that the starter item is
+        // reachable on one full energy bar of the pack's first job — measured at that job's cash
+        // floor and its base success chance, so the figure is what an unlucky player can rely on
+        // rather than what a lucky one might see.
+        var loader = new ContentPackLoader(FindRepoContentRoot());
+        var items = loader.LoadItems("crime");
+        var jobs = loader.LoadJobs("crime");
 
-        var starter = catalog.Items
-            .Where(i => i.LevelRequirement == 1 && i.Price <= PlayerDefaults.StartingCash)
+        var firstJob = jobs.Jobs
+            .Where(j => j.LevelRequirement == 1)
+            .OrderBy(j => j.EnergyCost)
+            .First();
+
+        int attemptsOnAFullBar = PlayerDefaults.EnergyMax / firstJob.EnergyCost;
+        double expectedCash =
+            attemptsOnAFullBar * firstJob.CashMin * firstJob.BaseSuccessChance;
+
+        var starter = items.Items
+            .Where(i => i.LevelRequirement == 1 && i.Attack + i.Defense >= 1)
             .OrderBy(i => i.Price)
             .FirstOrDefault();
 
         Assert.NotNull(starter);
-        Assert.True(starter.Attack + starter.Defense >= 1,
-            $"Starter item '{starter.Id}' grants no stat bonus, so buying it would not visibly change anything.");
+        Assert.True(starter.Price <= expectedCash + PlayerDefaults.StartingCash,
+            $"Cheapest stat-moving level-1 item '{starter.Id}' costs {starter.Price}, but one energy " +
+            $"bar of '{firstJob.Id}' only expects {expectedCash:0.##} cash on top of a starting " +
+            $"{PlayerDefaults.StartingCash} — so CP3 would take more than one sitting to reach.");
     }
 
     [Fact]

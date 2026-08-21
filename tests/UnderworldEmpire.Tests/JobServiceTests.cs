@@ -382,8 +382,15 @@ public class JobServiceTests
     // The stat gate (T3R.4) — a refusal, so nothing may be mutated
     // -------------------------------------------------------------------------
 
-    /// <summary>A job the fresh 5/5 player cannot reach: 9 attack required.</summary>
-    private static Job GatedJob(int attack = 9, int defense = 0) =>
+    /// <summary>
+    /// A job the fresh 1/1 player cannot reach: 5 attack required.
+    /// </summary>
+    /// <remarks>
+    /// Five, not more, so that Brass Knuckles (+4) takes a base-1 player to exactly the requirement.
+    /// That is the shape of the real unlock in the shipped pack, and what makes
+    /// <see cref="The_gate_reads_equipped_gear_not_just_base_stats"/> mean something.
+    /// </remarks>
+    private static Job GatedJob(int attack = 5, int defense = 0) =>
         TestJob(attackRequirement: attack, defenseRequirement: defense, baseSuccessChance: 0.8);
 
     [Fact]
@@ -536,14 +543,14 @@ public class JobServiceTests
     [Fact]
     public void Surplus_stats_raise_the_chance_the_attempt_rolls_against()
     {
-        // Requirement 3/2 against the fresh 5/5: five points of surplus at 1% each takes 0.85 to
-        // 0.90, so 9000 wins where it would have lost at the base chance.
-        var random = FakeRandomSource.Sequence(9000, 20);
+        // An ungated job against the fresh 1/1: two points of surplus at 1% each takes 0.85 to
+        // 0.87, so 8700 wins where it would have lost at the base chance.
+        var random = FakeRandomSource.Sequence(8700, 20);
         var player = TestPlayer();
         var service = new JobService(random);
 
         var result = Attempt(service, player,
-            TestJob(attackRequirement: 3, defenseRequirement: 2,
+            TestJob(attackRequirement: 0, defenseRequirement: 0,
                     baseSuccessChance: 0.85, successChancePerSurplusPoint: 0.01),
             TestMastery(player.Id));
 

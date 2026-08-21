@@ -227,21 +227,21 @@ public class JobEndpointTests : IClassFixture<CustomWebApplicationFactory>
         using var doc = await GetJobsAsync(token);
         var corner = Job(doc, "shake-down-corner-store");
 
-        Assert.Equal(3, corner.GetProperty("attackRequirement").GetInt32());
-        Assert.Equal(2, corner.GetProperty("defenseRequirement").GetInt32());
+        Assert.Equal(1, corner.GetProperty("attackRequirement").GetInt32());
+        Assert.Equal(1, corner.GetProperty("defenseRequirement").GetInt32());
     }
 
     [Fact]
     public async Task Each_job_reports_the_callers_live_success_chance()
     {
-        // A fresh 5/5 player against a 3/2 requirement: five points of surplus at 1% over the 0.85
-        // base. The figure is computed by the same Job.SuccessChanceFor the attempt rolls against,
-        // so what is displayed cannot drift from what is rolled.
+        // A fresh 1/1 player sits exactly on the first job 1/1 requirement, so there is no surplus
+        // and the figure is the job base chance. Computed by the same Job.SuccessChanceFor the
+        // attempt rolls against, so what is displayed cannot drift from what is rolled.
         var token = await NewGuestTokenAsync();
 
         using var doc = await GetJobsAsync(token);
 
-        Assert.Equal(0.90, Job(doc, "shake-down-corner-store").GetProperty("successChance").GetDouble(), precision: 10);
+        Assert.Equal(0.65, Job(doc, "shake-down-corner-store").GetProperty("successChance").GetDouble(), precision: 10);
     }
 
     [Fact]
