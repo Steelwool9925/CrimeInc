@@ -244,7 +244,11 @@ def main(argv: list[str]) -> int:
         print(f"error: no pack.json at {manifest_path}", file=sys.stderr)
         return 1
 
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    # utf-8-sig, not utf-8: pack.json is hand-edited, and a Windows editor (or PowerShell's
+    # Set-Content -Encoding utf8) will happily write a BOM that plain utf-8 decoding chokes on.
+    # .NET's File.ReadAllText strips it silently, so the server would load a manifest this
+    # script could not.
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
     palette = manifest.get("palette", {})
     primary = parse_hex(palette.get("primary", ""), "#B71C1C")
     secondary = parse_hex(palette.get("secondary", ""), "#212121")
