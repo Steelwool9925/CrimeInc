@@ -37,6 +37,12 @@ public sealed class ContentPackLoader
     }
 
     /// <summary>
+    /// The folder holding <paramref name="packId"/>'s files. Asset serving (T4.1) resolves
+    /// manifest-declared relative paths against this, and confines them to it.
+    /// </summary>
+    public string PackRoot(string packId) => Path.Combine(_contentRoot, packId);
+
+    /// <summary>
     /// Loads and validates the pack with <paramref name="packId"/>.
     /// </summary>
     /// <exception cref="ContentPackException">

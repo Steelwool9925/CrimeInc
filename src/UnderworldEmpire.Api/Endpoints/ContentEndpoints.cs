@@ -15,6 +15,20 @@ public static class ContentEndpoints
            .WithName("GetContentPack")
            .WithTags("Content");
 
+        // GET /content/assets/{key} — streams the file the manifest names for a logical key
+        // ("logo", "icon"). Anonymous, because the app shows branding before a guest exists.
+        //
+        // The key is looked up in the manifest and never treated as a path, so the route cannot
+        // be steered at an arbitrary file; PackAssets additionally confines the manifest's own
+        // declaration to the pack folder. Serving by key is what lets art be swapped as content,
+        // with no code change — the CP4 acceptance test.
+        app.MapGet("/content/assets/{key}", [AllowAnonymous] (string key, IContentPackProvider provider) =>
+            PackAssets.TryResolve(provider.ActivePack, provider.PackRoot, key, out var path, out var contentType)
+                ? Results.File(path, contentType)
+                : Results.NotFound())
+           .WithName("GetContentAsset")
+           .WithTags("Content");
+
         return app;
     }
 }

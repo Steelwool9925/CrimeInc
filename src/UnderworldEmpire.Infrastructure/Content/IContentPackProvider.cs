@@ -10,6 +10,12 @@ public interface IContentPackProvider
     ContentPack ActivePack { get; }
 
     /// <summary>
+    /// Absolute path of the active pack's folder. Asset requests resolve the manifest's relative
+    /// asset paths against this and are confined to it — see <see cref="PackAssets.TryResolve"/>.
+    /// </summary>
+    string PackRoot { get; }
+
+    /// <summary>
     /// The loaded and validated job catalog for the active pack. Same lifecycle as
     /// <see cref="ActivePack"/> — read once at startup, immutable thereafter.
     /// </summary>

@@ -22,10 +22,14 @@
     <ProjectReference Include="..\UnderworldEmpire.Infrastructure\UnderworldEmpire.Infrastructure.csproj" />
   </ItemGroup>
 
-  <!-- Copy content pack JSON files to build output so the loader can find them at runtime
-       and in integration tests (AppContext.BaseDirectory/content/<packId>/pack.json). -->
+  <!-- Copy content pack files to build output so the loader can find them at runtime and in
+       integration tests (AppContext.BaseDirectory/content/<packId>/pack.json).
+
+       Art assets (T4.1) are copied alongside the JSON: GET /content/assets/{key} streams them
+       from the pack folder, so a pack whose manifest names a logo it cannot serve would render
+       a broken image in the app. The extension list mirrors the allow-list in PackAssets. -->
   <ItemGroup>
-    <Content Include="..\..\content\**\*.json"
+    <Content Include="..\..\content\**\*.json;..\..\content\**\*.png;..\..\content\**\*.jpg;..\..\content\**\*.jpeg;..\..\content\**\*.webp;..\..\content\**\*.svg"
              Link="content\%(RecursiveDir)%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
