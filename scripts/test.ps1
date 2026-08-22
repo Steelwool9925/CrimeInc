@@ -3,17 +3,21 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 
+# Resolve the SDKs rather than trusting PATH — see scripts/_toolchain.ps1.
+. "$PSScriptRoot/_toolchain.ps1"
+$tc = Initialize-Toolchain -RequireFlutter
+
 Write-Host '== dotnet build ==' -ForegroundColor Cyan
-dotnet build "$root/UnderworldEmpire.slnx"
+& $tc.Dotnet build "$root/UnderworldEmpire.slnx"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host '== dotnet test ==' -ForegroundColor Cyan
-dotnet test "$root/UnderworldEmpire.slnx" --no-build
+& $tc.Dotnet test "$root/UnderworldEmpire.slnx" --no-build
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host '== flutter test ==' -ForegroundColor Cyan
 Push-Location "$root/app"
-try { flutter test } finally { Pop-Location }
+try { & $tc.Flutter test } finally { Pop-Location }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host 'All test suites passed.' -ForegroundColor Green

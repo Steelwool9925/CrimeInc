@@ -88,23 +88,45 @@ class ContentPack {
     required this.cashLabel,
     required this.premiumLabel,
     required this.primaryColorHex,
+    this.secondaryColorHex = '',
+    this.accentColorHex = '',
+    this.assets = const {},
   });
 
   final String name;
   final String cashLabel;
   final String premiumLabel;
   final String primaryColorHex;
+  final String secondaryColorHex;
+  final String accentColorHex;
+
+  /// Logical asset key ('logo', 'icon') to the path the manifest declares for it.
+  ///
+  /// The path is not used by the client — `GET /content/assets/{key}` resolves it server-side.
+  /// What matters here is which keys the pack declares at all, so the UI can leave out art a
+  /// pack does not ship instead of requesting a URL that will 404.
+  final Map<String, String> assets;
+
+  /// Whether the manifest declares a usable file for [key].
+  bool hasAsset(String key) => (assets[key] ?? '').isNotEmpty;
 
   factory ContentPack.fromJson(Map<String, dynamic> json) {
     final currencies = json['currencies'] as Map<String, dynamic>? ?? {};
     final cash = currencies['cash'] as Map<String, dynamic>? ?? {};
     final premium = currencies['premium'] as Map<String, dynamic>? ?? {};
     final palette = json['palette'] as Map<String, dynamic>? ?? {};
+    final assets = json['assets'] as Map<String, dynamic>? ?? {};
     return ContentPack(
       name: json['name'] as String? ?? '',
       cashLabel: cash['label'] as String? ?? 'Cash',
       premiumLabel: premium['label'] as String? ?? 'Gems',
       primaryColorHex: palette['primary'] as String? ?? '#6200EE',
+      secondaryColorHex: palette['secondary'] as String? ?? '',
+      accentColorHex: palette['accent'] as String? ?? '',
+      assets: {
+        for (final entry in assets.entries)
+          if (entry.value is String) entry.key: entry.value as String,
+      },
     );
   }
 }

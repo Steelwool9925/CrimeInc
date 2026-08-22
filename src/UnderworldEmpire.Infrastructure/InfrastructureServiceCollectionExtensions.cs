@@ -57,7 +57,12 @@ public static class InfrastructureServiceCollectionExtensions
         var itemCatalog = loader.LoadItems(BuildInfo.DefaultContentPack);
         var propertyCatalog = loader.LoadProperties(BuildInfo.DefaultContentPack);
         services.AddSingleton<IContentPackProvider>(
-            new ContentPackProvider(pack, jobCatalog, itemCatalog, propertyCatalog));
+            new ContentPackProvider(
+                pack,
+                loader.PackRoot(BuildInfo.DefaultContentPack),
+                jobCatalog,
+                itemCatalog,
+                propertyCatalog));
 
         return services;
     }

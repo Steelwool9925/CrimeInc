@@ -30,14 +30,25 @@ PostgreSQL                    ── all persistent state, transactional mutatio
 | `tests/UnderworldEmpire.Tests` | xUnit unit + integration tests |
 | `app/` | Flutter project (Android + Web) |
 | `content/crime/` | The MVP theme pack (data-driven JSON + assets) |
-| `scripts/` | Local build / test / run helpers (PowerShell) |
+| `scripts/` | Local build / test / run helpers (PowerShell) — start with `doctor.ps1` |
 | `docker-compose.yml` | Local Postgres (added in S0.2) |
 
 ## Prerequisites
 
-- .NET SDK 10.x
-- Flutter 3.35+ (Dart 3.9+)
-- Docker (for local Postgres, from S0.2)
+| Need | For | Required? |
+|---|---|---|
+| **.NET SDK 10.x** | API, tests | yes |
+| **Flutter 3.35+** (Dart 3.9+) | app, widget tests | yes |
+| **Docker** | local Postgres | yes |
+| Chrome | `run-app.ps1` web run | for the web run |
+| Android SDK | emulator / APK builds | optional — `./scripts/setup-android.ps1` installs it |
+| Python 3 | regenerating pack art | optional |
+
+> **You do not need to put the SDKs on PATH.** `scripts/_toolchain.ps1` locates them and the
+> scripts invoke them by full path. This matters more than it sounds: a machine with .NET 8
+> system-wide and .NET 10 per-user resolves `dotnet` to the 8, which cannot parse this repo's
+> `.slnx` solution and fails with `MSB4068: The element <Solution> is unrecognized` — an error
+> that reads like a corrupt solution file but is purely SDK resolution.
 
 > Local Postgres is published on **host port 5433** (see `docker-compose.yml`) to avoid
 > clashing with a natively-installed PostgreSQL on the default 5432. Override the connection
@@ -46,15 +57,56 @@ PostgreSQL                    ── all persistent state, transactional mutatio
 ## Quick start
 
 ```powershell
-# Build + test everything
+# 0. Check the machine has everything, and be told how to fix what it doesn't.
+#    Changes nothing; exits non-zero only on BLOCKING problems.
+./scripts/doctor.ps1
+
+# 1. Start Postgres
+docker compose up -d postgres
+
+# 2. Build + test everything (570 .NET tests, 240 Flutter tests)
 ./scripts/test.ps1
 
-# Run the API (Swagger at /swagger once S0.2 lands)
+# 3. Run the API — Swagger at http://localhost:5080/swagger
 ./scripts/run-api.ps1
 
-# Run the Flutter app (web)
+# 4. In a SECOND terminal, run the app (web)
 ./scripts/run-app.ps1
+#    Android emulator instead:  ./scripts/run-app.ps1 -d <device-id>
 ```
+
+**Start with `doctor.ps1`.** It reports the SDKs it found, whether Postgres is up, which
+optional targets are missing, and whether any access token is sitting in plaintext git config.
+
+### Android
+
+Android Studio is **not** required. This installs only the pieces the project needs
+(command-line tools, platform 36, build-tools 36, platform-tools — a few hundred MB):
+
+```powershell
+./scripts/setup-android.ps1                  # APK builds, physical devices
+./scripts/setup-android.ps1 -WithEmulator    # also an emulator (~1.5 GB more)
+
+cd app; flutter build apk --debug            # prove it works
+flutter devices                              # then: ./scripts/run-app.ps1 -d <device>
+```
+
+> Running that script **accepts Google's Android SDK licence agreements** on your behalf —
+> the same ones `flutter doctor --android-licenses` presents interactively.
+
+Everything installs under `%LOCALAPPDATA%\Android\Sdk`, so undoing it is deleting that folder
+and the `ANDROID_HOME` user variable. It needs a JDK (17 or 21); set `JAVA_HOME` if the script
+says it cannot find one.
+
+### Verifying the core loop without clicking through it
+
+```powershell
+# With the API running, in another terminal:
+./scripts/smoke-core-loop.ps1
+```
+
+Drives the real HTTP surface end to end — session, the art route, a job grind, buy + equip,
+and the property gate — and prints a pass/fail line per check.
 
 ## Content packs
 

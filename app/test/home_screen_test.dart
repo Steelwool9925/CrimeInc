@@ -111,10 +111,11 @@ void main() {
       await tester.pumpWidget(_wrap(state));
       await tester.pump();
 
-      // Energy has secondsUntilNextPoint: 42
+      // Energy has secondsUntilNextPoint: 42 — under a minute, so plain seconds.
       expect(find.text('+1 in 42s'), findsOneWidget);
-      // Stamina has secondsUntilNextPoint: 120
-      expect(find.text('+1 in 120s'), findsOneWidget);
+      // Stamina has secondsUntilNextPoint: 120. T4.2 formats anything over a minute as
+      // minutes and zero-padded seconds; this read "+1 in 120s" before.
+      expect(find.text('+1 in 2m 00s'), findsOneWidget);
       // Health is full — no countdown
       expect(find.textContaining('in '), findsNWidgets(2));
     });

@@ -80,6 +80,13 @@ abstract class ApiClient {
   /// ('notOwned', 'nothingToCollect').
   Future<CollectPropertyResult> collectProperty(
       String deviceToken, String propertyId);
+
+  /// Absolute URL for a pack art asset, by logical key ('logo', 'icon').
+  ///
+  /// Synchronous and unauthenticated: the server resolves the key against the manifest, so the
+  /// client never needs to know which file backs it. This is what lets art be swapped in the
+  /// pack without touching the app.
+  String assetUrl(String key);
 }
 
 class HttpApiClient implements ApiClient {
@@ -89,6 +96,9 @@ class HttpApiClient implements ApiClient {
 
   final String _baseUrl;
   final http.Client _client;
+
+  @override
+  String assetUrl(String key) => '$_baseUrl/content/assets/$key';
 
   static String _defaultBaseUrl() {
     const env = String.fromEnvironment('API_BASE_URL');

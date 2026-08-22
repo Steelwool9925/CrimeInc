@@ -43,8 +43,9 @@ void main() {
     testWidgets('shows attack and defense — CP2 checks the stat here', (tester) async {
       await pumpHome(tester, FakeApiClient(meResult: meWith(attack: 11, defense: 7)));
 
-      expect(find.text('Attack 11'), findsOneWidget);
-      expect(find.text('Defense 7'), findsOneWidget);
+      // Labelled "Base" since T4.2: these exclude equipped gear, unlike Inventory's totals.
+      expect(find.text('Base attack 11'), findsOneWidget);
+      expect(find.text('Base defense 7'), findsOneWidget);
     });
 
     testWidgets('prompts when skill points are unspent', (tester) async {

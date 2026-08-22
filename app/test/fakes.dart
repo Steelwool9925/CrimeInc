@@ -561,6 +561,9 @@ class FakeApiClient implements ApiClient {
   }
 
   @override
+  String assetUrl(String key) => 'http://fake.test/content/assets/$key';
+
+  @override
   Future<JobList> jobs(String deviceToken) async {
     jobsCalls++;
     if (_throwOnJobs) throw const ApiException(500, 'jobs error');

@@ -4,9 +4,14 @@
 # Pass extra args to override (e.g. --urls http://localhost:1234).
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+
+# Resolve the SDK rather than trusting PATH — see scripts/_toolchain.ps1.
+. "$PSScriptRoot/_toolchain.ps1"
+$tc = Initialize-Toolchain
+
 $env:ASPNETCORE_ENVIRONMENT = 'Development'
 if ($args.Count -eq 0) {
-    dotnet run --project "$root/src/UnderworldEmpire.Api" --urls http://localhost:5080
+    & $tc.Dotnet run --project "$root/src/UnderworldEmpire.Api" --urls http://localhost:5080
 } else {
-    dotnet run --project "$root/src/UnderworldEmpire.Api" @args
+    & $tc.Dotnet run --project "$root/src/UnderworldEmpire.Api" @args
 }
