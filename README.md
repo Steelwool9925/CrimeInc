@@ -117,5 +117,7 @@ possible (a separate future app can reuse the engine), but no other theme is bui
 
 ## Status
 
-Built session-by-session against [`CrimeIncMVPPlan.md`](./CrimeIncMVPPlan.md). See that plan for
-milestones (M0–M5), tasks, and manual test checkpoints (CP0–CP5).
+MVP complete: milestones M0–M4 (scaffolding, foundation, jobs & progression, items & properties,
+job risk, art & polish) are built and merged to `main`. The session-by-session build plan and its
+manual test checkpoints (CP0–CP4) are preserved in git history at `CrimeIncMVPPlan.md` as of this
+commit's parent, for anyone who wants the design rationale or balance-tuning notes.
