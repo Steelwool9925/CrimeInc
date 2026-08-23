@@ -50,3 +50,7 @@ gru-ledger.md
 # ---- Worktrees (isolated agent workspaces) ----
 .claude/worktrees/
 .worktrees/
+
+# Stray artifact from a PowerShell "2>$null" redirect reaching a non-PowerShell shell,
+# which creates a literal file named $null. Junk; never intentional.
+$null

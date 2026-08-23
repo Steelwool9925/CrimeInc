@@ -64,19 +64,31 @@ PostgreSQL                    ── all persistent state, transactional mutatio
 # 1. Start Postgres
 docker compose up -d postgres
 
-# 2. Build + test everything (570 .NET tests, 240 Flutter tests)
+# 2. Create the schema. REQUIRED on a fresh clone, and any time the Docker volume is
+#    recreated — compose gives you a database, not a schema. Safe to re-run.
+./scripts/migrate.ps1
+
+# 3. Build + test everything (570 .NET tests, 240 Flutter tests)
 ./scripts/test.ps1
 
-# 3. Run the API — Swagger at http://localhost:5080/swagger
+# 4. Run the API — Swagger at http://localhost:5080/swagger
 ./scripts/run-api.ps1
 
-# 4. In a SECOND terminal, run the app (web)
+# 5. In a SECOND terminal, run the app (web)
 ./scripts/run-app.ps1
 #    Android emulator instead:  ./scripts/run-app.ps1 -d <device-id>
 ```
 
-**Start with `doctor.ps1`.** It reports the SDKs it found, whether Postgres is up, which
-optional targets are missing, and whether any access token is sitting in plaintext git config.
+**Start with `doctor.ps1`.** It reports the SDKs it found, whether Postgres is up, whether the
+schema has been created, which optional targets are missing, and whether any access token is
+sitting in plaintext git config.
+
+> **Skipping step 2 produces a confusing failure.** Nothing applies migrations at startup — the
+> host never silently rewrites a database it was pointed at — so an unmigrated database serves
+> `GET /health` and even `GET /health/db` as **200**, then fails the first real request with
+> `42P01: relation "Players" does not exist`, surfacing as a 500 on `POST /session`. The app
+> calls `/session` during bootstrap, so the *frontend* is usually where you notice. If you see
+> that, run `./scripts/migrate.ps1`.
 
 ### Android
 

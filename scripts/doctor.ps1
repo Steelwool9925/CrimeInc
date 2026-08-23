@@ -60,6 +60,26 @@ if (-not $docker) {
         $dbs = & docker exec underworld-postgres psql -U underworld -tAc "select datname from pg_database where datname in ('underworld','underworld_test')" 2>$null
         if ($dbs -match 'underworld') { Ok "databases present" (($dbs | Where-Object { $_ }) -join ', ') }
         else { Warn "databases not created yet" "They are created on first run / first test pass." }
+
+        # Connectivity is NOT schema. An empty database answers GET /health/db with 200
+        # "reachable" and then 500s the first real request with
+        #     42P01: relation "Players" does not exist
+        # which reads as an application bug and is not one. Check the schema explicitly so that
+        # failure is diagnosed here instead of from a stack trace.
+        # NB: queried via information_schema with single-quoted string literals only. The
+        # obvious to_regclass('public."Players"') form does NOT survive: PowerShell strips
+        # double quotes when handing arguments to a native executable, so psql receives an
+        # unquoted identifier, folds it to lowercase, and reports the table missing on a
+        # database that has it. The identifier below is a string literal, not an identifier,
+        # so it needs no double quotes and cannot be mangled.
+        $hasPlayers = & docker exec underworld-postgres psql -U underworld -d underworld -tAc "select count(*) from information_schema.tables where table_schema='public' and table_name='Players'" 2>$null
+        if (($hasPlayers | Where-Object { $_ }) -join '' -match '1') {
+            # Identifier quotes here DO need escaping for the same reason; \" survives.
+            $applied = & docker exec underworld-postgres psql -U underworld -d underworld -tAc 'select count(*) from \"__EFMigrationsHistory\"' 2>$null
+            Ok "schema created" "$((($applied | Where-Object { $_ }) -join '').Trim()) migration(s) applied"
+        } else {
+            Bad "schema not created - the database is empty" "Run:  ./scripts/migrate.ps1     (compose gives you a database, not a schema)"
+        }
     } else {
         Bad "Postgres container not running" "Start it:  docker compose up -d postgres"
     }
@@ -114,7 +134,7 @@ if ($leaked.Count -gt 0) {
 # --- Verdict --------------------------------------------------------------
 Write-Host ""
 if ($blocking -eq 0) {
-    Write-Host "Ready. Next:  ./scripts/test.ps1   then   ./scripts/run-api.ps1" -ForegroundColor Green
+    Write-Host "Ready. Next:  ./scripts/migrate.ps1   then   ./scripts/test.ps1   then   ./scripts/run-api.ps1" -ForegroundColor Green
     if ($optional -gt 0) { Write-Host "($optional optional component(s) missing - see [warn] above)" -ForegroundColor DarkGray }
 } else {
     Write-Host "$blocking blocking problem(s) above must be fixed first." -ForegroundColor Red
