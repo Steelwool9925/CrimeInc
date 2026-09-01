@@ -61,8 +61,13 @@ void main() {
     expect(find.byKey(PackLogo.imageKey), findsNothing);
   });
 
-  testWidgets('the app bar takes its colour from the pack, not a hardcoded seed',
+  testWidgets(
+      'the app bar sets no colour of its own, so it inherits the Steamnoir AppBarTheme',
       (tester) async {
+    // Colouring the app bar from the pack is now packTheme's job (see pack_theme.dart /
+    // pack_theme_test.dart), applied once at the MaterialApp level, not something HomeScreen
+    // re-derives and overrides per screen. This test's own MaterialApp wrapper carries no
+    // packTheme, so an unset backgroundColor here is the signal HomeScreen left theming alone.
     final state = stateWith(packWith(const {'logo': 'assets/logo.png'}));
     await state.bootstrap();
 
@@ -70,6 +75,6 @@ void main() {
     await tester.pump();
 
     final appBar = tester.widget<AppBar>(find.byType(AppBar));
-    expect(appBar.backgroundColor, const Color(0xFFB71C1C));
+    expect(appBar.backgroundColor, isNull);
   });
 }

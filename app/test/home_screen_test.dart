@@ -176,7 +176,7 @@ void main() {
   });
 
   group('HomeScreen — navigation', () {
-    testWidgets('offers a way into the Store and the Inventory', (tester) async {
+    testWidgets('offers a way into the Store', (tester) async {
       final state = AppState(
           apiClient: FakeApiClient(), tokenStore: InMemoryTokenStore());
       await state.bootstrap();
@@ -184,10 +184,9 @@ void main() {
       await tester.pumpWidget(_wrap(state));
       await tester.pumpAndSettle();
 
-      // Without these the two screens exist but are unreachable, which is the same as not shipping
-      // them: CP3 is a sequence a player performs, not a set of routes.
+      // Without this the screen exists but is unreachable, which is the same as not shipping
+      // it: CP3 is a sequence a player performs, not a set of routes.
       expect(find.byKey(const Key('go-to-store')), findsOneWidget);
-      expect(find.byKey(const Key('go-to-inventory')), findsOneWidget);
     });
 
     testWidgets('the Store button opens the Store', (tester) async {
@@ -206,22 +205,6 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('store-card-brass-knuckles')), findsOneWidget);
-    });
-
-    testWidgets('the Inventory button opens the Inventory', (tester) async {
-      final api = FakeApiClient();
-      final state = AppState(apiClient: api, tokenStore: InMemoryTokenStore());
-      await state.bootstrap();
-
-      await tester.pumpWidget(_wrap(state));
-      await tester.pumpAndSettle();
-
-      await tester.ensureVisible(find.byKey(const Key('go-to-inventory')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('go-to-inventory')));
-      await tester.pumpAndSettle();
-
-      expect(find.byKey(const Key('inv-card-brass-knuckles')), findsOneWidget);
     });
 
     testWidgets('offers a way into Properties', (tester) async {
@@ -255,6 +238,55 @@ void main() {
       expect(find.byKey(const Key('property-card-street-corner')), findsOneWidget);
 
       addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
+    });
+
+    testWidgets('the Crew tile opens the Crew coming-soon screen', (tester) async {
+      final state = AppState(
+          apiClient: FakeApiClient(), tokenStore: InMemoryTokenStore());
+      await state.bootstrap();
+
+      await tester.pumpWidget(_wrap(state));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.byKey(const Key('go-to-crew')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('go-to-crew')));
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(AppBar, 'Crew'), findsOneWidget);
+    });
+
+    testWidgets('the Territory tile opens the Territory coming-soon screen',
+        (tester) async {
+      final state = AppState(
+          apiClient: FakeApiClient(), tokenStore: InMemoryTokenStore());
+      await state.bootstrap();
+
+      await tester.pumpWidget(_wrap(state));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.byKey(const Key('go-to-territory')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('go-to-territory')));
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(AppBar, 'Territory'), findsOneWidget);
+    });
+
+    testWidgets('the Rap Sheet tile opens the Profile screen', (tester) async {
+      final state = AppState(
+          apiClient: FakeApiClient(), tokenStore: InMemoryTokenStore());
+      await state.bootstrap();
+
+      await tester.pumpWidget(_wrap(state));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.byKey(const Key('go-to-profile')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('go-to-profile')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('profile-stat-cash')), findsOneWidget);
     });
   });
 }
