@@ -126,6 +126,9 @@ void main() {
 
       expect(theme, isA<ThemeData>());
       expect(theme.colorScheme.primary, isNotNull);
+      // Steamnoir is a dark theme end-to-end: a malformed pack must not silently drop back to
+      // a light scheme, it should fall back to the dark defaults.
+      expect(theme.brightness, Brightness.dark);
     });
 
     test('is not the old hardcoded deepPurple seed', () {
@@ -136,6 +139,35 @@ void main() {
       );
 
       expect(theme.colorScheme.primary, isNot(oldDefault.colorScheme.primary));
+    });
+
+    group('Steamnoir dark theme', () {
+      test('is a dark theme', () {
+        final theme = packTheme(packWith());
+
+        expect(theme.brightness, Brightness.dark);
+      });
+
+      test('scaffold background is the pack\'s parsed secondary colour', () {
+        final theme = packTheme(packWith(secondary: '#17110C'));
+
+        expect(theme.scaffoldBackgroundColor, const Color(0xFF17110C));
+      });
+
+      test('card colour is a lightened derivative of secondary, not the flat scaffold colour',
+          () {
+        final theme = packTheme(packWith(secondary: '#17110C'));
+
+        expect(theme.cardColor, isNot(theme.scaffoldBackgroundColor));
+      });
+
+      test('onSurface text colour is distinct from the scaffold background', () {
+        // Basic contrast sanity check: text must not be the same colour as the background it
+        // sits on.
+        final theme = packTheme(packWith());
+
+        expect(theme.colorScheme.onSurface, isNot(theme.scaffoldBackgroundColor));
+      });
     });
   });
 }

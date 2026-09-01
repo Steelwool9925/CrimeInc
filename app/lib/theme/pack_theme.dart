@@ -8,12 +8,22 @@ import '../api/models.dart';
 /// different pack is a content edit. Before this, `main.dart` seeded everything from
 /// `Colors.deepPurple` while the shipped `crime` pack declared red — the manifest was written
 /// but only one app bar ever read it.
+///
+/// Reworked for the "Steamnoir" pack (brass / near-black warm brown / dark teal): the theme is
+/// now dark by default, since the shipped palette is designed for a dark scaffold with a light
+/// (cream) text colour, not a light Material scheme with a brass seed.
 
 /// Fallbacks used when the pack has not loaded yet, or declares an unparseable colour. Chosen to
-/// match the shipped `crime` pack so the pre-load frame does not flash a different palette.
-const Color _fallbackPrimary = Color(0xFFB71C1C);
-const Color _fallbackSecondary = Color(0xFF212121);
-const Color _fallbackAccent = Color(0xFFFFC107);
+/// match the shipped `crime` pack (Steamnoir: brass / near-black warm brown / dark teal) so the
+/// pre-load frame does not flash a different palette.
+const Color _fallbackPrimary = Color(0xFFC17A3D);
+const Color _fallbackSecondary = Color(0xFF17110C);
+const Color _fallbackAccent = Color(0xFF2B7A72);
+
+/// Warm cream used for text/icons that must read on the dark secondary background. Not pack
+/// data — every pack is expected to be dark enough that a light "on" colour reads on it, same
+/// as `_fallbackPrimary` et al. are stand-ins for pack data before it loads.
+const Color _cream = Color(0xFFEFE6D8);
 
 /// Parses `#RRGGBB`, `RRGGBB`, or `#AARRGGBB` into a [Color].
 ///
@@ -37,21 +47,63 @@ ThemeData packTheme(ContentPack? pack) {
   final secondary = parsePackColor(pack?.secondaryColorHex, _fallbackSecondary);
   final accent = parsePackColor(pack?.accentColorHex, _fallbackAccent);
 
-  // fromSeed generates a full, contrast-checked scheme; the three manifest colours are then
+  // Card/surface tone is derived from secondary rather than hardcoded, so a different pack's
+  // dark secondary still produces a sensibly lighter card colour instead of an unrelated hex.
+  final surface = Color.lerp(secondary, Colors.white, 0.08)!;
+
+  // fromSeed generates a full, contrast-checked dark scheme; the manifest colours are then
   // pinned over it so the pack's declared values appear exactly as written rather than being
   // harmonised into something else. Everything the manifest does not specify stays derived.
-  final scheme = ColorScheme.fromSeed(seedColor: primary).copyWith(
+  final scheme = ColorScheme.fromSeed(
+    seedColor: primary,
+    brightness: Brightness.dark,
+  ).copyWith(
     primary: primary,
     secondary: secondary,
     tertiary: accent,
+    // Brass is light enough that dark (near-black) text reads on it.
+    onPrimary: secondary,
+    onSecondary: _cream,
+    onTertiary: _cream,
+    onSurface: _cream,
+    surface: surface,
   );
 
   return ThemeData(
     colorScheme: scheme,
+    brightness: Brightness.dark,
+    scaffoldBackgroundColor: secondary,
+    cardColor: surface,
+    // Deliberate change from the old brass app bar: Steamnoir's reference design uses a dark
+    // app bar that matches the scaffold, with brass reserved for accents/selection states.
     appBarTheme: AppBarTheme(
-      backgroundColor: primary,
-      foregroundColor: scheme.onPrimary,
+      backgroundColor: secondary,
+      foregroundColor: _cream,
+      elevation: 0,
+    ),
+    // Not consumed yet — a bottom nav shell lands in a later milestone — but the tab bar's
+    // colours belong to "the theme," so they're defined here alongside everything else.
+    bottomNavigationBarTheme: BottomNavigationBarThemeData(
+      backgroundColor: secondary,
+      selectedItemColor: primary,
+      unselectedItemColor: _cream.withValues(alpha: 0.6),
+      type: BottomNavigationBarType.fixed,
+    ),
+    // Same story as bottomNavigationBarTheme: for a later milestone's sidebar on wider layouts.
+    navigationRailTheme: NavigationRailThemeData(
+      backgroundColor: secondary,
+      selectedIconTheme: IconThemeData(color: primary),
+      selectedLabelTextStyle: TextStyle(color: primary),
+      unselectedIconTheme: IconThemeData(color: _cream.withValues(alpha: 0.6)),
+      unselectedLabelTextStyle: TextStyle(color: _cream.withValues(alpha: 0.6)),
     ),
     progressIndicatorTheme: ProgressIndicatorThemeData(color: accent),
+    // Approximates a small-caps/serif-feeling header for titles only, without a new font asset
+    // or pubspec dependency. Body text is left alone.
+    textTheme: const TextTheme(
+      titleLarge: TextStyle(letterSpacing: 1.1, fontWeight: FontWeight.w600),
+      titleMedium: TextStyle(letterSpacing: 1.1, fontWeight: FontWeight.w600),
+      headlineSmall: TextStyle(letterSpacing: 1.1, fontWeight: FontWeight.w600),
+    ),
   );
 }

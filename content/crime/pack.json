@@ -6,9 +6,9 @@
     "premium": { "label": "Gold Bars", "abbr": "GB" }
   },
   "palette": {
-    "primary": "#B71C1C",
-    "secondary": "#212121",
-    "accent": "#FFC107"
+    "primary": "#C17A3D",
+    "secondary": "#17110C",
+    "accent": "#2B7A72"
   },
   "assets": {
     "logo": "assets/logo.png",
