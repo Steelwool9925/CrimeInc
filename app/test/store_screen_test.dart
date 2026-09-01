@@ -117,6 +117,31 @@ void main() {
     });
   });
 
+  group('StoreScreen — navigation', () {
+    testWidgets('the AppBar shows Market, not Store', (tester) async {
+      await pumpStore(tester, FakeApiClient());
+
+      expect(find.text('Market'), findsOneWidget);
+      expect(find.text('Store'), findsNothing);
+    });
+
+    testWidgets('offers a way into the Inventory', (tester) async {
+      await pumpStore(tester, FakeApiClient());
+
+      expect(find.byKey(const Key('go-to-inventory')), findsOneWidget);
+    });
+
+    testWidgets('the Inventory action opens the Inventory', (tester) async {
+      final api = FakeApiClient();
+      await pumpStore(tester, api);
+
+      await tester.tap(find.byKey(const Key('go-to-inventory')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('inv-card-brass-knuckles')), findsOneWidget);
+    });
+  });
+
   group('StoreScreen — errors', () {
     testWidgets('a catalog failure shows an error and a retry', (tester) async {
       await pumpStore(tester, FakeApiClient(throwOnInventory: true));

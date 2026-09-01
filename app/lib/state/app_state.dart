@@ -69,6 +69,12 @@ class AppState extends ChangeNotifier {
   String assetUrl(String key) => _apiClient.assetUrl(key);
 
   List<Job> get jobs => _jobs;
+
+  /// Total completions across every job, for the Rap Sheet's "Jobs Done" stat. A pure fold over
+  /// [jobs] — no new endpoint: `GET /jobs` already returns each job's `mastery.completions`.
+  int get totalJobsCompleted =>
+      _jobs.fold(0, (sum, job) => sum + job.mastery.completions);
+
   bool get jobsLoading => _jobsLoading;
   String? get jobsError => _jobsError;
   String? get jobInFlight => _jobInFlight;
