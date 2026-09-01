@@ -160,13 +160,7 @@ class _DashboardGrid extends StatelessWidget {
           title: 'Crew',
           subtitle: 'Coming soon',
           onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => const ComingSoonScreen(
-                title: 'Crew',
-                icon: Icons.groups_outlined,
-                message: 'Crew is coming in a future update.',
-              ),
-            ),
+            MaterialPageRoute(builder: (_) => crewComingSoonScreen),
           ),
         ),
         _DashboardTile(

@@ -74,6 +74,10 @@ ThemeData packTheme(ContentPack? pack) {
     brightness: Brightness.dark,
     scaffoldBackgroundColor: secondary,
     cardColor: surface,
+    // Material 3's Card widget does not read ThemeData.cardColor at all — it reads
+    // cardTheme.color, falling back to colorScheme.surfaceContainerLow when unset. Without this,
+    // every Card in the app renders an M3-seed-derived colour instead of the pack's surface.
+    cardTheme: CardThemeData(color: surface),
     // Deliberate change from the old brass app bar: Steamnoir's reference design uses a dark
     // app bar that matches the scaffold, with brass reserved for accents/selection states.
     appBarTheme: AppBarTheme(
@@ -92,6 +96,10 @@ ThemeData packTheme(ContentPack? pack) {
     // Same story as bottomNavigationBarTheme: for a later milestone's sidebar on wider layouts.
     navigationRailTheme: NavigationRailThemeData(
       backgroundColor: secondary,
+      // NavigationRail defaults labelType to none, which renders every destination's label via
+      // Visibility.maintain(visible: false, ...) — present for semantics but never painted. That
+      // left the two label text styles below dead code and the side rail showing bare icons.
+      labelType: NavigationRailLabelType.all,
       selectedIconTheme: IconThemeData(color: primary),
       selectedLabelTextStyle: TextStyle(color: primary),
       unselectedIconTheme: IconThemeData(color: _cream.withValues(alpha: 0.6)),

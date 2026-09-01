@@ -30,6 +30,23 @@ class _AppShellState extends State<AppShell> {
   /// bottom bar instead.
   static const double _wideBreakpoint = 800;
 
+  /// The five top-level destinations, declared once. `_buildNarrow` and `_buildWide` each map
+  /// this into their own destination widget type, so adding, renaming, or reordering a
+  /// destination only has to happen here. Narrow and wide labels are kept distinct because the
+  /// two layouts intentionally disagree on some of them (e.g. 'Props' vs 'Properties').
+  static const List<({IconData icon, String narrowLabel, String wideLabel})>
+      _destinations = [
+    (icon: Icons.home_outlined, narrowLabel: 'Home', wideLabel: 'Home'),
+    (icon: Icons.work_outline, narrowLabel: 'Jobs', wideLabel: 'Jobs'),
+    (
+      icon: Icons.location_city_outlined,
+      narrowLabel: 'Props',
+      wideLabel: 'Properties',
+    ),
+    (icon: Icons.groups_outlined, narrowLabel: 'Crew', wideLabel: 'Crew'),
+    (icon: Icons.badge_outlined, narrowLabel: 'Profile', wideLabel: 'Profile'),
+  ];
+
   /// Builds exactly one destination's screen — never all five. Each of these five widgets already
   /// owns a complete `Scaffold`+`AppBar`; that scaffolding is intentionally left in place rather
   /// than stripped out, so a full `Scaffold` here is the correct nested pattern, not a bug.
@@ -37,11 +54,7 @@ class _AppShellState extends State<AppShell> {
         0 => HomeScreen(appState: widget.appState),
         1 => JobsScreen(appState: widget.appState),
         2 => PropertiesScreen(appState: widget.appState),
-        3 => const ComingSoonScreen(
-            title: 'Crew',
-            icon: Icons.groups_outlined,
-            message: 'Crew is coming in a future update.',
-          ),
+        3 => crewComingSoonScreen,
         4 => ProfileScreen(appState: widget.appState),
         _ => throw StateError('unknown destination index: $index'),
       };
@@ -63,28 +76,12 @@ class _AppShellState extends State<AppShell> {
         // The theme already styles BottomNavigationBar via bottomNavigationBarTheme.
         currentIndex: _selectedIndex,
         onTap: _onSelect,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.work_outline),
-            label: 'Jobs',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.location_city_outlined),
-            label: 'Props',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.groups_outlined),
-            label: 'Crew',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.badge_outlined),
-            label: 'Profile',
-          ),
-        ],
+        items: _destinations
+            .map((d) => BottomNavigationBarItem(
+                  icon: Icon(d.icon),
+                  label: d.narrowLabel,
+                ))
+            .toList(),
       ),
     );
   }
@@ -98,28 +95,12 @@ class _AppShellState extends State<AppShell> {
             // The theme already styles NavigationRail via navigationRailTheme.
             selectedIndex: _selectedIndex,
             onDestinationSelected: _onSelect,
-            destinations: const [
-              NavigationRailDestination(
-                icon: Icon(Icons.home_outlined),
-                label: Text('Home'),
-              ),
-              NavigationRailDestination(
-                icon: Icon(Icons.work_outline),
-                label: Text('Jobs'),
-              ),
-              NavigationRailDestination(
-                icon: Icon(Icons.location_city_outlined),
-                label: Text('Properties'),
-              ),
-              NavigationRailDestination(
-                icon: Icon(Icons.groups_outlined),
-                label: Text('Crew'),
-              ),
-              NavigationRailDestination(
-                icon: Icon(Icons.badge_outlined),
-                label: Text('Profile'),
-              ),
-            ],
+            destinations: _destinations
+                .map((d) => NavigationRailDestination(
+                      icon: Icon(d.icon),
+                      label: Text(d.wideLabel),
+                    ))
+                .toList(),
           ),
           const VerticalDivider(width: 1),
           Expanded(child: _bodyFor(_selectedIndex)),

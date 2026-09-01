@@ -31,7 +31,6 @@ class ComingSoonScreen extends StatelessWidget {
                 icon,
                 size: 64,
                 key: const Key('coming-soon-icon'),
-                color: Theme.of(context).colorScheme.secondary,
               ),
               const SizedBox(height: 16),
               Text(
@@ -53,3 +52,12 @@ class ComingSoonScreen extends StatelessWidget {
     );
   }
 }
+
+/// The Crew placeholder, shared so its title/icon/message are declared exactly once. Both the
+/// Home dashboard tile and the app shell's Crew tab route here, rather than each constructing
+/// their own copy of the same three literals.
+const ComingSoonScreen crewComingSoonScreen = ComingSoonScreen(
+  title: 'Crew',
+  icon: Icons.groups_outlined,
+  message: 'Crew is coming in a future update.',
+);

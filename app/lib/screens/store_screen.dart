@@ -184,15 +184,16 @@ class _StoreCard extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                if (!item.canBuy)
-                  Text(
-                    buyLockLabel(item),
-                    key: Key('store-lock-${item.id}'),
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: theme.colorScheme.error),
-                  )
-                else
-                  const SizedBox.shrink(),
+                Expanded(
+                  child: !item.canBuy
+                      ? Text(
+                          buyLockLabel(item),
+                          key: Key('store-lock-${item.id}'),
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: theme.colorScheme.error),
+                        )
+                      : const SizedBox.shrink(),
+                ),
                 ElevatedButton(
                   key: Key('buy-item-${item.id}'),
                   onPressed: enabled ? onBuy : null,
