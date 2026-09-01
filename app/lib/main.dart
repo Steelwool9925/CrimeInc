@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import 'api/api_client.dart';
-import 'screens/home_screen.dart';
 import 'state/app_state.dart';
 import 'storage/token_store.dart';
 import 'theme/pack_theme.dart';
+import 'widgets/app_shell.dart';
 
 void main() {
   runApp(const UnderworldEmpireApp());
@@ -49,7 +49,7 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
         return MaterialApp(
           title: pack?.name.isNotEmpty == true ? pack!.name : 'Underworld Empire',
           theme: packTheme(pack),
-          home: HomeScreen(appState: _appState),
+          home: AppShell(appState: _appState),
         );
       },
     );

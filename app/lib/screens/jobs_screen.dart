@@ -242,15 +242,16 @@ class _JobCard extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                if (!job.canAttempt)
-                  Text(
-                    _lockLabel,
-                    key: Key('job-lock-${job.id}'),
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: theme.colorScheme.error),
-                  )
-                else
-                  const SizedBox.shrink(),
+                Expanded(
+                  child: !job.canAttempt
+                      ? Text(
+                          _lockLabel,
+                          key: Key('job-lock-${job.id}'),
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: theme.colorScheme.error),
+                        )
+                      : const SizedBox.shrink(),
+                ),
                 ElevatedButton(
                   key: Key('do-job-${job.id}'),
                   onPressed: enabled ? onDo : null,
