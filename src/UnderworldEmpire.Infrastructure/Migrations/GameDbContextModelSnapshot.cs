@@ -89,11 +89,19 @@ namespace UnderworldEmpire.Infrastructure.Migrations
                     b.Property<int>("Level")
                         .HasColumnType("integer");
 
+                    b.Property<string>("PasswordHash")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
                     b.Property<long>("PremiumCurrency")
                         .HasColumnType("bigint");
 
                     b.Property<int>("SkillPoints")
                         .HasColumnType("integer");
+
+                    b.Property<string>("Username")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
 
                     b.Property<long>("Xp")
                         .HasColumnType("bigint");
@@ -159,6 +167,10 @@ namespace UnderworldEmpire.Infrastructure.Migrations
 
                     b.HasIndex("DeviceToken")
                         .IsUnique();
+
+                    b.HasIndex("Username")
+                        .IsUnique()
+                        .HasFilter("\"Username\" IS NOT NULL");
 
                     b.ToTable("Players");
                 });
