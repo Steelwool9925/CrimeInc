@@ -1,4 +1,6 @@
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.OpenApi;
 using UnderworldEmpire.Api.Auth;
 using UnderworldEmpire.Api.Endpoints;
@@ -20,6 +22,27 @@ builder.Services.AddAuthorization();
 // so browser requests to this API are cross-origin. Wide-open in Development only.
 builder.Services.AddCors(options =>
     options.AddPolicy("dev", p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+
+// Fixed-window rate limiting on login, keyed per client IP: 5 attempts per 5 minutes.
+// Internet-exposed password auth is the highest-value brute-force target in this API; this is
+// the mandatory mitigation named in the feature plan, not optional hardening.
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddPolicy("login", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromMinutes(5),
+                QueueLimit = 0
+            }));
+    options.OnRejected = (context, _) =>
+    {
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        return ValueTask.CompletedTask;
+    };
+});
 
 // Swagger UI (served at /swagger in Development) is the manual API test surface used
 // throughout the plan's session checkpoints.
@@ -61,6 +84,7 @@ else
 // Auth middleware must appear before endpoint mapping.
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 // Liveness: 200 whenever the process is up. This is the CP0 check.
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
