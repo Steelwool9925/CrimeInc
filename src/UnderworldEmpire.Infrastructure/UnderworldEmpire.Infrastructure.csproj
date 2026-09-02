@@ -8,6 +8,13 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- AccountEndpoints (Api) catches the same unique-violation shape the action services do,
+         via WriteConflicts.IsUniqueViolation — there's no separate account action service for it
+         to live behind, so the check itself needs to be visible across the assembly boundary. -->
+    <InternalsVisibleTo Include="UnderworldEmpire.Api" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
