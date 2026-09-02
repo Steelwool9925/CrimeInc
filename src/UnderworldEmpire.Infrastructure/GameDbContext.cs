@@ -49,6 +49,19 @@ public class GameDbContext : DbContext
         player.HasIndex(p => p.DeviceToken)
             .IsUnique();
 
+        player.Property(p => p.Username)
+            .HasMaxLength(AccountCredentials.MaxUsernameLength);
+        player.Property(p => p.PasswordHash)
+            .HasMaxLength(200); // PBKDF2 output string: "{iterations}.{saltBase64}.{hashBase64}" comfortably fits.
+
+        // A filtered unique index: multiple guest players with a null Username must coexist (a
+        // plain unique index would only allow ONE null in some databases, and even where nulls
+        // are exempt by default, being explicit here documents the intent rather than relying on
+        // Postgres's default null-handling). Only a *claimed* username needs to be unique.
+        player.HasIndex(p => p.Username)
+            .IsUnique()
+            .HasFilter("\"Username\" IS NOT NULL");
+
         // Energy meter — mapped as a complex type (EF 8+) with explicit column names
         player.ComplexProperty(p => p.Energy, b =>
         {
