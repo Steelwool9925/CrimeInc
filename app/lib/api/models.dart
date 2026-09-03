@@ -36,6 +36,7 @@ class Me {
     required this.skillPoints,
     required this.attack,
     required this.defense,
+    this.username,
   });
 
   final String playerId;
@@ -50,6 +51,9 @@ class Me {
   final int attack;
   final int defense;
 
+  /// The account username, or null for a guest player who hasn't claimed one.
+  final String? username;
+
   factory Me.fromJson(Map<String, dynamic> json) => Me(
         playerId: json['playerId'] as String,
         energy: MeterState.fromJson(json['energy'] as Map<String, dynamic>),
@@ -62,6 +66,7 @@ class Me {
         skillPoints: json['skillPoints'] as int,
         attack: json['attack'] as int,
         defense: json['defense'] as int,
+        username: json['username'] as String?,
       );
 }
 

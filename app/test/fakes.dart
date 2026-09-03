@@ -378,7 +378,14 @@ class FakeApiClient implements ApiClient {
     this.refuseAllocateWith,
     this.refuseItemActionWith,
     this.refusePropertyActionWith,
-  })  : _inventoryResult = inventoryResult ??
+    this.refuseLoginWith,
+    SessionResult? loginResult,
+  })  : _loginResult = loginResult ??
+            const SessionResult(
+              deviceToken: 'fake-token-abc',
+              playerId: 'player-guid-123',
+            ),
+        _inventoryResult = inventoryResult ??
             const InventoryList(
               items: [kOwnedWeapon, kUnaffordableArmor, kLockedWeapon],
               loadout: kBareLoadout,
@@ -525,6 +532,14 @@ class FakeApiClient implements ApiClient {
   /// reason — the shape a 409 from the item endpoints takes.
   final String? refuseItemActionWith;
 
+  /// When set, login throws a [JobRefusedException] with this reason — the shape a 409 from
+  /// POST /account/login takes (always `invalidCredentials` from the real endpoint, but the fake
+  /// accepts any string so a test can assert on whatever it passes here).
+  final String? refuseLoginWith;
+
+  final SessionResult _loginResult;
+  final List<({String username, String password})> loginCalls = [];
+
   final List<String?> sessionCalls = [];
   int meCalls = 0;
   int contentPackCalls = 0;
@@ -544,6 +559,15 @@ class FakeApiClient implements ApiClient {
     sessionCalls.add(deviceToken);
     if (_throwOnSession) throw const ApiException(500, 'session error');
     return _sessionResult;
+  }
+
+  @override
+  Future<SessionResult> login(String username, String password) async {
+    loginCalls.add((username: username, password: password));
+    if (refuseLoginWith != null) {
+      throw JobRefusedException(refuseLoginWith!, 'Invalid username or password.');
+    }
+    return _loginResult;
   }
 
   @override

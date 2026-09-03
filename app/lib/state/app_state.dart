@@ -120,23 +120,69 @@ class AppState extends ChangeNotifier {
     try {
       final storedToken = await _tokenStore.read();
       final result = await _apiClient.session(storedToken);
-      _deviceToken = result.deviceToken;
-      await _tokenStore.write(_deviceToken!);
-
-      try {
-        _contentPack = await _apiClient.contentPack();
-      } catch (_) {
-        // best-effort; keep null / defaults
-      }
-
-      _me = await _apiClient.me(_deviceToken!);
-      _status = LoadStatus.ready;
+      await _finishAuth(result.deviceToken);
     } catch (e) {
       _status = LoadStatus.error;
       _errorMessage = e.toString();
     }
 
     notifyListeners();
+  }
+
+  /// Shared tail of every path that ends in a usable [_deviceToken] — the guest bootstrap above,
+  /// and [login] below. Persists the token, loads the content pack (best-effort) and the player
+  /// projection, and marks the app ready.
+  Future<void> _finishAuth(String deviceToken) async {
+    _deviceToken = deviceToken;
+    await _tokenStore.write(deviceToken);
+
+    try {
+      _contentPack = await _apiClient.contentPack();
+    } catch (_) {
+      // best-effort; keep null / defaults
+    }
+
+    _me = await _apiClient.me(deviceToken);
+    _status = LoadStatus.ready;
+  }
+
+  bool _loggingIn = false;
+  String? _loginError;
+
+  bool get loggingIn => _loggingIn;
+
+  /// A message for [LoginScreen] to show, or null between attempts. Cleared at the start of every
+  /// call to [login].
+  String? get loginError => _loginError;
+
+  /// Exchanges [username]/[password] for the account's device token and finishes auth exactly
+  /// like a returning guest's [bootstrap] does from that point on — same [_finishAuth] tail, so
+  /// there is only one place that logic can drift.
+  ///
+  /// Returns whether it succeeded. [loginError] carries a message to show on failure; the server
+  /// sends only a stable reason token (today, always `invalidCredentials` — this endpoint never
+  /// distinguishes an unknown username from a wrong password, deliberately), so the display text
+  /// is chosen here, the same translation this codebase already does for item/property refusals.
+  Future<bool> login(String username, String password) async {
+    _loggingIn = true;
+    _loginError = null;
+    notifyListeners();
+
+    try {
+      final result = await _apiClient.login(username, password);
+      await _finishAuth(result.deviceToken);
+      _loggingIn = false;
+      notifyListeners();
+      return true;
+    } on JobRefusedException {
+      _loginError = 'Incorrect username or password.';
+    } catch (_) {
+      _loginError = 'Could not reach the server. Check your connection and try again.';
+    }
+
+    _loggingIn = false;
+    notifyListeners();
+    return false;
   }
 
   Future<void> refresh() async {
