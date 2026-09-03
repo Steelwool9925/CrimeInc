@@ -79,6 +79,34 @@ public static class AccountEndpoints
         .WithName("PostAccountRegister")
         .WithTags("Account");
 
+        // POST /account/login — exchanges a username/password for the account's device token.
+        // Anonymous by design: this is how a caller obtains a bearer token in the first place.
+        app.MapPost("/account/login", [AllowAnonymous] async (
+            LoginRequest request,
+            GameDbContext db) =>
+        {
+            var lowered = request.Username.ToLowerInvariant();
+
+            var player = await db.Players.FirstOrDefaultAsync(p => p.Username == lowered);
+
+            // Unknown username, missing hash, or wrong password must all be indistinguishable to
+            // the caller — one shared refusal path, not separately-worded branches that could
+            // drift apart later.
+            if (player is null || player.PasswordHash is null ||
+                !PasswordHasher.Verify(request.Password, player.PasswordHash))
+            {
+                return Results.Problem(
+                    detail: "Invalid username or password.",
+                    statusCode: StatusCodes.Status409Conflict,
+                    extensions: new Dictionary<string, object?> { ["reason"] = "invalidCredentials" });
+            }
+
+            return Results.Ok(new LoginResponse(player.DeviceToken, player.Id));
+        })
+        .RequireRateLimiting("login")
+        .WithName("PostAccountLogin")
+        .WithTags("Account");
+
         return app;
     }
 }
