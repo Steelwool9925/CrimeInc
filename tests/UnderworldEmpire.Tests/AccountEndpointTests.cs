@@ -44,6 +44,9 @@ public class AccountEndpointTests : IClassFixture<CustomWebApplicationFactory>
     private static async Task<JsonDocument> BodyAsync(HttpResponseMessage response) =>
         JsonDocument.Parse(await response.Content.ReadAsStringAsync());
 
+    private async Task<HttpResponseMessage> LoginAsync(string username, string password) =>
+        await _client.PostAsJsonAsync("/account/login", new { username, password });
+
     /// <summary>
     /// A fresh, mixed-case, valid username (e.g. "Al3f9c2b1a7d"). The Postgres container behind
     /// these tests is not reset between test methods or test runs, so a literal like
@@ -156,5 +159,91 @@ public class AccountEndpointTests : IClassFixture<CustomWebApplicationFactory>
 
         using var doc = await BodyAsync(second);
         Assert.Equal("usernameTaken", doc.RootElement.GetProperty("reason").GetString());
+    }
+
+    // -------------------------------------------------------------------------
+    // POST /account/login — same device token, on a different "device"
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Login_with_correct_credentials_returns_the_same_device_token_that_registered()
+    {
+        var registeringToken = await NewGuestTokenAsync();
+        var username = UniqueUsername();
+        var password = "correct-horse-battery";
+
+        var register = await RegisterAsync(registeringToken, username, password);
+        Assert.Equal(HttpStatusCode.OK, register.StatusCode);
+
+        // A fresh "device" — no bearer token at all — logging in with the account's credentials.
+        var login = await LoginAsync(username, password);
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+
+        using var doc = await BodyAsync(login);
+        var returnedToken = doc.RootElement.GetProperty("deviceToken").GetString();
+
+        // Login never rotates the token — it returns the exact same one every other device
+        // logged into this account already holds.
+        Assert.Equal(registeringToken, returnedToken);
+    }
+
+    // -------------------------------------------------------------------------
+    // POST /account/login — refusals are indistinguishable
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Login_with_wrong_password_returns_409_invalidCredentials()
+    {
+        var token = await NewGuestTokenAsync();
+        var username = UniqueUsername();
+        await RegisterAsync(token, username, "correct-horse-battery");
+
+        var response = await LoginAsync(username, "wrong-password-entirely");
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        using var doc = await BodyAsync(response);
+        Assert.Equal("invalidCredentials", doc.RootElement.GetProperty("reason").GetString());
+    }
+
+    [Fact]
+    public async Task Login_with_an_unknown_username_returns_the_identical_409_invalidCredentials()
+    {
+        var response = await LoginAsync("nobody-has-ever-registered-this-one", "whatever-password");
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        using var doc = await BodyAsync(response);
+        Assert.Equal("invalidCredentials", doc.RootElement.GetProperty("reason").GetString());
+    }
+
+    // -------------------------------------------------------------------------
+    // POST /account/login — rate limiting
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task A_sixth_login_attempt_within_the_window_is_rate_limited()
+    {
+        // The "login" policy is a fixed window of 5 attempts per 5 minutes, keyed per client IP.
+        // This test needs its OWN factory/client rather than the class fixture shared with every
+        // other test above: all requests from one in-memory TestServer client share one IP, so
+        // this class's other login-calling tests would otherwise eat into the same 5-attempt
+        // window and make this test's outcome depend on test execution order.
+        using var factory = new CustomWebApplicationFactory();
+        factory.MigrateDb();
+        using var client = factory.CreateClient();
+
+        async Task<HttpResponseMessage> Attempt(string suffix) =>
+            await client.PostAsJsonAsync(
+                "/account/login",
+                new { username = $"rate-limit-probe-{suffix}", password = "irrelevant-password" });
+
+        for (int i = 0; i < 5; i++)
+        {
+            var response = await Attempt(i.ToString());
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        }
+
+        var sixth = await Attempt("6th");
+
+        Assert.Equal((HttpStatusCode)429, sixth.StatusCode);
     }
 }
