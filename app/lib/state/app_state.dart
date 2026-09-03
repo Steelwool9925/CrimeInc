@@ -129,13 +129,21 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Shared tail of every path that ends in a usable [_deviceToken] — the guest bootstrap above,
-  /// and [login] below. Persists the token, loads the content pack (best-effort) and the player
-  /// projection, and marks the app ready.
+  /// Shared tail of every path that ends in a usable [deviceToken] — the guest bootstrap above,
+  /// and [login] below. Loads the content pack (best-effort) and the player projection, and only
+  /// once the player projection actually succeeds does it commit [_deviceToken] and persist the
+  /// token to storage.
+  ///
+  /// The order is deliberate: [deviceToken] itself is already known-good by the time this runs
+  /// (session()/login() already exchanged it with the server), but *this device having a usable
+  /// save* is only confirmed once `me()` succeeds. Persisting the token before that point would
+  /// mean a transient failure here — network blip on `me()`, say — leaves the token saved to disk
+  /// even though the caller (`login()`) reports failure to the UI. On [login] specifically that is
+  /// not a cosmetic inconsistency: the player just typed a password, was told it didn't work, and
+  /// would otherwise be silently logged into that very account on the next launch, because
+  /// `_resolveStartup()` finds the already-written token and takes the returning-player fast path
+  /// without ever having shown a success confirmation.
   Future<void> _finishAuth(String deviceToken) async {
-    _deviceToken = deviceToken;
-    await _tokenStore.write(deviceToken);
-
     try {
       _contentPack = await _apiClient.contentPack();
     } catch (_) {
@@ -143,6 +151,9 @@ class AppState extends ChangeNotifier {
     }
 
     _me = await _apiClient.me(deviceToken);
+
+    _deviceToken = deviceToken;
+    await _tokenStore.write(deviceToken);
     _status = LoadStatus.ready;
   }
 

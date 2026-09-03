@@ -162,6 +162,88 @@ public class AccountEndpointTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     // -------------------------------------------------------------------------
+    // POST /account/register — a null field must refuse, not crash
+    // -------------------------------------------------------------------------
+    //
+    // request.Username/Password are typed as non-nullable `string`, but that annotation is
+    // compile-time only — System.Text.Json's minimal-API body binder does not enforce it, so a
+    // request that sends JSON `null` for either field deserializes it to an actual null at
+    // runtime. Found by the final whole-branch code review as a real, live-reproduced 500
+    // (NullReferenceException) rather than a refusal.
+
+    [Fact]
+    public async Task A_null_username_on_register_refuses_rather_than_crashing()
+    {
+        var token = await NewGuestTokenAsync();
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/account/register")
+        {
+            Content = JsonContent.Create(new { username = (string?)null, password = "correct-horse-battery" })
+        };
+        request.Headers.Add("Authorization", $"Bearer {token}");
+        var response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        using var doc = await BodyAsync(response);
+        Assert.Equal("usernameInvalid", doc.RootElement.GetProperty("reason").GetString());
+    }
+
+    [Fact]
+    public async Task A_null_password_on_register_refuses_rather_than_crashing()
+    {
+        var token = await NewGuestTokenAsync();
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/account/register")
+        {
+            Content = JsonContent.Create(new { username = UniqueUsername(), password = (string?)null })
+        };
+        request.Headers.Add("Authorization", $"Bearer {token}");
+        var response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        using var doc = await BodyAsync(response);
+        Assert.Equal("passwordTooWeak", doc.RootElement.GetProperty("reason").GetString());
+    }
+
+    // -------------------------------------------------------------------------
+    // POST /account/login — a null field must refuse, not crash
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task A_null_username_on_login_refuses_rather_than_crashing()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/account/login")
+        {
+            Content = JsonContent.Create(new { username = (string?)null, password = "whatever" })
+        };
+
+        var response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        using var doc = await BodyAsync(response);
+        Assert.Equal("invalidCredentials", doc.RootElement.GetProperty("reason").GetString());
+    }
+
+    [Fact]
+    public async Task A_null_password_on_login_refuses_rather_than_crashing()
+    {
+        var token = await NewGuestTokenAsync();
+        var username = UniqueUsername();
+        await RegisterAsync(token, username, "correct-horse-battery");
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/account/login")
+        {
+            Content = JsonContent.Create(new { username, password = (string?)null })
+        };
+
+        var response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        using var doc = await BodyAsync(response);
+        Assert.Equal("invalidCredentials", doc.RootElement.GetProperty("reason").GetString());
+    }
+
+    // -------------------------------------------------------------------------
     // POST /account/login — same device token, on a different "device"
     // -------------------------------------------------------------------------
 
@@ -216,8 +298,52 @@ public class AccountEndpointTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     // -------------------------------------------------------------------------
-    // POST /account/login — rate limiting
+    // POST /account/login — rate limiting is keyed on the real client IP, not the tunnel hop
     // -------------------------------------------------------------------------
+    //
+    // docs/hosting-a-friend.md's own hosting story puts a tunnel (cloudflared/ngrok) in front of
+    // this API, connecting to Kestrel over localhost — every remote player's connection-level IP
+    // collapses to the same loopback address unless X-Forwarded-For is honoured. Found by the
+    // final whole-branch code review: without ForwardedHeadersOptions configured, one player's
+    // failed attempts would exhaust the *shared* bucket and lock out every other player. This test
+    // proves two distinct forwarded IPs get two distinct rate-limit buckets.
+
+    [Fact]
+    public async Task Two_different_forwarded_client_ips_get_independent_rate_limit_buckets()
+    {
+        using var factory = new CustomWebApplicationFactory();
+        factory.MigrateDb();
+        using var client = factory.CreateClient();
+
+        async Task<HttpResponseMessage> AttemptFrom(string forwardedFor, string suffix)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, "/account/login")
+            {
+                Content = JsonContent.Create(new
+                {
+                    username = $"forwarded-probe-{suffix}",
+                    password = "irrelevant-password"
+                })
+            };
+            request.Headers.Add("X-Forwarded-For", forwardedFor);
+            return await client.SendAsync(request);
+        }
+
+        // Exhaust the 5-attempt window for "203.0.113.10".
+        for (int i = 0; i < 5; i++)
+        {
+            var response = await AttemptFrom("203.0.113.10", $"a{i}");
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        }
+        var sixthFromFirstIp = await AttemptFrom("203.0.113.10", "a5");
+        Assert.Equal((HttpStatusCode)429, sixthFromFirstIp.StatusCode);
+
+        // A completely different forwarded IP is unaffected — its own bucket, not the one just
+        // exhausted. Before the ForwardedHeaders fix, both would have shared the TestServer's own
+        // loopback connection IP and this attempt would already be rate-limited too.
+        var firstFromSecondIp = await AttemptFrom("203.0.113.20", "b0");
+        Assert.Equal(HttpStatusCode.Conflict, firstFromSecondIp.StatusCode);
+    }
 
     [Fact]
     public async Task A_sixth_login_attempt_within_the_window_is_rate_limited()

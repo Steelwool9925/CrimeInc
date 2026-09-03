@@ -36,9 +36,17 @@ public static class AccountEndpoints
             }
 
             // Canonicalise before validating, so what's validated is exactly what gets stored.
-            var lowered = request.Username.ToLowerInvariant();
+            // request.Username/Password are declared as non-nullable `string`, but that
+            // annotation is compile-time only — System.Text.Json's minimal-API body binder does
+            // not enforce it at runtime, so a request that omits the field (or sends JSON `null`)
+            // deserializes it to an actual null here. `?.ToLowerInvariant()` plus the `is null`
+            // arms below turn that into the same ordinary usernameInvalid/passwordTooWeak
+            // refusal every other malformed value gets, instead of an unhandled
+            // NullReferenceException surfacing as a raw 500.
+            var lowered = request.Username?.ToLowerInvariant();
+            var password = request.Password;
 
-            if (!AccountCredentials.IsValidUsername(lowered))
+            if (lowered is null || !AccountCredentials.IsValidUsername(lowered))
             {
                 return Results.Problem(
                     detail: $"Username must be {AccountCredentials.MinUsernameLength}-" +
@@ -48,7 +56,7 @@ public static class AccountEndpoints
                     extensions: new Dictionary<string, object?> { ["reason"] = "usernameInvalid" });
             }
 
-            if (!AccountCredentials.IsValidPassword(request.Password))
+            if (password is null || !AccountCredentials.IsValidPassword(password))
             {
                 return Results.Problem(
                     detail: $"Password must be at least {AccountCredentials.MinPasswordLength} " +
@@ -58,7 +66,7 @@ public static class AccountEndpoints
             }
 
             player.Username = lowered;
-            player.PasswordHash = PasswordHasher.Hash(request.Password);
+            player.PasswordHash = PasswordHasher.Hash(password);
 
             try
             {
@@ -85,15 +93,23 @@ public static class AccountEndpoints
             LoginRequest request,
             GameDbContext db) =>
         {
-            var lowered = request.Username.ToLowerInvariant();
+            // request.Username/Password are non-nullable `string` at compile time only — a
+            // request that omits either field deserializes it to a real null at runtime (STJ
+            // does not enforce C#'s nullable-reference-type annotations), so both are handled
+            // as null-safe values feeding the same single refusal path below, never dereferenced
+            // directly.
+            var lowered = request.Username?.ToLowerInvariant();
+            var password = request.Password;
 
-            var player = await db.Players.FirstOrDefaultAsync(p => p.Username == lowered);
+            var player = lowered is null
+                ? null
+                : await db.Players.FirstOrDefaultAsync(p => p.Username == lowered);
 
-            // Unknown username, missing hash, or wrong password must all be indistinguishable to
-            // the caller — one shared refusal path, not separately-worded branches that could
-            // drift apart later.
-            if (player is null || player.PasswordHash is null ||
-                !PasswordHasher.Verify(request.Password, player.PasswordHash))
+            // Unknown username, missing username/password, missing hash, or wrong password must
+            // all be indistinguishable to the caller — one shared refusal path, not separately
+            // worded branches that could drift apart later.
+            if (player is null || player.PasswordHash is null || password is null ||
+                !PasswordHasher.Verify(password, player.PasswordHash))
             {
                 return Results.Problem(
                     detail: "Invalid username or password.",

@@ -57,6 +57,27 @@ void main() {
       expect(okState.loginError, isNull);
     });
 
+    test(
+        'a failed me() after a successful login does not leave the token persisted '
+        '(found by the final whole-branch code review)', () async {
+      // login() itself succeeds against the server, but the follow-up me() call fails (a
+      // transient network blip, say). login() must report failure to the UI — and, just as
+      // importantly, must not have already written the token to storage: a player told "login
+      // failed" who then relaunches the app must not be silently signed into that account anyway.
+      final tokenStore = InMemoryTokenStore();
+      final api = FakeApiClient(
+        loginResult: const SessionResult(deviceToken: 'should-not-be-saved', playerId: 'id'),
+        throwOnMe: true,
+      );
+      final state = AppState(apiClient: api, tokenStore: tokenStore);
+
+      final ok = await state.login('alice', 'correct-horse-battery');
+
+      expect(ok, isFalse);
+      expect(state.loginError, isNotNull);
+      expect(await tokenStore.read(), isNull);
+    });
+
     test('loggingIn is true while the call is in flight', () async {
       final api = FakeApiClient(
         loginResult: const SessionResult(deviceToken: 'tok', playerId: 'id'),
