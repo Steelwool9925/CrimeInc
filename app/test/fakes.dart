@@ -380,11 +380,14 @@ class FakeApiClient implements ApiClient {
     this.refusePropertyActionWith,
     this.refuseLoginWith,
     SessionResult? loginResult,
+    this.refuseRegisterWith,
+    Me? registerResult,
   })  : _loginResult = loginResult ??
             const SessionResult(
               deviceToken: 'fake-token-abc',
               playerId: 'player-guid-123',
             ),
+        _registerResult = registerResult ?? kFakeMe,
         _inventoryResult = inventoryResult ??
             const InventoryList(
               items: [kOwnedWeapon, kUnaffordableArmor, kLockedWeapon],
@@ -540,6 +543,14 @@ class FakeApiClient implements ApiClient {
   final SessionResult _loginResult;
   final List<({String username, String password})> loginCalls = [];
 
+  /// When set, registerAccount throws a [JobRefusedException] with this reason — the shape a 409
+  /// from POST /account/register takes (`alreadyClaimed`, `usernameInvalid`, `passwordTooWeak`,
+  /// or `usernameTaken` from the real endpoint; the fake accepts any string).
+  final String? refuseRegisterWith;
+
+  final Me _registerResult;
+  final List<({String deviceToken, String username, String password})> registerCalls = [];
+
   final List<String?> sessionCalls = [];
   int meCalls = 0;
   int contentPackCalls = 0;
@@ -568,6 +579,16 @@ class FakeApiClient implements ApiClient {
       throw JobRefusedException(refuseLoginWith!, 'Invalid username or password.');
     }
     return _loginResult;
+  }
+
+  @override
+  Future<Me> registerAccount(
+      String deviceToken, String username, String password) async {
+    registerCalls.add((deviceToken: deviceToken, username: username, password: password));
+    if (refuseRegisterWith != null) {
+      throw JobRefusedException(refuseRegisterWith!, 'The account could not be claimed.');
+    }
+    return _registerResult;
   }
 
   @override

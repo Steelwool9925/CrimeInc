@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
 
 import '../state/app_state.dart';
+import 'register_screen.dart';
 import 'skills_screen.dart';
 
 /// The "Rap Sheet" screen — deliberately scoped to what the server already models.
 ///
 /// The design reference for this screen shows a player display name, a rank title, a respect
-/// meter, an avatar/plate picker and an achievements grid. None of that exists server-side: there
-/// is no name field on [Me], no rank, no respect stat, no achievements — so none of it is invented
-/// here. Where the design shows those, this screen shows a plain panel saying they are not live
-/// yet, rather than fabricating placeholder values that would read as real.
+/// meter, an avatar/plate picker and an achievements grid. Only the first of those exists
+/// server-side now — an account's username, once claimed (see [_AccountSection]) — and even that
+/// is a login credential, not the freeform display name the design shows. Rank, respect, an
+/// avatar/plate picker and achievements still don't exist at all, so none of them are invented
+/// here; this screen shows a plain panel saying they are not live yet, rather than fabricating
+/// placeholder values that would read as real.
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key, required this.appState});
 
@@ -61,6 +64,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     MaterialPageRoute(builder: (_) => SkillsScreen(appState: state)),
                   ),
                 ),
+                const SizedBox(height: 16),
+                _AccountSection(appState: state),
                 const SizedBox(height: 16),
                 const _ComingSoonPanel(),
               ],
@@ -182,6 +187,42 @@ class _StatTile extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Real account state, not a placeholder: an unclaimed guest player gets a "protect this save"
+/// prompt into [RegisterScreen]; a claimed one shows the username it's logged in as.
+class _AccountSection extends StatelessWidget {
+  const _AccountSection({required this.appState});
+
+  final AppState appState;
+
+  @override
+  Widget build(BuildContext context) {
+    final username = appState.me?.username;
+
+    if (username != null) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text(
+            'Logged in as $username',
+            key: const Key('profile-account-username'),
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ),
+      );
+    }
+
+    return OutlinedButton.icon(
+      key: const Key('profile-create-account'),
+      icon: const Icon(Icons.lock_outline),
+      label: const Text('Create Account'),
+      onPressed: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => RegisterScreen(appState: appState)),
       ),
     );
   }

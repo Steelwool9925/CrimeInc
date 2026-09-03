@@ -2,9 +2,25 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:underworld_empire/api/models.dart';
 import 'package:underworld_empire/screens/profile_screen.dart';
+import 'package:underworld_empire/screens/register_screen.dart';
 import 'package:underworld_empire/state/app_state.dart';
 
 import 'fakes.dart';
+
+const _kClaimedMe = Me(
+  playerId: 'player-guid-123',
+  energy: MeterState(current: 7, max: 10, regenSecondsPerPoint: 300),
+  stamina: MeterState(current: 5, max: 10, regenSecondsPerPoint: 300),
+  health: MeterState(current: 10, max: 10, regenSecondsPerPoint: 300),
+  cash: 12345,
+  premiumCurrency: 0,
+  level: 1,
+  xp: 0,
+  skillPoints: 0,
+  attack: 1,
+  defense: 1,
+  username: 'alicecarter',
+);
 
 /// Pumps ProfileScreen with a bootstrapped AppState, then settles enough frames for the
 /// post-frame loadJobs() call to resolve.
@@ -130,6 +146,34 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('skill-points')), findsOneWidget);
+    });
+  });
+
+  group('ProfileScreen — account', () {
+    testWidgets('an unclaimed guest sees a Create Account prompt, not a username', (tester) async {
+      // The default FakeApiClient's Me carries no username — a guest who has never registered.
+      await pumpProfile(tester, FakeApiClient());
+
+      expect(find.byKey(const Key('profile-create-account')), findsOneWidget);
+      expect(find.byKey(const Key('profile-account-username')), findsNothing);
+    });
+
+    testWidgets('a claimed account shows who it is logged in as, not the prompt', (tester) async {
+      await pumpProfile(tester, FakeApiClient(meResult: _kClaimedMe));
+
+      expect(find.byKey(const Key('profile-account-username')), findsOneWidget);
+      expect(find.text('Logged in as alicecarter'), findsOneWidget);
+      expect(find.byKey(const Key('profile-create-account')), findsNothing);
+    });
+
+    testWidgets('tapping Create Account pushes RegisterScreen', (tester) async {
+      await pumpProfile(tester, FakeApiClient());
+
+      await tester.tap(find.byKey(const Key('profile-create-account')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(RegisterScreen), findsOneWidget);
+      expect(find.byKey(const Key('register-username-field')), findsOneWidget);
     });
   });
 }

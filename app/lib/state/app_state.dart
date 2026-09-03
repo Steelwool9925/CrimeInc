@@ -185,6 +185,56 @@ class AppState extends ChangeNotifier {
     return false;
   }
 
+  bool _registeringAccount = false;
+  String? _registerAccountError;
+
+  bool get registeringAccount => _registeringAccount;
+
+  /// A message for [RegisterScreen] to show, or null between attempts. Cleared at the start of
+  /// every call to [registerAccount].
+  String? get registerAccountError => _registerAccountError;
+
+  /// Claims the current device's player with a username/password — see
+  /// [ApiClient.registerAccount]. Returns whether it succeeded; on success [me] is updated from
+  /// the server's response, so `me.username` reads non-null immediately without a follow-up read.
+  ///
+  /// Requires an existing session ([_deviceToken] set by [bootstrap]/[login] already having run) —
+  /// this screen is only ever reached from Profile, which is only ever reached once the app is
+  /// past its startup gate. Returns false without calling the server if that invariant is somehow
+  /// violated, the same defensive shape [loadJobs] and friends already use for "no token yet."
+  Future<bool> registerAccount(String username, String password) async {
+    final token = _deviceToken;
+    if (token == null) return false;
+
+    _registeringAccount = true;
+    _registerAccountError = null;
+    notifyListeners();
+
+    try {
+      _me = await _apiClient.registerAccount(token, username, password);
+      _registeringAccount = false;
+      notifyListeners();
+      return true;
+    } on JobRefusedException catch (e) {
+      // The server's reason is a stable token, not display text (identity-session.md's own
+      // convention) — translated here, the same way item/property refusals already are.
+      _registerAccountError = switch (e.reason) {
+        'alreadyClaimed' => 'This device already has an account.',
+        'usernameInvalid' =>
+          'That username isn\'t allowed — use 3-32 lowercase letters, digits, underscores or hyphens.',
+        'passwordTooWeak' => 'Password must be at least 8 characters.',
+        'usernameTaken' => 'That username is already taken.',
+        _ => 'Could not create the account.',
+      };
+    } catch (_) {
+      _registerAccountError = 'Could not reach the server. Check your connection and try again.';
+    }
+
+    _registeringAccount = false;
+    notifyListeners();
+    return false;
+  }
+
   Future<void> refresh() async {
     final token = _deviceToken;
     if (token == null) return;
