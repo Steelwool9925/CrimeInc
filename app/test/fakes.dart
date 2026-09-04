@@ -89,6 +89,78 @@ const kStatLockedJob = Job(
   unavailableReason: 'stats',
 );
 
+/// An item-quantity gate the player has not yet met: needs 2 switchblade, holds 1.
+const kUnmetItemRequirement = JobItemRequirement(
+  itemId: 'switchblade',
+  minQuantity: 2,
+  held: 1,
+  met: false,
+);
+
+/// The same gate, now met — holds enough.
+const kMetItemRequirement = JobItemRequirement(
+  itemId: 'switchblade',
+  minQuantity: 2,
+  held: 2,
+  met: true,
+);
+
+/// A job locked behind an item-quantity gate — level and stats already cleared, so 'items' is the
+/// only reason left.
+const kItemGatedJob = Job(
+  id: 'hijack-a-delivery-truck',
+  name: 'Hijack a Delivery Truck',
+  description: 'Wait at the light.',
+  area: 'docks',
+  energyCost: 4,
+  levelRequirement: 1,
+  cashMin: 140,
+  cashMax: 260,
+  xp: 55,
+  attackRequirement: 9,
+  defenseRequirement: 7,
+  itemRequirements: [kUnmetItemRequirement],
+  successChance: 0.65,
+  mastery: kFakeMastery,
+  canAttempt: false,
+  unavailableReason: 'items',
+);
+
+/// The same job as [kItemGatedJob], but attemptable — every gate cleared, including the item one.
+const kItemReadyJob = Job(
+  id: 'hijack-a-delivery-truck',
+  name: 'Hijack a Delivery Truck',
+  description: 'Wait at the light.',
+  area: 'docks',
+  energyCost: 4,
+  levelRequirement: 1,
+  cashMin: 140,
+  cashMax: 260,
+  xp: 55,
+  attackRequirement: 9,
+  defenseRequirement: 7,
+  itemRequirements: [kMetItemRequirement],
+  successChance: 0.68,
+  mastery: kFakeMastery,
+  canAttempt: true,
+);
+
+/// A successful attempt at [kItemReadyJob] that consumed one unit of its item requirement, leaving
+/// stock one below what it started with.
+const kItemConsumingJobResult = JobResult(
+  jobId: 'hijack-a-delivery-truck',
+  succeeded: true,
+  energySpent: 4,
+  cashEarned: 200,
+  xpEarned: 55,
+  healthLost: 0,
+  mastery: kFakeMastery,
+  masteryRankedUp: false,
+  itemsConsumed: [
+    ItemConsumption(itemId: 'switchblade', quantityConsumed: 1, quantityRemaining: 1),
+  ],
+);
+
 /// A failed attempt: energy still spent, 1% cash and 10% XP, three health gone, mastery unmoved.
 const kFailedJobResult = JobResult(
   jobId: 'shake-down-corner-store',

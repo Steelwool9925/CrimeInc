@@ -324,6 +324,7 @@ class AppState extends ChangeNotifier {
         'energy' => 'Not enough energy.',
         'level' => 'Your level is too low for that job.',
         'stats' => 'Your attack or defense is too low for that job.',
+        'items' => 'You do not have enough of a required item for that job.',
         _ => e.detail,
       };
     } catch (e) {
@@ -334,15 +335,22 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// Folds a job outcome into the cached catalog so the list reflects the new mastery and energy
-  /// without a second network call.
+  /// Folds a job outcome into the cached catalog so the list reflects the new mastery, item stock
+  /// and energy without a second network call.
   void _applyOutcomeToCatalog(DoJobResult outcome) {
     final energy = _me?.energy.current;
     final level = _me?.level;
 
+    // Keyed by item id so the fourth rule below is an O(1) lookup per requirement rather than a
+    // nested scan. Empty for the jobs that opt into no item gate, in which case every requirement
+    // list below is empty too and this is never consulted.
+    final consumedByItemId = {
+      for (final consumed in outcome.result.itemsConsumed) consumed.itemId: consumed,
+    };
+
     _jobs = _jobs.map((job) {
-      final mastery =
-          job.id == outcome.result.jobId ? outcome.result.mastery : job.mastery;
+      final isAttemptedJob = job.id == outcome.result.jobId;
+      final mastery = isAttemptedJob ? outcome.result.mastery : job.mastery;
 
       final meetsLevel = level == null || level >= job.levelRequirement;
       final affords = energy == null || energy >= job.energyCost;
@@ -354,11 +362,34 @@ class AppState extends ChangeNotifier {
       // a 'stats' lock and light up a button the server will refuse.
       final wasStatLocked = job.unavailableReason == 'stats';
 
+      // Fourth carry-forward rule: item stock. Unlike stats, the just-attempted job's outcome names
+      // its exact new remaining quantity per requirement (ItemConsumption.quantityRemaining), so
+      // this one is recomputed precisely rather than carried forward blind — but only for the job
+      // that was actually attempted; a different job referencing the same item id (not in the
+      // shipped pack, but the domain allows it) is not touched, matching Tier 1's scope. See the
+      // Tier 2 sketch for a general reconciliation instead of this fourth ad-hoc rule.
+      final itemRequirements = isAttemptedJob
+          ? job.itemRequirements.map((requirement) {
+              final consumed = consumedByItemId[requirement.itemId];
+              if (consumed == null) return requirement;
+
+              return JobItemRequirement(
+                itemId: requirement.itemId,
+                minQuantity: requirement.minQuantity,
+                held: consumed.quantityRemaining,
+                met: consumed.quantityRemaining >= requirement.minQuantity,
+              );
+            }).toList(growable: false)
+          : job.itemRequirements;
+      final meetsItems = itemRequirements.every((requirement) => requirement.met);
+
       final reason = !meetsLevel
           ? 'level'
           : wasStatLocked
               ? 'stats'
-              : (!affords ? 'energy' : null);
+              : (!meetsItems
+                  ? 'items'
+                  : (!affords ? 'energy' : null));
 
       return Job(
         id: job.id,
@@ -372,6 +403,7 @@ class AppState extends ChangeNotifier {
         xp: job.xp,
         attackRequirement: job.attackRequirement,
         defenseRequirement: job.defenseRequirement,
+        itemRequirements: itemRequirements,
         successChance: job.successChance,
         mastery: mastery,
         canAttempt: reason == null,

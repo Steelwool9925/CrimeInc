@@ -191,6 +191,36 @@ class JobMastery {
       );
 }
 
+/// One item-quantity gate on a job, from this player's point of view: the content requirement plus
+/// their current holding, so the card never needs a follow-up call to explain a lock.
+@immutable
+class JobItemRequirement {
+  const JobItemRequirement({
+    required this.itemId,
+    required this.minQuantity,
+    required this.held,
+    required this.met,
+  });
+
+  final String itemId;
+  final int minQuantity;
+
+  /// How many copies this player currently holds. Zero when they own none at all, the same as a
+  /// holding with too few — the server does not distinguish "never bought one" on the wire.
+  final int held;
+
+  /// Whether [held] meets [minQuantity]. Derivable client-side, but sent anyway so the card never
+  /// re-implements the server's `>=` comparison.
+  final bool met;
+
+  factory JobItemRequirement.fromJson(Map<String, dynamic> json) => JobItemRequirement(
+        itemId: json['itemId'] as String,
+        minQuantity: json['minQuantity'] as int,
+        held: json['held'] as int,
+        met: json['met'] as bool,
+      );
+}
+
 @immutable
 class Job {
   const Job({
@@ -205,6 +235,7 @@ class Job {
     required this.xp,
     required this.attackRequirement,
     required this.defenseRequirement,
+    this.itemRequirements = const [],
     required this.successChance,
     required this.mastery,
     required this.canAttempt,
@@ -227,6 +258,10 @@ class Job {
   /// Minimum effective defense.
   final int defenseRequirement;
 
+  /// Item-quantity gates this job additionally requires, alongside the stat gate. Empty for the
+  /// jobs that opt into no item gate.
+  final List<JobItemRequirement> itemRequirements;
+
   /// This player's live chance of success, 0..1, already capped by the pack ceiling.
   ///
   /// The server computes it with the same method the attempt rolls against, so what is drawn on a
@@ -237,8 +272,8 @@ class Job {
   final JobMastery mastery;
   final bool canAttempt;
 
-  /// Stable token from the server: 'level', 'stats' or 'energy'. Null when [canAttempt] is true.
-  /// The user-facing wording is the client's to choose.
+  /// Stable token from the server: 'level', 'stats', 'items' or 'energy'. Null when [canAttempt] is
+  /// true. The user-facing wording is the client's to choose.
   final String? unavailableReason;
 
   factory Job.fromJson(Map<String, dynamic> json) => Job(
@@ -253,6 +288,9 @@ class Job {
         xp: json['xp'] as int,
         attackRequirement: json['attackRequirement'] as int,
         defenseRequirement: json['defenseRequirement'] as int,
+        itemRequirements: (json['itemRequirements'] as List<dynamic>? ?? [])
+            .map((r) => JobItemRequirement.fromJson(r as Map<String, dynamic>))
+            .toList(growable: false),
         // `as num` then toDouble: System.Text.Json writes a whole-number chance as `1`, not `1.0`,
         // and `as double` on an int is a runtime type error in Dart rather than a widening.
         successChance: (json['successChance'] as num).toDouble(),
@@ -305,6 +343,30 @@ class LevelUp {
       );
 }
 
+/// One item requirement's consumption from one applied job attempt — win or lose.
+@immutable
+class ItemConsumption {
+  const ItemConsumption({
+    required this.itemId,
+    required this.quantityConsumed,
+    required this.quantityRemaining,
+  });
+
+  final String itemId;
+
+  /// Copies spent this attempt. Always 1 in this first pass.
+  final int quantityConsumed;
+
+  /// Copies left in the holding after this attempt.
+  final int quantityRemaining;
+
+  factory ItemConsumption.fromJson(Map<String, dynamic> json) => ItemConsumption(
+        itemId: json['itemId'] as String,
+        quantityConsumed: json['quantityConsumed'] as int,
+        quantityRemaining: json['quantityRemaining'] as int,
+      );
+}
+
 @immutable
 class JobResult {
   const JobResult({
@@ -316,6 +378,7 @@ class JobResult {
     required this.healthLost,
     required this.mastery,
     required this.masteryRankedUp,
+    this.itemsConsumed = const [],
   });
 
   final String jobId;
@@ -337,6 +400,10 @@ class JobResult {
   final JobMastery mastery;
   final bool masteryRankedUp;
 
+  /// One entry per item requirement the job gated on, spent on this attempt — win or lose. Empty
+  /// for the jobs that opt into no item gate.
+  final List<ItemConsumption> itemsConsumed;
+
   factory JobResult.fromJson(Map<String, dynamic> json) => JobResult(
         jobId: json['jobId'] as String,
         succeeded: json['succeeded'] as bool,
@@ -346,6 +413,9 @@ class JobResult {
         healthLost: json['healthLost'] as int,
         mastery: JobMastery.fromJson(json['mastery'] as Map<String, dynamic>),
         masteryRankedUp: json['masteryRankedUp'] as bool,
+        itemsConsumed: (json['itemsConsumed'] as List<dynamic>? ?? [])
+            .map((c) => ItemConsumption.fromJson(c as Map<String, dynamic>))
+            .toList(growable: false),
       );
 }
 

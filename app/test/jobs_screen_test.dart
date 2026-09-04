@@ -364,6 +364,83 @@ void main() {
     });
   });
 
+  group('JobsScreen — item gate', () {
+    /// A catalog whose second row is item-locked rather than level-, stats- or energy-locked.
+    FakeApiClient withItemGatedJob() => FakeApiClient(
+          jobsResult: const JobList(
+            jobs: [kCheapJob, kItemGatedJob],
+            currentEnergy: 7,
+            level: 3,
+          ),
+        );
+
+    testWidgets('an item-locked job is disabled', (tester) async {
+      await pumpJobs(tester, withItemGatedJob());
+
+      final button = tester.widget<ElevatedButton>(
+          find.byKey(const Key('do-job-hijack-a-delivery-truck')));
+
+      expect(button.onPressed, isNull);
+    });
+
+    testWidgets('an item-locked job names the item it needs', (tester) async {
+      await pumpJobs(tester, withItemGatedJob());
+
+      final lock = tester.widget<Text>(
+          find.byKey(const Key('job-lock-hijack-a-delivery-truck')));
+
+      expect(lock.data, 'Needs 2 switchblade');
+    });
+
+    testWidgets('a job with no item requirements shows no item wording', (tester) async {
+      await pumpJobs(tester, FakeApiClient());
+
+      // kUnaffordableJob shares the same id but is locked on energy, with no item requirements —
+      // this must never read as an item lock.
+      final lock = tester.widget<Text>(
+          find.byKey(const Key('job-lock-hijack-a-delivery-truck')));
+
+      expect(lock.data, isNot(contains('switchblade')));
+    });
+
+    testWidgets('a successful item-gated attempt shows the consumption in the completion card',
+        (tester) async {
+      final api = FakeApiClient(
+        jobsResult: const JobList(
+          jobs: [kItemReadyJob],
+          currentEnergy: 7,
+          level: 3,
+        ),
+        doJobResult: const DoJobResult(
+          result: kItemConsumingJobResult,
+          player: kFakeMe,
+        ),
+      );
+      await pumpJobs(tester, api);
+
+      await tester.tap(find.byKey(const Key('do-job-hijack-a-delivery-truck')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('job-result-item-switchblade')), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('job-result-item-switchblade')),
+          matching: find.text('-1 (1 left)'),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a job with no item requirements draws no item tile', (tester) async {
+      await pumpJobs(tester, FakeApiClient());
+
+      await tester.tap(find.byKey(const Key('do-job-shake-down-corner-store')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('job-result-item-switchblade')), findsNothing);
+    });
+  });
+
   group('JobsScreen — a failed attempt', () {
     FakeApiClient failing() => FakeApiClient(
           doJobResult: const DoJobResult(

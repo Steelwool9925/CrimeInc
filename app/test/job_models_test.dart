@@ -84,6 +84,42 @@ void main() {
       expect(job.canAttempt, isFalse);
       expect(job.unavailableReason, 'stats');
     });
+
+    test('reads an empty item-requirements array as no gate', () {
+      final job = Job.fromJson(jobJson()..['itemRequirements'] = <dynamic>[]);
+
+      expect(job.itemRequirements, isEmpty);
+    });
+
+    test('defaults to no item gate when the field is absent entirely', () {
+      // Older cached JSON, or any fixture predating this field, must not crash the parser.
+      final job = Job.fromJson(jobJson());
+
+      expect(job.itemRequirements, isEmpty);
+    });
+
+    test('reads an item requirement with the callers held quantity', () {
+      final job = Job.fromJson(jobJson(canAttempt: false, unavailableReason: 'items')
+        ..['itemRequirements'] = [
+          {'itemId': 'switchblade', 'minQuantity': 2, 'held': 1, 'met': false},
+        ]);
+
+      final requirement = job.itemRequirements.single;
+      expect(requirement.itemId, 'switchblade');
+      expect(requirement.minQuantity, 2);
+      expect(requirement.held, 1);
+      expect(requirement.met, isFalse);
+      expect(job.unavailableReason, 'items');
+    });
+
+    test('reads a met item requirement', () {
+      final job = Job.fromJson(jobJson()
+        ..['itemRequirements'] = [
+          {'itemId': 'switchblade', 'minQuantity': 2, 'held': 2, 'met': true},
+        ]);
+
+      expect(job.itemRequirements.single.met, isTrue);
+    });
   });
 
   group('JobResult.fromJson — the failure branch', () {
@@ -106,6 +142,24 @@ void main() {
       expect(result.cashEarned, 1);
       expect(result.xpEarned, 1);
       expect(result.healthLost, 3);
+    });
+
+    test('defaults to no consumption when the field is absent entirely', () {
+      final result = JobResult.fromJson(jobResultJson());
+
+      expect(result.itemsConsumed, isEmpty);
+    });
+
+    test('reads an items-consumed entry', () {
+      final result = JobResult.fromJson(jobResultJson()
+        ..['itemsConsumed'] = [
+          {'itemId': 'switchblade', 'quantityConsumed': 1, 'quantityRemaining': 4},
+        ]);
+
+      final consumed = result.itemsConsumed.single;
+      expect(consumed.itemId, 'switchblade');
+      expect(consumed.quantityConsumed, 1);
+      expect(consumed.quantityRemaining, 4);
     });
   });
 }
