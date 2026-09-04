@@ -13,6 +13,16 @@ namespace UnderworldEmpire.Api.Contracts;
 public record JobMasteryState(int Completions, int Rank, int MaxRank, int? CompletionsUntilNextRank);
 
 /// <summary>
+/// One item-quantity gate on a job, from the calling player's point of view — content plus this
+/// player's current holding, so the client never needs a follow-up call to explain a lock.
+/// </summary>
+/// <param name="ItemId">Content id of the required weapon or armor item.</param>
+/// <param name="MinQuantity">Minimum copies held to attempt the job.</param>
+/// <param name="Held">How many copies this player currently holds.</param>
+/// <param name="Met">Whether <see cref="Held"/> meets <see cref="MinQuantity"/>.</param>
+public record JobItemRequirementDto(string ItemId, int MinQuantity, int Held, bool Met);
+
+/// <summary>
 /// One job as offered to the calling player: the content definition plus that player's mastery and
 /// whether they can attempt it right now.
 /// </summary>
@@ -32,6 +42,10 @@ public record JobMasteryState(int Completions, int Rank, int MaxRank, int? Compl
 /// </param>
 /// <param name="AttackRequirement">Minimum effective attack — base plus equipped gear.</param>
 /// <param name="DefenseRequirement">Minimum effective defense.</param>
+/// <param name="ItemRequirements">
+///     Item-quantity gates this job additionally requires, alongside the stat gate. Empty for the
+///     jobs that opt into no item gate — every job shipped before this field existed.
+/// </param>
 /// <param name="SuccessChance">
 ///     This caller's live chance of success, in <c>[0, 1]</c>, already capped by the pack ceiling.
 ///     Computed by the same <c>Job.SuccessChanceFor</c> the attempt rolls against, so the odds shown
@@ -39,7 +53,7 @@ public record JobMasteryState(int Completions, int Rank, int MaxRank, int? Compl
 ///     cannot attempt, so the client can show what clearing the gate would buy.
 /// </param>
 /// <param name="UnavailableReason">
-///     Why <paramref name="CanAttempt"/> is false — <c>"level"</c>, <c>"stats"</c> or
+///     Why <paramref name="CanAttempt"/> is false — <c>"level"</c>, <c>"stats"</c>, <c>"items"</c> or
 ///     <c>"energy"</c> — or <see langword="null"/> when it is true. A stable token, not display
 ///     text: the label is the client's to localise.
 /// </param>
@@ -55,6 +69,7 @@ public record JobDto(
     long Xp,
     int AttackRequirement,
     int DefenseRequirement,
+    IReadOnlyList<JobItemRequirementDto> ItemRequirements,
     double SuccessChance,
     JobMasteryState Mastery,
     bool CanAttempt,
@@ -84,6 +99,10 @@ public record JobDto(
 ///     attempts.
 /// </param>
 /// <param name="MasteryRankedUp">Whether this attempt crossed a mastery rank threshold.</param>
+/// <param name="ItemsConsumed">
+///     One entry per item requirement the job gates on, spent on this attempt — win or lose. Empty
+///     for the jobs that opt into no item gate.
+/// </param>
 public record JobResultDto(
     string JobId,
     bool Succeeded,
@@ -92,7 +111,14 @@ public record JobResultDto(
     long XpEarned,
     int HealthLost,
     JobMasteryState Mastery,
-    bool MasteryRankedUp);
+    bool MasteryRankedUp,
+    IReadOnlyList<ItemConsumptionDto> ItemsConsumed);
+
+/// <summary>One item requirement's consumption from one applied job attempt, as returned on the wire.</summary>
+/// <param name="ItemId">The item consumed.</param>
+/// <param name="QuantityConsumed">Copies spent this attempt. Always 1 in this first pass.</param>
+/// <param name="QuantityRemaining">Copies left in the holding after this attempt.</param>
+public record ItemConsumptionDto(string ItemId, int QuantityConsumed, int QuantityRemaining);
 
 /// <summary>Response body for GET /jobs.</summary>
 /// <param name="Jobs">Every job in the active pack, in content-declared order.</param>

@@ -47,13 +47,17 @@ public static class JobEndpoints
 
             // The stat gate and the reported odds both read effective stats, so the equipped
             // holdings are resolved here too. A third query on this route, and the reason equipping
-            // a weapon visibly changes the job list.
-            var equipped = await db.PlayerItems
+            // a weapon visibly changes the job list. Unfiltered by Equipped (unlike the old query)
+            // because the item-quantity gate asks "how many do you hold", independently of what's
+            // worn — ResolveEquipped still picks out just the equipped ones for the Loadout below,
+            // so this stays one query doing both jobs rather than a second read alongside it.
+            var holdings = await db.PlayerItems
                 .AsNoTracking()
-                .Where(h => h.PlayerId == playerId && h.Equipped)
+                .Where(h => h.PlayerId == playerId)
                 .ToListAsync();
 
-            var loadout = Loadout.For(player, content.ItemCatalog.ResolveEquipped(equipped));
+            var loadout = Loadout.For(player, content.ItemCatalog.ResolveEquipped(holdings));
+            var heldQuantities = holdings.ToDictionary(h => h.ItemId, h => h.Quantity, StringComparer.Ordinal);
 
             var now = DateTimeOffset.UtcNow;
             int currentEnergy = player.Energy.CurrentAt(now, MeterRates.Energy);
@@ -69,17 +73,33 @@ public static class JobEndpoints
                     ? mastery.CompletionsUntilNextRank(catalog.CompletionsPerRank, catalog.MaxRank)
                     : UntilNextRankForFreshJob(catalog);
 
-                // Precedence is level -> stats -> energy, the same order JobService.Attempt refuses
-                // in: the most permanent reason first, so a row failing several gates shows the one
-                // that will take longest to clear. A mismatch here would let a row look attemptable
-                // and then be refused for a reason the client never displayed.
+                // Precedence is level -> stats -> items -> energy, the same order JobService.Attempt
+                // refuses in: the most permanent reason first, so a row failing several gates shows
+                // the one that will take longest to clear. A mismatch here would let a row look
+                // attemptable and then be refused for a reason the client never displayed.
                 string? unavailableReason = player.Level < job.LevelRequirement
                     ? "level"
                     : !job.MeetsStatRequirements(loadout.TotalAttack, loadout.TotalDefense)
                         ? "stats"
-                        : currentEnergy < job.EnergyCost
-                            ? "energy"
-                            : null;
+                        : !job.MeetsItemRequirements(heldQuantities)
+                            ? "items"
+                            : currentEnergy < job.EnergyCost
+                                ? "energy"
+                                : null;
+
+                List<JobItemRequirementDto> itemRequirements = job.ItemRequirements.Count == 0
+                    ? []
+                    : job.ItemRequirements
+                        .Select(r =>
+                        {
+                            int held = heldQuantities.GetValueOrDefault(r.ItemId);
+                            return new JobItemRequirementDto(
+                                ItemId: r.ItemId,
+                                MinQuantity: r.MinQuantity,
+                                Held: held,
+                                Met: held >= r.MinQuantity);
+                        })
+                        .ToList();
 
                 jobs.Add(new JobDto(
                     Id: job.Id,
@@ -93,10 +113,11 @@ public static class JobEndpoints
                     Xp: job.Xp,
                     AttackRequirement: job.AttackRequirement,
                     DefenseRequirement: job.DefenseRequirement,
+                    ItemRequirements: itemRequirements,
                     // The same method the attempt rolls against — a second implementation here
                     // would let the displayed odds drift from the real ones.
                     SuccessChance: job.SuccessChanceFor(
-                        loadout.TotalAttack, loadout.TotalDefense, catalog.MaxSuccessChance),
+                        loadout.TotalAttack, loadout.TotalDefense, catalog.MaxSuccessChance, heldQuantities),
                     Mastery: new JobMasteryState(
                         Completions: completions,
                         Rank: rank,
@@ -151,6 +172,7 @@ public static class JobEndpoints
                 {
                     JobFailure.LevelTooLow => ("level", "Your level is too low for this job."),
                     JobFailure.StatsTooLow => ("stats", "Your attack or defense is too low for this job."),
+                    JobFailure.InsufficientItems => ("items", "You do not hold enough of a required item for this job."),
                     JobFailure.InsufficientEnergy => ("energy", "You do not have enough energy for this job."),
                     _ => ("unknown", "The job could not be performed.")
                 };
@@ -181,7 +203,10 @@ public static class JobEndpoints
                         Rank: outcome.MasteryRank,
                         MaxRank: catalog.MaxRank,
                         CompletionsUntilNextRank: outcome.CompletionsUntilNextRank),
-                    MasteryRankedUp: outcome.MasteryRankedUp),
+                    MasteryRankedUp: outcome.MasteryRankedUp,
+                    ItemsConsumed: outcome.ItemsConsumed
+                        .Select(c => new ItemConsumptionDto(c.ItemId, c.QuantityConsumed, c.QuantityRemaining))
+                        .ToList()),
                 Player: PlayerProjection.ToMeDto(result.Player!, DateTimeOffset.UtcNow),
                 LevelUp: levelUp));
         })
