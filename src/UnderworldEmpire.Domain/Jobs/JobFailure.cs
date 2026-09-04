@@ -27,6 +27,17 @@ public enum JobFailure
     /// </remarks>
     StatsTooLow,
 
+    /// <summary>
+    /// The player holds less than the minimum quantity of one or more of the job's required items.
+    /// Reported as <c>"items"</c>.
+    /// </summary>
+    /// <remarks>
+    /// A gate, not a penalty: nothing is spent, exactly like <see cref="StatsTooLow"/>. Sits
+    /// alongside the stat gate rather than folded into it — a player can meet stats and fail items,
+    /// or the reverse, and these are different questions about the same job.
+    /// </remarks>
+    InsufficientItems,
+
     /// <summary>The player has less energy than the job costs. A temporary refusal — energy regenerates.</summary>
     InsufficientEnergy
 }
