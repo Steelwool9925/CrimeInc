@@ -96,9 +96,13 @@
         "attack": 9,
         "defense": 7
       },
+      "itemRequirements": [
+        { "itemId": "switchblade", "minQuantity": 2 }
+      ],
       "risk": {
         "baseSuccessChance": 0.65,
         "successChancePerSurplusPoint": 0.008,
+        "itemSuccessChancePerSurplusPoint": 0.01,
         "healthLossMin": 2,
         "healthLossMax": 8
       }

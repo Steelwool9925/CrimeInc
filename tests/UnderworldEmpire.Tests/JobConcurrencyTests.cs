@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using UnderworldEmpire.Domain;
+using UnderworldEmpire.Domain.Items;
+using UnderworldEmpire.Domain.Jobs;
 using UnderworldEmpire.Infrastructure;
 
 namespace UnderworldEmpire.Tests;
@@ -54,6 +56,109 @@ public class JobConcurrencyTests : IClassFixture<CustomWebApplicationFactory>
 
         var player = await db.Players.AsNoTracking().FirstAsync(p => p.Id == playerId);
         return (player.Cash, player.Energy.CurrentAt(DateTimeOffset.UtcNow, MeterRates.Energy), player.Xp);
+    }
+
+    // -------------------------------------------------------------------------
+    // Item-quantity gate (Tier 1 consumable item gate, M2) — the same xmin path must cover the
+    // new PlayerItems child-row write, since it rides in the same SaveChangesAsync as Players.
+    // -------------------------------------------------------------------------
+
+    private const string ItemGatedJobId = "hijack-a-delivery-truck";
+    private const string GateItemId = "switchblade";
+
+    /// <summary>
+    /// A player already at the item-gated job's level and stat requirements, holding
+    /// <paramref name="switchbladeQuantity"/> of the item it gates on.
+    /// </summary>
+    private async Task<Guid> SeedPlayerReadyForItemGatedJobAsync(int switchbladeQuantity)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<GameDbContext>();
+
+        var now = DateTimeOffset.UtcNow;
+        var player = new Player
+        {
+            CreatedAtUtc = now,
+            DeviceToken = DeviceTokenGenerator.Generate(),
+            Level = 3,
+            Attack = 9,
+            Defense = 7,
+            Energy = Meter.Full(PlayerDefaults.EnergyMax, now),
+            Stamina = Meter.Full(PlayerDefaults.StaminaMax, now),
+            Health = Meter.Full(PlayerDefaults.HealthMax, now)
+        };
+        db.Players.Add(player);
+
+        var holding = new PlayerItem { PlayerId = player.Id, ItemId = GateItemId };
+        holding.AddCopies(switchbladeQuantity);
+        db.PlayerItems.Add(holding);
+
+        await db.SaveChangesAsync();
+        return player.Id;
+    }
+
+    private async Task<int> HeldQuantityAsync(Guid playerId, string itemId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<GameDbContext>();
+        var holding = await db.PlayerItems.AsNoTracking()
+            .FirstOrDefaultAsync(h => h.PlayerId == playerId && h.ItemId == itemId);
+        return holding?.Quantity ?? 0;
+    }
+
+    [Fact]
+    public async Task Two_concurrent_item_gated_attempts_consume_stock_exactly_once_each()
+    {
+        // Well above the minimum of 2, so both attempts clear the item gate regardless of read
+        // ordering — this isolates the property under test (does the child-row write ever get lost
+        // or double-applied?) from the item gate itself, which DoJobEndpointTests already covers.
+        var playerId = await SeedPlayerReadyForItemGatedJobAsync(switchbladeQuantity: 10);
+        var now = DateTimeOffset.UtcNow;
+
+        using var scopeA = _factory.Services.CreateScope();
+        using var scopeB = _factory.Services.CreateScope();
+
+        var results = await Task.WhenAll(
+            scopeA.ServiceProvider.GetRequiredService<JobActionService>()
+                .PerformAsync(playerId, ItemGatedJobId, now),
+            scopeB.ServiceProvider.GetRequiredService<JobActionService>()
+                .PerformAsync(playerId, ItemGatedJobId, now));
+
+        int succeeded = results.Count(r => r.WasApplied);
+        int conflicted = results.Count(r => r.Error == JobActionError.ConcurrencyConflict);
+
+        Assert.True(succeeded >= 1, "At least one attempt should have succeeded.");
+        Assert.Equal(2, succeeded + conflicted);
+
+        // Whichever number of attempts actually applied, stock dropped by exactly that many units —
+        // never one unit for two applied attempts (a lost update), and never two for one (a
+        // double-spend). The existing xmin token on Players, which every applied attempt already
+        // writes via Energy, is what makes this true without any new concurrency primitive.
+        Assert.Equal(10 - succeeded, await HeldQuantityAsync(playerId, GateItemId));
+    }
+
+    [Fact]
+    public async Task Sequential_item_gated_attempts_each_consume_their_own_unit()
+    {
+        // The counterpart to the race: with no contention, both attempts must go through and each
+        // must spend its own unit — not one shared spend across both.
+        var playerId = await SeedPlayerReadyForItemGatedJobAsync(switchbladeQuantity: 2);
+        var now = DateTimeOffset.UtcNow;
+
+        using var scopeA = _factory.Services.CreateScope();
+        var first = await scopeA.ServiceProvider.GetRequiredService<JobActionService>()
+            .PerformAsync(playerId, ItemGatedJobId, now);
+        Assert.True(first.WasApplied);
+        Assert.Equal(1, await HeldQuantityAsync(playerId, GateItemId));
+
+        using var scopeB = _factory.Services.CreateScope();
+        var second = await scopeB.ServiceProvider.GetRequiredService<JobActionService>()
+            .PerformAsync(playerId, ItemGatedJobId, now);
+
+        // Stock dropped below the minimum after the first attempt, so the second is refused.
+        Assert.False(second.WasApplied);
+        Assert.Equal(JobFailure.InsufficientItems, second.Failure);
+        Assert.Equal(1, await HeldQuantityAsync(playerId, GateItemId));
     }
 
     [Fact]

@@ -69,4 +69,27 @@ public class PlayerItem
 
     /// <summary>Stops wearing this item, keeping the copies owned. Idempotent.</summary>
     public void Unequip() => Equipped = false;
+
+    /// <summary>
+    /// Removes <paramref name="count"/> copies from the holding — a one-time-use consumable spend.
+    /// </summary>
+    /// <remarks>
+    /// The inverse of <see cref="AddCopies"/>. Does not touch <see cref="Equipped"/>: a job's
+    /// item-quantity gate and the equip/loadout system ask independent questions about the same row
+    /// (see <c>Job.ItemRequirements</c>'s remarks), so spending the last copy of an equipped item
+    /// leaves it reporting as equipped with zero left — a gap Tier 3 may close, not this pass.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    ///     Thrown when <paramref name="count"/> is not positive, or exceeds <see cref="Quantity"/>.
+    /// </exception>
+    public void Consume(int count)
+    {
+        if (count < 1)
+            throw new ArgumentOutOfRangeException(nameof(count), count, "Copies consumed must be >= 1.");
+        if (count > Quantity)
+            throw new ArgumentOutOfRangeException(nameof(count), count,
+                $"Cannot consume {count} copies from a holding of {Quantity}.");
+
+        Quantity -= count;
+    }
 }

@@ -40,9 +40,13 @@ jobs[]   the catalog, in display order — the engine does not sort
   requirements      minimum EFFECTIVE stats to attempt — base plus equipped gear
     attack          minimum effective attack (>= 0; 0 means ungated)
     defense         minimum effective defense (>= 0)
+  itemRequirements[]  optional item-quantity gates, alongside requirements — absent means ungated
+    itemId          a weapon or armor id from items.json (not vehicle; must exist)
+    minQuantity     minimum copies held to attempt the job (>= 1)
   risk              per-job risk tuning — required, not optional
     baseSuccessChance             chance for a player exactly at the requirements (0..1)
     successChancePerSurplusPoint  added per point of surplus stat (>= 0)
+    itemSuccessChancePerSurplusPoint  added per point of surplus held-item quantity (>= 0)
     healthLossMin/healthLossMax   inclusive health lost on a failure, rolled per attempt
 ```
 
@@ -52,18 +56,35 @@ mistake a content author would not notice. This is the one place the pack is str
 domain: `Job` itself defaults to certain-and-ungated so hand-built definitions in tests cannot fall
 into the failure path by accident.
 
+**`itemRequirements` is the opposite: absent is the ordinary case.** Every job written before this
+field existed has none, and must keep working unchanged — so unlike `risk`/`requirements`, omitting
+it is not an error. It is one time use: each attempt spends exactly 1 unit of every listed item,
+win or lose, and the same holding also answers the equip question independently — a player can wear
+a weapon (satisfying `requirements`) and separately need spare stock of it (satisfying
+`itemRequirements`); those are different questions about the same rows.
+
+**`itemId` is validated against `items.json` at startup**, the one place these two otherwise
+independent catalogs cross. An id that does not exist, or names a vehicle rather than a weapon or
+armor item, is a named load error — items load before jobs specifically so this check can run.
+
 The success chance for a given player is:
 
 ```
-surplus = max(0, effectiveAttack  - requirements.attack)
-        + max(0, effectiveDefense - requirements.defense)
+statSurplus = max(0, effectiveAttack  - requirements.attack)
+            + max(0, effectiveDefense - requirements.defense)
 
-chance  = baseSuccessChance + successChancePerSurplusPoint * surplus
+itemSurplus = sum over itemRequirements of max(0, quantityHeld - minQuantity)
+
+chance  = baseSuccessChance
+          + successChancePerSurplusPoint * statSurplus
+          + itemSuccessChancePerSurplusPoint * itemSurplus
           clamped to [baseSuccessChance, min(1, risk.maxSuccessChance)]
 ```
 
 Each stat's surplus floors at **zero independently**. Summed algebraically, a large attack overshoot
-would cancel a defense shortfall and the defense requirement would stop meaning anything.
+would cancel a defense shortfall and the defense requirement would stop meaning anything. Item
+surplus floors at zero the same way, and is a wholly separate term from stat surplus — a big pile of
+spare stock must not paper over a stats shortfall, or the reverse.
 
 Validation reports **every** problem at once rather than stopping at the first, so a content edit
 needs one fix pass rather than one restart per error. Unknown fields are ignored, so a newer pack
@@ -108,14 +129,14 @@ first sitting.
 
 ### Risk balance
 
-| job | lvl | req atk/def | base | per surplus pt | health loss |
-|---|---|---|---|---|---|
-| shake-down-corner-store | 1 | 1 / 1 | 0.65 | 0.010 | 0–1 |
-| boost-a-parked-car | 1 | 5 / 1 | 0.75 | 0.010 | 0–3 |
-| run-numbers-for-the-bookie | 2 | 6 / 5 | 0.72 | 0.010 | 0–4 |
-| hijack-a-delivery-truck | 3 | 9 / 7 | 0.65 | 0.008 | 2–8 |
-| torch-a-rival-warehouse | 5 | 14 / 10 | 0.60 | 0.006 | 4–14 |
-| rob-an-armored-transport | 8 | 22 / 16 | 0.55 | 0.005 | 8–25 |
+| job | lvl | req atk/def | base | per surplus pt | health loss | item gate |
+|---|---|---|---|---|---|---|
+| shake-down-corner-store | 1 | 1 / 1 | 0.65 | 0.010 | 0–1 | — |
+| boost-a-parked-car | 1 | 5 / 1 | 0.75 | 0.010 | 0–3 | — |
+| run-numbers-for-the-bookie | 2 | 6 / 5 | 0.72 | 0.010 | 0–4 | — |
+| hijack-a-delivery-truck | 3 | 9 / 7 | 0.65 | 0.008 | 2–8 | 2× switchblade, +0.01/surplus |
+| torch-a-rival-warehouse | 5 | 14 / 10 | 0.60 | 0.006 | 4–14 | — |
+| rob-an-armored-transport | 8 | 22 / 16 | 0.55 | 0.005 | 8–25 | — |
 
 Tuned against a fresh player at **attack 1 / defense 1**, where a skill point is worth +1:
 
@@ -144,6 +165,11 @@ never be handed a raw roll.
 
 Job ids are compared **ordinally**. They are content keys, not display text, so casing is
 significant and `Boost-A-Parked-Car` is a different id from `boost-a-parked-car`.
+
+**`hijack-a-delivery-truck`'s item gate is a first-pass balance choice, explicitly tunable — not a
+frozen decision.** It sits on a mid-tier job with headroom before *Torch*/*Rob*'s harder stat gates,
+and asks for 2 switchblades: a level-2 unlock, so a level-3 player attempting *Hijack* has plausibly
+already bought one for *Boost a Parked Car* and needs one more.
 
 ## `items.json`
 

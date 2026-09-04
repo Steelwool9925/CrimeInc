@@ -108,4 +108,62 @@ public class PlayerItemTests
 
         Assert.False(row.Equipped);
     }
+
+    // -------------------------------------------------------------------------
+    // Consuming copies (Tier 1 consumable item gate)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void Consuming_copies_decreases_the_quantity_owned()
+    {
+        var row = OwnedRow(copies: 5);
+
+        row.Consume(2);
+
+        Assert.Equal(3, row.Quantity);
+    }
+
+    [Fact]
+    public void Consuming_every_copy_leaves_the_row_at_zero()
+    {
+        var row = OwnedRow(copies: 2);
+
+        row.Consume(2);
+
+        Assert.Equal(0, row.Quantity);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Consuming_a_non_positive_number_of_copies_is_rejected(int count)
+    {
+        var row = OwnedRow(copies: 3);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => row.Consume(count));
+        Assert.Equal(3, row.Quantity);
+    }
+
+    [Fact]
+    public void Consuming_more_copies_than_are_held_is_rejected()
+    {
+        var row = OwnedRow(copies: 2);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => row.Consume(3));
+        Assert.Equal(2, row.Quantity);
+    }
+
+    [Fact]
+    public void Consuming_the_last_copy_of_an_equipped_item_leaves_it_reporting_as_equipped()
+    {
+        // Equip/Loadout is untouched by design — the item gate and the equip flag are independent
+        // questions about the same row. A gap Tier 3 may close, not this pass.
+        var row = OwnedRow(copies: 1);
+        row.Equip();
+
+        row.Consume(1);
+
+        Assert.Equal(0, row.Quantity);
+        Assert.True(row.Equipped);
+    }
 }

@@ -75,6 +75,20 @@ public sealed record JobRiskJson
 
     [JsonPropertyName("healthLossMax")]
     public int HealthLossMax { get; init; }
+
+    /// <summary>Success-chance gain per point of surplus held-item quantity. Defaults to 0 like its siblings.</summary>
+    [JsonPropertyName("itemSuccessChancePerSurplusPoint")]
+    public double ItemSuccessChancePerSurplusPoint { get; init; }
+}
+
+/// <summary>One item-quantity gate on a job: hold at least <see cref="MinQuantity"/> of <see cref="ItemId"/>.</summary>
+public sealed record JobItemRequirementJson
+{
+    [JsonPropertyName("itemId")]
+    public string ItemId { get; init; } = string.Empty;
+
+    [JsonPropertyName("minQuantity")]
+    public int MinQuantity { get; init; }
 }
 
 /// <summary>Pack-wide mastery thresholds, applied to every job.</summary>
@@ -125,6 +139,15 @@ public sealed record JobJson
     /// </summary>
     [JsonPropertyName("risk")]
     public JobRiskJson? Risk { get; init; }
+
+    /// <summary>
+    /// Item-quantity gates this job additionally requires, alongside <see cref="Requirements"/>.
+    /// <see langword="null"/> or absent means ungated — unlike <see cref="Requirements"/> and
+    /// <see cref="Risk"/>, every job that predates this field must keep working without it, so
+    /// omission here is the ordinary case rather than a named error.
+    /// </summary>
+    [JsonPropertyName("itemRequirements")]
+    public List<JobItemRequirementJson>? ItemRequirements { get; init; }
 }
 
 /// <summary>The reward block for one job. Cash is a range; XP is fixed.</summary>

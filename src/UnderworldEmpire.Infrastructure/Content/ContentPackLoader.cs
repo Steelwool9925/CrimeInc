@@ -84,10 +84,20 @@ public sealed class ContentPackLoader
     /// rather than one error per restart. Domain objects are constructed only after validation
     /// passes, so <see cref="Job.EnsureValid"/> never fires mid-collection and truncates the report.
     /// </remarks>
+    /// <param name="packId">The pack to load.</param>
+    /// <param name="itemCatalog">
+    ///     The pack's already-loaded item catalog, used to validate every job's
+    ///     <c>itemRequirements</c> reference a real weapon or armor item — items and jobs are
+    ///     otherwise independent catalogs, so this is the one place they cross. Omitted (or
+    ///     <see langword="null"/>), that cross-catalog check is skipped entirely, which is the right
+    ///     answer for a caller with no items to validate against (every test fixture that does not
+    ///     exercise item requirements). The real startup path (<c>AddInfrastructure</c>) always
+    ///     supplies one, loading items first for exactly this reason.
+    /// </param>
     /// <exception cref="ContentPackException">
     ///     Thrown when the file is missing, cannot be parsed, or fails validation.
     /// </exception>
-    public JobCatalog LoadJobs(string packId)
+    public JobCatalog LoadJobs(string packId, ItemCatalog? itemCatalog = null)
     {
         var jobsFile = Path.Combine(_contentRoot, packId, "jobs.json");
 
@@ -109,7 +119,7 @@ public sealed class ContentPackLoader
                 $"jobs.json for '{packId}' is not valid JSON: {ex.Message}", ex);
         }
 
-        ValidateJobs(file, packId);
+        ValidateJobs(file, packId, itemCatalog);
 
         var jobs = new List<Job>(file.Jobs.Count);
         foreach (var entry in file.Jobs)
@@ -132,6 +142,10 @@ public sealed class ContentPackLoader
                 DefenseRequirement = entry.Requirements.Defense,
                 BaseSuccessChance = entry.Risk!.BaseSuccessChance,
                 SuccessChancePerSurplusPoint = entry.Risk.SuccessChancePerSurplusPoint,
+                ItemRequirements = (entry.ItemRequirements ?? [])
+                    .Select(r => new ItemRequirement(r.ItemId, r.MinQuantity))
+                    .ToList(),
+                ItemSuccessChancePerSurplusPoint = entry.Risk.ItemSuccessChancePerSurplusPoint,
                 HealthLossMin = entry.Risk.HealthLossMin,
                 HealthLossMax = entry.Risk.HealthLossMax
             };
@@ -311,7 +325,7 @@ public sealed class ContentPackLoader
                 $"Content pack '{expectedId}' failed validation: {string.Join("; ", errors)}.");
     }
 
-    private static void ValidateJobs(JobCatalogFile file, string expectedPackId)
+    private static void ValidateJobs(JobCatalogFile file, string expectedPackId, ItemCatalog? itemCatalog)
     {
         var errors = new List<string>();
 
@@ -421,6 +435,52 @@ public sealed class ContentPackLoader
                     errors.Add(
                         $"{where}: 'risk.healthLossMax' ({job.Risk.HealthLossMax}) is below " +
                         $"'risk.healthLossMin' ({job.Risk.HealthLossMin})");
+
+                if (job.Risk.ItemSuccessChancePerSurplusPoint < 0.0)
+                    errors.Add(
+                        $"{where}: 'risk.itemSuccessChancePerSurplusPoint' must be >= 0, found " +
+                        $"{job.Risk.ItemSuccessChancePerSurplusPoint}");
+            }
+
+            // Absent means ungated — unlike 'requirements' and 'risk' above, every job that predates
+            // this field must keep working without it, so omission is the ordinary case here.
+            if (job.ItemRequirements is not null)
+            {
+                var seenItemIds = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var requirement in job.ItemRequirements)
+                {
+                    if (string.IsNullOrWhiteSpace(requirement.ItemId))
+                    {
+                        errors.Add($"{where}: 'itemRequirements' has an entry with a missing or empty 'itemId'");
+                        continue;
+                    }
+
+                    if (!seenItemIds.Add(requirement.ItemId))
+                        errors.Add($"{where}: 'itemRequirements' has a duplicate entry for '{requirement.ItemId}'");
+
+                    if (requirement.MinQuantity < 1)
+                        errors.Add(
+                            $"{where}: 'itemRequirements' entry for '{requirement.ItemId}' has " +
+                            $"'minQuantity' {requirement.MinQuantity}, must be >= 1");
+
+                    // The one place items and jobs cross: jobs.json cannot reference an item.json id
+                    // that does not exist, or that exists but is not equippable gear. Skipped when no
+                    // item catalog was supplied at all (see LoadJobs's itemCatalog remarks) rather
+                    // than when the id simply fails to resolve — those are different situations and
+                    // only the latter is a content mistake.
+                    else if (itemCatalog is not null)
+                    {
+                        var referenced = itemCatalog.Find(requirement.ItemId);
+                        if (referenced is null)
+                            errors.Add(
+                                $"{where}: 'itemRequirements' references unknown item id " +
+                                $"'{requirement.ItemId}'");
+                        else if (referenced.Slot == ItemSlot.Vehicle)
+                            errors.Add(
+                                $"{where}: 'itemRequirements' references '{requirement.ItemId}', which " +
+                                "is a vehicle — only weapon or armor items can gate a job");
+                    }
+                }
             }
         }
 
