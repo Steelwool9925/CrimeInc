@@ -161,6 +161,20 @@ public class JobTests
     }
 
     [Fact]
+    public void A_duplicate_item_requirement_for_the_same_item_is_rejected()
+    {
+        // Mirrors ContentPackLoader.ValidateJobs's duplicate check: a hand-built Job with two
+        // requirements for the same item would let JobService.Attempt build two ItemConsumption
+        // entries for it, and the second Consume() at the infrastructure layer would throw against a
+        // row the first already drained.
+        Assert.Throws<ArgumentException>(() => TestJob(itemRequirements:
+        [
+            new ItemRequirement("switchblade", 2),
+            new ItemRequirement("switchblade", 3)
+        ]).EnsureValid());
+    }
+
+    [Fact]
     public void A_negative_item_success_chance_per_surplus_point_is_rejected()
     {
         // Same reasoning as the stat gain: a negative rate would make spare stock actively harmful.

@@ -69,7 +69,7 @@ public sealed class JobService
         ArgumentNullException.ThrowIfNull(mastery);
         ArgumentNullException.ThrowIfNull(loadout);
 
-        var held = heldItemQuantities ?? EmptyHeldItems;
+        var held = heldItemQuantities ?? Job.EmptyHeldItems;
 
         // ---- Validate before mutating anything ----
 
@@ -181,9 +181,6 @@ public sealed class JobService
 
         return _random.NextInclusive(1, BasisPoints) <= chanceBasisPoints;
     }
-
-    /// <summary>Shared empty holding for an attempt whose caller has no items to report.</summary>
-    private static readonly IReadOnlyDictionary<string, int> EmptyHeldItems = new Dictionary<string, int>();
 
     /// <summary>
     /// A consolation share of <paramref name="amount"/>, rounded <b>up</b>.

@@ -131,8 +131,12 @@ public sealed record Job
         return ItemRequirements.All(r => held.GetValueOrDefault(r.ItemId) >= r.MinQuantity);
     }
 
-    /// <summary>Shared empty holding, so callers with nothing to report need not allocate one.</summary>
-    private static readonly IReadOnlyDictionary<string, int> EmptyHeldItems = new Dictionary<string, int>();
+    /// <summary>
+    /// Shared empty holding, so callers with nothing to report need not allocate one. Internal
+    /// (not private) so <see cref="JobService"/> can reuse the same instance rather than keeping its
+    /// own copy of a constant the two classes would otherwise need to keep in sync by hand.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, int> EmptyHeldItems = new Dictionary<string, int>();
 
     /// <summary>
     /// This job's success chance for a player with the given effective stats, under the pack-wide
@@ -241,6 +245,7 @@ public sealed record Job
         if (HealthLossMax < HealthLossMin)
             throw new ArgumentOutOfRangeException(nameof(HealthLossMax), HealthLossMax,
                 $"Job '{Id}' has healthLossMax below healthLossMin ({HealthLossMin}).");
+        var seenItemIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var requirement in ItemRequirements)
         {
             if (string.IsNullOrWhiteSpace(requirement.ItemId))
@@ -251,6 +256,14 @@ public sealed record Job
                 throw new ArgumentOutOfRangeException(nameof(ItemRequirements), requirement.MinQuantity,
                     $"Job '{Id}' has an item requirement for '{requirement.ItemId}' with a minimum " +
                     "quantity below 1.");
+            // A duplicate would let MeetsItemRequirements evaluate the same held quantity against
+            // the same minimum twice — harmless there, but JobService.Attempt would then build two
+            // ItemConsumption entries for the one item, and the second Consume() at the
+            // infrastructure layer would throw against a row already drained by the first.
+            if (!seenItemIds.Add(requirement.ItemId))
+                throw new ArgumentException(
+                    $"Job '{Id}' has a duplicate item requirement for '{requirement.ItemId}'.",
+                    nameof(ItemRequirements));
         }
         if (ItemSuccessChancePerSurplusPoint < 0.0)
             // Same reasoning as SuccessChancePerSurplusPoint: a negative gain would make surplus
