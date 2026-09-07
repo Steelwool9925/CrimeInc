@@ -1,8 +1,12 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using UnderworldEmpire.Domain;
+using UnderworldEmpire.Domain.Items;
 using UnderworldEmpire.Domain.Progression;
+using UnderworldEmpire.Infrastructure;
 
 namespace UnderworldEmpire.Tests;
 
@@ -66,6 +70,75 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
 
     private static async Task<JsonDocument> BodyAsync(HttpResponseMessage response) =>
         JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+    // -------------------------------------------------------------------------
+    // Helpers — item-gated jobs (Tier 1 consumable item gate, M2)
+    // -------------------------------------------------------------------------
+
+    /// <summary>The item-gated job's own stat gate: 9 attack / 7 defense, level 3.</summary>
+    private const string ItemGatedJob = "hijack-a-delivery-truck";
+
+    private const string GateItemId = "switchblade";
+
+    private async Task<Guid> PlayerIdForAsync(string token)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<GameDbContext>();
+        var player = await db.Players.AsNoTracking().FirstAsync(p => p.DeviceToken == token);
+        return player.Id;
+    }
+
+    /// <summary>
+    /// Sets a fresh guest player's level and stats directly, bypassing the grind — these tests are
+    /// about the item gate, not about re-proving levelling (already covered elsewhere).
+    /// </summary>
+    private async Task SetLevelAndStatsAsync(Guid playerId, int level, int attack, int defense)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<GameDbContext>();
+        var player = await db.Players.FirstAsync(p => p.Id == playerId);
+        player.Level = level;
+        player.Attack = attack;
+        player.Defense = defense;
+        await db.SaveChangesAsync();
+    }
+
+    private async Task GiveItemAsync(Guid playerId, string itemId, int quantity)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<GameDbContext>();
+        var holding = await db.PlayerItems.FindAsync(playerId, itemId);
+        if (holding is null)
+        {
+            holding = new PlayerItem { PlayerId = playerId, ItemId = itemId };
+            db.PlayerItems.Add(holding);
+        }
+        holding.AddCopies(quantity);
+        await db.SaveChangesAsync();
+    }
+
+    private async Task<int> HeldQuantityAsync(Guid playerId, string itemId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<GameDbContext>();
+        var holding = await db.PlayerItems.AsNoTracking()
+            .FirstOrDefaultAsync(h => h.PlayerId == playerId && h.ItemId == itemId);
+        return holding?.Quantity ?? 0;
+    }
+
+    /// <summary>
+    /// A fresh guest, already at the item-gated job's level and stat requirements, holding
+    /// <paramref name="switchbladeQuantity"/> of the item it gates on.
+    /// </summary>
+    private async Task<(string Token, Guid PlayerId)> ReadyForItemGatedJobAsync(int switchbladeQuantity)
+    {
+        var token = await NewGuestTokenAsync();
+        var playerId = await PlayerIdForAsync(token);
+        await SetLevelAndStatsAsync(playerId, level: 3, attack: 9, defense: 7);
+        if (switchbladeQuantity > 0)
+            await GiveItemAsync(playerId, GateItemId, switchbladeQuantity);
+        return (token, playerId);
+    }
 
     // -------------------------------------------------------------------------
     // Auth and lookup
@@ -549,5 +622,101 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
 
         Assert.True(result.GetProperty("succeeded").GetBoolean());
         Assert.Equal(0, result.GetProperty("healthLost").GetInt32());
+    }
+
+    // -------------------------------------------------------------------------
+    // Item-quantity gate (Tier 1 consumable item gate, M2) — the real transaction
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Attempting_the_item_gated_job_below_the_minimum_is_refused()
+    {
+        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 1);
+
+        var response = await DoJobAsync(token, ItemGatedJob);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task The_item_gate_refusal_spends_nothing_and_consumes_no_stock()
+    {
+        var (token, playerId) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 1);
+
+        using var before = await GetMeAsync(token);
+        long cashBefore = before.RootElement.GetProperty("cash").GetInt64();
+        int energyBefore = before.RootElement.GetProperty("energy").GetProperty("current").GetInt32();
+
+        await DoJobAsync(token, ItemGatedJob);
+
+        using var after = await GetMeAsync(token);
+        Assert.Equal(cashBefore, after.RootElement.GetProperty("cash").GetInt64());
+        Assert.Equal(energyBefore, after.RootElement.GetProperty("energy").GetProperty("current").GetInt32());
+        Assert.Equal(1, await HeldQuantityAsync(playerId, GateItemId));
+    }
+
+    [Fact]
+    public async Task Holding_exactly_the_minimum_is_admitted_and_attempting_it_succeeds()
+    {
+        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 2);
+
+        var response = await DoJobAsync(token, ItemGatedJob);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_successful_attempt_consumes_exactly_one_unit_from_stock()
+    {
+        // Holding 5, well above the minimum of 2 — proves the spend is the fixed rate, not
+        // proportional to the surplus that improved the odds.
+        var (token, playerId) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 5);
+
+        var response = await DoJobAsync(token, ItemGatedJob);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        Assert.Equal(4, await HeldQuantityAsync(playerId, GateItemId));
+    }
+
+    [Fact]
+    public async Task A_failed_item_gated_attempt_still_consumes_stock()
+    {
+        // True one-time-use: the item is spent on the attempt, not the outcome.
+        var (token, playerId) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 5);
+
+        using (_factory.Random.Scripted(10_000, 200, 3))
+        {
+            using var body = await BodyAsync(await DoJobAsync(token, ItemGatedJob));
+            Assert.False(body.RootElement.GetProperty("result").GetProperty("succeeded").GetBoolean());
+        }
+
+        Assert.Equal(4, await HeldQuantityAsync(playerId, GateItemId));
+    }
+
+    [Fact]
+    public async Task Stock_dropping_below_the_minimum_relocks_the_job()
+    {
+        var (token, playerId) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 2);
+
+        var first = await DoJobAsync(token, ItemGatedJob);
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(1, await HeldQuantityAsync(playerId, GateItemId));
+
+        // Refused: energy for a second attempt is plentiful, but stock is now below the minimum.
+        var second = await DoJobAsync(token, ItemGatedJob);
+        Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+        Assert.Equal(1, await HeldQuantityAsync(playerId, GateItemId));
+    }
+
+    [Fact]
+    public async Task Attempting_with_none_of_the_required_item_at_all_is_refused()
+    {
+        // No PlayerItems row for the item at all, as opposed to a row with too few — the gate must
+        // treat "never bought one" the same as "bought some, ran out".
+        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 0);
+
+        var response = await DoJobAsync(token, ItemGatedJob);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 }

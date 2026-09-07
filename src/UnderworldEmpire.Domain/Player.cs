@@ -20,6 +20,20 @@ public class Player
     /// </summary>
     public string DeviceToken { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The account username, lower-cased, if this player has claimed an account. Null for a
+    /// guest player who has never registered — the guest bootstrap flow is unaffected by this
+    /// being unset.
+    /// </summary>
+    public string? Username { get; set; }
+
+    /// <summary>
+    /// PBKDF2 password hash (see <c>PasswordHasher</c> in Infrastructure), set together with
+    /// <see cref="Username"/> when an account is claimed. Null exactly when <see cref="Username"/>
+    /// is null.
+    /// </summary>
+    public string? PasswordHash { get; set; }
+
     /// <summary>Action-gated resource; regenerates at <see cref="MeterRates.Energy"/>.</summary>
     public Meter Energy { get; set; } =
         Meter.Full(PlayerDefaults.EnergyMax, DateTimeOffset.UtcNow);

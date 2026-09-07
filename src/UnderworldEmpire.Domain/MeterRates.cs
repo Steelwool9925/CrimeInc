@@ -6,8 +6,12 @@ namespace UnderworldEmpire.Domain;
 /// </summary>
 public static class MeterRates
 {
-    /// <summary>Energy regenerates one point every five minutes.</summary>
-    public static readonly TimeSpan Energy = TimeSpan.FromMinutes(5);
+    /// <summary>
+    /// Energy regenerates one point every 90 seconds — a full 10-point bar refills from empty in
+    /// 15 minutes, matching a first-time player's first session rather than making them wait out
+    /// the original 5-minutes-a-point rate (50 minutes for a full refill).
+    /// </summary>
+    public static readonly TimeSpan Energy = TimeSpan.FromSeconds(90);
 
     /// <summary>Stamina regenerates one point every five minutes.</summary>
     public static readonly TimeSpan Stamina = TimeSpan.FromMinutes(5);

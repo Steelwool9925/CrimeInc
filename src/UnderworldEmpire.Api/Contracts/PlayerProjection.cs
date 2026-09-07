@@ -28,7 +28,8 @@ public static class PlayerProjection
             Xp: player.Xp,
             SkillPoints: player.SkillPoints,
             Attack: player.Attack,
-            Defense: player.Defense);
+            Defense: player.Defense,
+            Username: player.Username);
 
     /// <summary>Projects a computed <paramref name="loadout"/> onto the wire.</summary>
     /// <remarks>

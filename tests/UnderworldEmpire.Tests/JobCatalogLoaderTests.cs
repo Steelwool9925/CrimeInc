@@ -1,5 +1,6 @@
 using System.Text.Json;
 using UnderworldEmpire.Domain;
+using UnderworldEmpire.Domain.Items;
 using UnderworldEmpire.Domain.Jobs;
 using UnderworldEmpire.Infrastructure.Content;
 
@@ -83,9 +84,20 @@ public class JobCatalogLoaderTests : IDisposable
     private static object ValidJobRisk(
         double baseSuccessChance = 0.85,
         double successChancePerSurplusPoint = 0.01,
+        double itemSuccessChancePerSurplusPoint = 0.0,
         int healthLossMin = 0,
         int healthLossMax = 1) =>
-        new { baseSuccessChance, successChancePerSurplusPoint, healthLossMin, healthLossMax };
+        new
+        {
+            baseSuccessChance,
+            successChancePerSurplusPoint,
+            itemSuccessChancePerSurplusPoint,
+            healthLossMin,
+            healthLossMax
+        };
+
+    private static object ValidItemRequirement(string itemId = "switchblade", int minQuantity = 2) =>
+        new { itemId, minQuantity };
 
     private static Dictionary<string, object?> ValidJob(
         string id = "mug-a-tourist",
@@ -98,7 +110,8 @@ public class JobCatalogLoaderTests : IDisposable
         object? requirements = null,
         object? risk = null,
         bool omitRequirements = false,
-        bool omitRisk = false)
+        bool omitRisk = false,
+        List<object>? itemRequirements = null)
     {
         var job = new Dictionary<string, object?>
         {
@@ -115,9 +128,25 @@ public class JobCatalogLoaderTests : IDisposable
             job["requirements"] = requirements ?? ValidRequirements();
         if (!omitRisk)
             job["risk"] = risk ?? ValidJobRisk();
+        if (itemRequirements is not null)
+            job["itemRequirements"] = itemRequirements;
 
         return job;
     }
+
+    /// <summary>An item catalog with one weapon (id "switchblade") and one vehicle, for cross-catalog tests.</summary>
+    private static ItemCatalog TestItemCatalog() => new([
+        new Item
+        {
+            Id = "switchblade", Name = "Switchblade", Slot = ItemSlot.Weapon,
+            LevelRequirement = 1, Price = 10, Attack = 1, Defense = 0
+        },
+        new Item
+        {
+            Id = "stolen-sedan", Name = "Stolen Sedan", Slot = ItemSlot.Vehicle,
+            LevelRequirement = 1, Price = 10, Attack = 1, Defense = 0
+        }
+    ]);
 
     // -------------------------------------------------------------------------
     // Happy path
@@ -576,6 +605,136 @@ public class JobCatalogLoaderTests : IDisposable
         Assert.Contains("'risk' is missing", ex.Message);
         Assert.Contains("'requirements' is missing", ex.Message);
         Assert.Contains("'id' is missing or empty", ex.Message);
+    }
+
+    // -------------------------------------------------------------------------
+    // Item requirements (Tier 1 consumable item gate) — the one cross-catalog check
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void A_job_with_no_item_requirements_field_loads_ungated_by_items()
+    {
+        // Absent is the ordinary case here — every job written before this field existed has none.
+        WriteJobs("crime", ValidCatalog());
+
+        var job = Loader().LoadJobs("crime", TestItemCatalog()).Jobs.Single();
+
+        Assert.Empty(job.ItemRequirements);
+        Assert.Equal(0.0, job.ItemSuccessChancePerSurplusPoint, precision: 10);
+    }
+
+    [Fact]
+    public void Loaded_jobs_carry_their_item_requirements_and_item_surplus_rate()
+    {
+        WriteJobs("crime", ValidCatalog(ValidJob(
+            itemRequirements: [ValidItemRequirement(itemId: "switchblade", minQuantity: 3)],
+            risk: ValidJobRisk(itemSuccessChancePerSurplusPoint: 0.02))));
+
+        var job = Loader().LoadJobs("crime", TestItemCatalog()).Jobs.Single();
+
+        var requirement = Assert.Single(job.ItemRequirements);
+        Assert.Equal("switchblade", requirement.ItemId);
+        Assert.Equal(3, requirement.MinQuantity);
+        Assert.Equal(0.02, job.ItemSuccessChancePerSurplusPoint, precision: 10);
+    }
+
+    [Fact]
+    public void An_item_requirement_naming_an_unknown_item_id_throws()
+    {
+        WriteJobs("crime", ValidCatalog(ValidJob(
+            itemRequirements: [ValidItemRequirement(itemId: "no-such-item")])));
+
+        var ex = Assert.Throws<ContentPackException>(
+            () => Loader().LoadJobs("crime", TestItemCatalog()));
+
+        Assert.Contains("unknown item id 'no-such-item'", ex.Message);
+    }
+
+    [Fact]
+    public void An_item_requirement_naming_a_vehicle_throws()
+    {
+        // Only weapon/armor items can gate a job — a vehicle is a different kind of gear entirely.
+        WriteJobs("crime", ValidCatalog(ValidJob(
+            itemRequirements: [ValidItemRequirement(itemId: "stolen-sedan")])));
+
+        var ex = Assert.Throws<ContentPackException>(
+            () => Loader().LoadJobs("crime", TestItemCatalog()));
+
+        Assert.Contains("'stolen-sedan', which is a vehicle", ex.Message);
+    }
+
+    [Fact]
+    public void An_unknown_item_id_is_not_checked_when_no_item_catalog_is_supplied()
+    {
+        // LoadJobs's itemCatalog parameter is optional precisely so a caller with nothing to
+        // validate against (most of this file's fixtures) is not forced to construct one.
+        WriteJobs("crime", ValidCatalog(ValidJob(
+            itemRequirements: [ValidItemRequirement(itemId: "no-such-item")])));
+
+        var job = Loader().LoadJobs("crime").Jobs.Single();
+
+        Assert.Single(job.ItemRequirements);
+    }
+
+    [Fact]
+    public void An_item_requirement_with_a_blank_item_id_throws()
+    {
+        WriteJobs("crime", ValidCatalog(ValidJob(
+            itemRequirements: [ValidItemRequirement(itemId: "")])));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+
+        Assert.Contains("missing or empty 'itemId'", ex.Message);
+    }
+
+    [Fact]
+    public void An_item_requirement_with_a_minimum_quantity_below_one_throws()
+    {
+        WriteJobs("crime", ValidCatalog(ValidJob(
+            itemRequirements: [ValidItemRequirement(minQuantity: 0)])));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+
+        Assert.Contains("'minQuantity' 0, must be >= 1", ex.Message);
+    }
+
+    [Fact]
+    public void A_duplicate_item_requirement_for_the_same_item_throws()
+    {
+        WriteJobs("crime", ValidCatalog(ValidJob(
+            itemRequirements: [ValidItemRequirement(), ValidItemRequirement()])));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+
+        Assert.Contains("duplicate entry for 'switchblade'", ex.Message);
+    }
+
+    [Fact]
+    public void A_negative_item_success_chance_per_surplus_point_throws()
+    {
+        WriteJobs("crime", ValidCatalog(ValidJob(
+            risk: ValidJobRisk(itemSuccessChancePerSurplusPoint: -0.01))));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+
+        Assert.Contains("'risk.itemSuccessChancePerSurplusPoint' must be >= 0", ex.Message);
+    }
+
+    [Fact]
+    public void Real_crime_catalog_validates_hijack_a_delivery_trucks_switchblade_requirement()
+    {
+        // Integration proof: the real jobs.json + items.json pairing loads and cross-validates
+        // cleanly, and the demo content is wired the way the README documents it.
+        var realLoader = new ContentPackLoader(FindRepoContentRoot());
+        var itemCatalog = realLoader.LoadItems("crime");
+
+        var job = realLoader.LoadJobs("crime", itemCatalog).Jobs
+            .Single(j => j.Id == "hijack-a-delivery-truck");
+
+        var requirement = Assert.Single(job.ItemRequirements);
+        Assert.Equal("switchblade", requirement.ItemId);
+        Assert.Equal(2, requirement.MinQuantity);
+        Assert.True(job.ItemSuccessChancePerSurplusPoint > 0.0);
     }
 
     [Fact]

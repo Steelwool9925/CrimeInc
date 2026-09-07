@@ -69,6 +69,12 @@ class AppState extends ChangeNotifier {
   String assetUrl(String key) => _apiClient.assetUrl(key);
 
   List<Job> get jobs => _jobs;
+
+  /// Total completions across every job, for the Rap Sheet's "Jobs Done" stat. A pure fold over
+  /// [jobs] — no new endpoint: `GET /jobs` already returns each job's `mastery.completions`.
+  int get totalJobsCompleted =>
+      _jobs.fold(0, (sum, job) => sum + job.mastery.completions);
+
   bool get jobsLoading => _jobsLoading;
   String? get jobsError => _jobsError;
   String? get jobInFlight => _jobInFlight;
@@ -114,23 +120,130 @@ class AppState extends ChangeNotifier {
     try {
       final storedToken = await _tokenStore.read();
       final result = await _apiClient.session(storedToken);
-      _deviceToken = result.deviceToken;
-      await _tokenStore.write(_deviceToken!);
-
-      try {
-        _contentPack = await _apiClient.contentPack();
-      } catch (_) {
-        // best-effort; keep null / defaults
-      }
-
-      _me = await _apiClient.me(_deviceToken!);
-      _status = LoadStatus.ready;
+      await _finishAuth(result.deviceToken);
     } catch (e) {
       _status = LoadStatus.error;
       _errorMessage = e.toString();
     }
 
     notifyListeners();
+  }
+
+  /// Shared tail of every path that ends in a usable [deviceToken] — the guest bootstrap above,
+  /// and [login] below. Loads the content pack (best-effort) and the player projection, and only
+  /// once the player projection actually succeeds does it commit [_deviceToken] and persist the
+  /// token to storage.
+  ///
+  /// The order is deliberate: [deviceToken] itself is already known-good by the time this runs
+  /// (session()/login() already exchanged it with the server), but *this device having a usable
+  /// save* is only confirmed once `me()` succeeds. Persisting the token before that point would
+  /// mean a transient failure here — network blip on `me()`, say — leaves the token saved to disk
+  /// even though the caller (`login()`) reports failure to the UI. On [login] specifically that is
+  /// not a cosmetic inconsistency: the player just typed a password, was told it didn't work, and
+  /// would otherwise be silently logged into that very account on the next launch, because
+  /// `_resolveStartup()` finds the already-written token and takes the returning-player fast path
+  /// without ever having shown a success confirmation.
+  Future<void> _finishAuth(String deviceToken) async {
+    try {
+      _contentPack = await _apiClient.contentPack();
+    } catch (_) {
+      // best-effort; keep null / defaults
+    }
+
+    _me = await _apiClient.me(deviceToken);
+
+    _deviceToken = deviceToken;
+    await _tokenStore.write(deviceToken);
+    _status = LoadStatus.ready;
+  }
+
+  bool _loggingIn = false;
+  String? _loginError;
+
+  bool get loggingIn => _loggingIn;
+
+  /// A message for [LoginScreen] to show, or null between attempts. Cleared at the start of every
+  /// call to [login].
+  String? get loginError => _loginError;
+
+  /// Exchanges [username]/[password] for the account's device token and finishes auth exactly
+  /// like a returning guest's [bootstrap] does from that point on — same [_finishAuth] tail, so
+  /// there is only one place that logic can drift.
+  ///
+  /// Returns whether it succeeded. [loginError] carries a message to show on failure; the server
+  /// sends only a stable reason token (today, always `invalidCredentials` — this endpoint never
+  /// distinguishes an unknown username from a wrong password, deliberately), so the display text
+  /// is chosen here, the same translation this codebase already does for item/property refusals.
+  Future<bool> login(String username, String password) async {
+    _loggingIn = true;
+    _loginError = null;
+    notifyListeners();
+
+    try {
+      final result = await _apiClient.login(username, password);
+      await _finishAuth(result.deviceToken);
+      _loggingIn = false;
+      notifyListeners();
+      return true;
+    } on JobRefusedException {
+      _loginError = 'Incorrect username or password.';
+    } catch (_) {
+      _loginError = 'Could not reach the server. Check your connection and try again.';
+    }
+
+    _loggingIn = false;
+    notifyListeners();
+    return false;
+  }
+
+  bool _registeringAccount = false;
+  String? _registerAccountError;
+
+  bool get registeringAccount => _registeringAccount;
+
+  /// A message for [RegisterScreen] to show, or null between attempts. Cleared at the start of
+  /// every call to [registerAccount].
+  String? get registerAccountError => _registerAccountError;
+
+  /// Claims the current device's player with a username/password — see
+  /// [ApiClient.registerAccount]. Returns whether it succeeded; on success [me] is updated from
+  /// the server's response, so `me.username` reads non-null immediately without a follow-up read.
+  ///
+  /// Requires an existing session ([_deviceToken] set by [bootstrap]/[login] already having run) —
+  /// this screen is only ever reached from Profile, which is only ever reached once the app is
+  /// past its startup gate. Returns false without calling the server if that invariant is somehow
+  /// violated, the same defensive shape [loadJobs] and friends already use for "no token yet."
+  Future<bool> registerAccount(String username, String password) async {
+    final token = _deviceToken;
+    if (token == null) return false;
+
+    _registeringAccount = true;
+    _registerAccountError = null;
+    notifyListeners();
+
+    try {
+      _me = await _apiClient.registerAccount(token, username, password);
+      _registeringAccount = false;
+      notifyListeners();
+      return true;
+    } on JobRefusedException catch (e) {
+      // The server's reason is a stable token, not display text (identity-session.md's own
+      // convention) — translated here, the same way item/property refusals already are.
+      _registerAccountError = switch (e.reason) {
+        'alreadyClaimed' => 'This device already has an account.',
+        'usernameInvalid' =>
+          'That username isn\'t allowed — use 3-32 lowercase letters, digits, underscores or hyphens.',
+        'passwordTooWeak' => 'Password must be at least 8 characters.',
+        'usernameTaken' => 'That username is already taken.',
+        _ => 'Could not create the account.',
+      };
+    } catch (_) {
+      _registerAccountError = 'Could not reach the server. Check your connection and try again.';
+    }
+
+    _registeringAccount = false;
+    notifyListeners();
+    return false;
   }
 
   Future<void> refresh() async {
@@ -211,6 +324,7 @@ class AppState extends ChangeNotifier {
         'energy' => 'Not enough energy.',
         'level' => 'Your level is too low for that job.',
         'stats' => 'Your attack or defense is too low for that job.',
+        'items' => 'You do not have enough of a required item for that job.',
         _ => e.detail,
       };
     } catch (e) {
@@ -221,15 +335,22 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// Folds a job outcome into the cached catalog so the list reflects the new mastery and energy
-  /// without a second network call.
+  /// Folds a job outcome into the cached catalog so the list reflects the new mastery, item stock
+  /// and energy without a second network call.
   void _applyOutcomeToCatalog(DoJobResult outcome) {
     final energy = _me?.energy.current;
     final level = _me?.level;
 
+    // Keyed by item id so the fourth rule below is an O(1) lookup per requirement rather than a
+    // nested scan. Empty for the jobs that opt into no item gate, in which case every requirement
+    // list below is empty too and this is never consulted.
+    final consumedByItemId = {
+      for (final consumed in outcome.result.itemsConsumed) consumed.itemId: consumed,
+    };
+
     _jobs = _jobs.map((job) {
-      final mastery =
-          job.id == outcome.result.jobId ? outcome.result.mastery : job.mastery;
+      final isAttemptedJob = job.id == outcome.result.jobId;
+      final mastery = isAttemptedJob ? outcome.result.mastery : job.mastery;
 
       final meetsLevel = level == null || level >= job.levelRequirement;
       final affords = energy == null || energy >= job.energyCost;
@@ -241,11 +362,34 @@ class AppState extends ChangeNotifier {
       // a 'stats' lock and light up a button the server will refuse.
       final wasStatLocked = job.unavailableReason == 'stats';
 
+      // Fourth carry-forward rule: item stock. Unlike stats, the just-attempted job's outcome names
+      // its exact new remaining quantity per requirement (ItemConsumption.quantityRemaining), so
+      // this one is recomputed precisely rather than carried forward blind — but only for the job
+      // that was actually attempted; a different job referencing the same item id (not in the
+      // shipped pack, but the domain allows it) is not touched, matching Tier 1's scope. See the
+      // Tier 2 sketch for a general reconciliation instead of this fourth ad-hoc rule.
+      final itemRequirements = isAttemptedJob
+          ? job.itemRequirements.map((requirement) {
+              final consumed = consumedByItemId[requirement.itemId];
+              if (consumed == null) return requirement;
+
+              return JobItemRequirement(
+                itemId: requirement.itemId,
+                minQuantity: requirement.minQuantity,
+                held: consumed.quantityRemaining,
+                met: consumed.quantityRemaining >= requirement.minQuantity,
+              );
+            }).toList(growable: false)
+          : job.itemRequirements;
+      final meetsItems = itemRequirements.every((requirement) => requirement.met);
+
       final reason = !meetsLevel
           ? 'level'
           : wasStatLocked
               ? 'stats'
-              : (!affords ? 'energy' : null);
+              : (!meetsItems
+                  ? 'items'
+                  : (!affords ? 'energy' : null));
 
       return Job(
         id: job.id,
@@ -259,6 +403,7 @@ class AppState extends ChangeNotifier {
         xp: job.xp,
         attackRequirement: job.attackRequirement,
         defenseRequirement: job.defenseRequirement,
+        itemRequirements: itemRequirements,
         successChance: job.successChance,
         mastery: mastery,
         canAttempt: reason == null,

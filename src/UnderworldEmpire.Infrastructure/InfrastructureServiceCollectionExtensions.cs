@@ -53,8 +53,11 @@ public static class InfrastructureServiceCollectionExtensions
         var contentRoot = configuration["Content:Root"];
         var loader = new ContentPackLoader(contentRoot);
         var pack = loader.Load(BuildInfo.DefaultContentPack);
-        var jobCatalog = loader.LoadJobs(BuildInfo.DefaultContentPack);
+        // Items load before jobs so a job's itemRequirements can be checked against real item ids —
+        // the one place these two otherwise-independent catalogs cross. See LoadJobs's itemCatalog
+        // remarks.
         var itemCatalog = loader.LoadItems(BuildInfo.DefaultContentPack);
+        var jobCatalog = loader.LoadJobs(BuildInfo.DefaultContentPack, itemCatalog);
         var propertyCatalog = loader.LoadProperties(BuildInfo.DefaultContentPack);
         services.AddSingleton<IContentPackProvider>(
             new ContentPackProvider(

@@ -1,7 +1,11 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using UnderworldEmpire.Domain;
+using UnderworldEmpire.Domain.Items;
+using UnderworldEmpire.Infrastructure;
 
 namespace UnderworldEmpire.Tests;
 
@@ -12,10 +16,12 @@ namespace UnderworldEmpire.Tests;
 public class JobEndpointTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly HttpClient _client;
+    private readonly CustomWebApplicationFactory _factory;
 
     public JobEndpointTests(CustomWebApplicationFactory factory)
     {
         factory.MigrateDb();
+        _factory = factory;
         _client = factory.CreateClient();
     }
 
@@ -294,5 +300,186 @@ public class JobEndpointTests : IClassFixture<CustomWebApplicationFactory>
         var transport = Job(doc, "rob-an-armored-transport");
 
         Assert.Equal("level", transport.GetProperty("unavailableReason").GetString());
+    }
+
+    // -------------------------------------------------------------------------
+    // Item-quantity gate read-path parity (Tier 1 consumable item gate, M3)
+    // -------------------------------------------------------------------------
+
+    private const string ItemGatedJob = "hijack-a-delivery-truck";
+    private const string GateItemId = "switchblade";
+
+    private async Task<Guid> PlayerIdForAsync(string token)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<GameDbContext>();
+        var player = await db.Players.AsNoTracking().FirstAsync(p => p.DeviceToken == token);
+        return player.Id;
+    }
+
+    /// <summary>Sets level and stats directly — these tests are about the item gate, not the grind.</summary>
+    private async Task SetLevelAndStatsAsync(Guid playerId, int level, int attack, int defense)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<GameDbContext>();
+        var player = await db.Players.FirstAsync(p => p.Id == playerId);
+        player.Level = level;
+        player.Attack = attack;
+        player.Defense = defense;
+        await db.SaveChangesAsync();
+    }
+
+    private async Task GiveItemAsync(Guid playerId, string itemId, int quantity)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<GameDbContext>();
+        var holding = await db.PlayerItems.FindAsync(playerId, itemId);
+        if (holding is null)
+        {
+            holding = new PlayerItem { PlayerId = playerId, ItemId = itemId };
+            db.PlayerItems.Add(holding);
+        }
+        holding.AddCopies(quantity);
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>A fresh guest, already at the item-gated job's level and stat requirements.</summary>
+    private async Task<(string Token, Guid PlayerId)> ReadyForItemGatedJobAsync(int switchbladeQuantity = 0)
+    {
+        var token = await NewGuestTokenAsync();
+        var playerId = await PlayerIdForAsync(token);
+        await SetLevelAndStatsAsync(playerId, level: 3, attack: 9, defense: 7);
+        if (switchbladeQuantity > 0)
+            await GiveItemAsync(playerId, GateItemId, switchbladeQuantity);
+        return (token, playerId);
+    }
+
+    [Fact]
+    public async Task A_job_with_no_item_requirements_reports_an_empty_array()
+    {
+        var token = await NewGuestTokenAsync();
+
+        using var doc = await GetJobsAsync(token);
+        var corner = Job(doc, "shake-down-corner-store");
+
+        Assert.Empty(corner.GetProperty("itemRequirements").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task An_item_gated_job_reports_its_requirement_content_and_the_callers_holding()
+    {
+        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 1);
+
+        using var doc = await GetJobsAsync(token);
+        var requirement = Job(doc, ItemGatedJob).GetProperty("itemRequirements")[0];
+
+        Assert.Equal(GateItemId, requirement.GetProperty("itemId").GetString());
+        Assert.Equal(2, requirement.GetProperty("minQuantity").GetInt32());
+        Assert.Equal(1, requirement.GetProperty("held").GetInt32());
+        Assert.False(requirement.GetProperty("met").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Holding_the_minimum_quantity_marks_the_requirement_met()
+    {
+        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 2);
+
+        using var doc = await GetJobsAsync(token);
+        var requirement = Job(doc, ItemGatedJob).GetProperty("itemRequirements")[0];
+
+        Assert.True(requirement.GetProperty("met").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Never_holding_the_item_reports_zero_held_not_a_missing_field()
+    {
+        // No PlayerItems row at all, as opposed to a row with a low quantity.
+        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 0);
+
+        using var doc = await GetJobsAsync(token);
+        var requirement = Job(doc, ItemGatedJob).GetProperty("itemRequirements")[0];
+
+        Assert.Equal(0, requirement.GetProperty("held").GetInt32());
+        Assert.False(requirement.GetProperty("met").GetBoolean());
+    }
+
+    [Fact]
+    public async Task An_item_gated_job_below_the_minimum_is_locked_with_reason_items()
+    {
+        // Level and stats already cleared, so the item gate is the only reason left.
+        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 1);
+
+        using var doc = await GetJobsAsync(token);
+        var hijack = Job(doc, ItemGatedJob);
+
+        Assert.False(hijack.GetProperty("canAttempt").GetBoolean());
+        Assert.Equal("items", hijack.GetProperty("unavailableReason").GetString());
+    }
+
+    [Fact]
+    public async Task Holding_enough_of_the_required_item_unlocks_the_job()
+    {
+        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 2);
+
+        using var doc = await GetJobsAsync(token);
+        var hijack = Job(doc, ItemGatedJob);
+
+        Assert.True(hijack.GetProperty("canAttempt").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, hijack.GetProperty("unavailableReason").ValueKind);
+    }
+
+    [Fact]
+    public async Task The_stats_reason_still_outranks_the_items_reason()
+    {
+        // Precedence is level -> stats -> items -> energy: a player short on both stats and items
+        // must be told the stats reason, the one that takes longer to fix.
+        var token = await NewGuestTokenAsync();
+        var playerId = await PlayerIdForAsync(token);
+        await SetLevelAndStatsAsync(playerId, level: 3, attack: 0, defense: 0); // fails stats, no items
+
+        using var doc = await GetJobsAsync(token);
+        var hijack = Job(doc, ItemGatedJob);
+
+        Assert.Equal("stats", hijack.GetProperty("unavailableReason").GetString());
+    }
+
+    [Fact]
+    public async Task The_items_reason_outranks_the_energy_reason()
+    {
+        // A player with plenty of energy but short on items must see "items", not "energy" — items
+        // sits ahead of energy in the precedence order (both are "go buy something" fixes).
+        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 0);
+
+        using var doc = await GetJobsAsync(token);
+        var hijack = Job(doc, ItemGatedJob);
+
+        Assert.Equal(PlayerDefaults.EnergyMax, doc.RootElement.GetProperty("currentEnergy").GetInt32());
+        Assert.Equal("items", hijack.GetProperty("unavailableReason").GetString());
+    }
+
+    [Fact]
+    public async Task The_reported_chance_includes_the_item_surplus_term()
+    {
+        // Exactly at the stat requirement (no stat surplus), holding 3 above the item minimum of 2:
+        // 0.65 base + 3 * 0.01 item-surplus rate = 0.68. Computed by the same Job.SuccessChanceFor
+        // the attempt would roll against, so this figure cannot drift from what an attempt gets.
+        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 5);
+
+        using var doc = await GetJobsAsync(token);
+
+        Assert.Equal(0.68, Job(doc, ItemGatedJob).GetProperty("successChance").GetDouble(), precision: 10);
+    }
+
+    [Fact]
+    public async Task The_reported_chance_ignores_item_surplus_when_the_item_gate_is_not_met()
+    {
+        // Below the minimum: SuccessChanceFor still reports a figure (GET /jobs shows odds even for a
+        // job the caller cannot attempt), but the item-surplus term is necessarily zero or negative-
+        // floored since there is no surplus to speak of below the floor itself.
+        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 0);
+
+        using var doc = await GetJobsAsync(token);
+
+        Assert.Equal(0.65, Job(doc, ItemGatedJob).GetProperty("successChance").GetDouble(), precision: 10);
     }
 }

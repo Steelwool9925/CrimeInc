@@ -140,6 +140,20 @@ public class JobActionService
         // price of gear mattering outside combat.
         var loadout = await BuildLoadoutAsync(player, cancellationToken);
 
+        // A third read, but only for a job that opts into an item gate — skipped entirely for the 6
+        // jobs with none, so query count only grows where the feature is actually used. Tracked (not
+        // AsNoTracking): these rows get decremented below once the attempt is known to be applied.
+        List<PlayerItem> trackedHoldings = [];
+        IReadOnlyDictionary<string, int>? heldItemQuantities = null;
+        if (job.ItemRequirements.Count > 0)
+        {
+            var itemIds = job.ItemRequirements.Select(r => r.ItemId).ToList();
+            trackedHoldings = await _db.PlayerItems
+                .Where(h => h.PlayerId == playerId && itemIds.Contains(h.ItemId))
+                .ToListAsync(cancellationToken);
+            heldItemQuantities = trackedHoldings.ToDictionary(h => h.ItemId, h => h.Quantity);
+        }
+
         var result = _jobs.Attempt(
             player,
             job,
@@ -151,7 +165,8 @@ public class JobActionService
                 catalog.MaxSuccessChance,
                 catalog.ConsolationCashFraction,
                 catalog.ConsolationXpFraction),
-            nowUtc);
+            nowUtc,
+            heldItemQuantities);
 
         if (!result.WasApplied)
         {
@@ -163,8 +178,20 @@ public class JobActionService
             return new JobActionResult(JobActionError.None, result.Failure, null);
         }
 
+        // Every entry in ItemsConsumed names a requirement the gate already proved is held, so the
+        // matching tracked row is guaranteed to exist here — the gate cannot pass without it.
+        foreach (var consumption in result.Outcome!.ItemsConsumed)
+        {
+            var holding = trackedHoldings.First(h => h.ItemId == consumption.ItemId);
+            holding.Consume(consumption.QuantityConsumed);
+        }
+
         try
         {
+            // No new transaction and no new concurrency handling: this decrement rides in the same
+            // SaveChangesAsync as Players/PlayerJobMasteries, which already writes Players.Energy on
+            // every applied attempt — the existing xmin token on that row already serializes two
+            // concurrent attempts by the same player, this child-row write included.
             await _db.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)

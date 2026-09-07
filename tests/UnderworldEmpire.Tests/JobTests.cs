@@ -21,6 +21,8 @@ public class JobTests
         int defenseRequirement = 0,
         double baseSuccessChance = 1.0,
         double successChancePerSurplusPoint = 0.0,
+        IReadOnlyList<ItemRequirement>? itemRequirements = null,
+        double itemSuccessChancePerSurplusPoint = 0.0,
         int healthLossMin = 0,
         int healthLossMax = 0) => new()
         {
@@ -35,6 +37,8 @@ public class JobTests
             DefenseRequirement = defenseRequirement,
             BaseSuccessChance = baseSuccessChance,
             SuccessChancePerSurplusPoint = successChancePerSurplusPoint,
+            ItemRequirements = itemRequirements ?? [],
+            ItemSuccessChancePerSurplusPoint = itemSuccessChancePerSurplusPoint,
             HealthLossMin = healthLossMin,
             HealthLossMax = healthLossMax
         };
@@ -47,6 +51,13 @@ public class JobTests
         successChancePerSurplusPoint: 0.01,
         healthLossMin: 0,
         healthLossMax: 3);
+
+    /// <summary>A job gated on holding at least 2 switchblades, +1% success per surplus item.</summary>
+    private static Job ItemGatedJob(int minQuantity = 2, double itemSuccessChancePerSurplusPoint = 0.01) =>
+        TestJob(
+            baseSuccessChance: 0.75,
+            itemRequirements: [new ItemRequirement("switchblade", minQuantity)],
+            itemSuccessChancePerSurplusPoint: itemSuccessChancePerSurplusPoint);
 
     // -------------------------------------------------------------------------
     // Defaults
@@ -63,6 +74,8 @@ public class JobTests
         Assert.Equal(0, job.AttackRequirement);
         Assert.Equal(0, job.DefenseRequirement);
         Assert.Equal(0.0, job.SuccessChancePerSurplusPoint);
+        Assert.Empty(job.ItemRequirements);
+        Assert.Equal(0.0, job.ItemSuccessChancePerSurplusPoint);
         Assert.Equal(0, job.HealthLossMin);
         Assert.Equal(0, job.HealthLossMax);
     }
@@ -125,6 +138,111 @@ public class JobTests
     {
         Assert.Throws<ArgumentOutOfRangeException>(
             () => TestJob(healthLossMin: 5, healthLossMax: 4).EnsureValid());
+    }
+
+    [Fact]
+    public void A_valid_item_gated_job_passes_validation()
+    {
+        ItemGatedJob().EnsureValid();
+    }
+
+    [Fact]
+    public void An_item_requirement_with_a_blank_item_id_is_rejected()
+    {
+        Assert.Throws<ArgumentException>(
+            () => TestJob(itemRequirements: [new ItemRequirement("", 2)]).EnsureValid());
+    }
+
+    [Fact]
+    public void An_item_requirement_with_a_minimum_quantity_below_one_is_rejected()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => TestJob(itemRequirements: [new ItemRequirement("switchblade", 0)]).EnsureValid());
+    }
+
+    [Fact]
+    public void A_duplicate_item_requirement_for_the_same_item_is_rejected()
+    {
+        // Mirrors ContentPackLoader.ValidateJobs's duplicate check: a hand-built Job with two
+        // requirements for the same item would let JobService.Attempt build two ItemConsumption
+        // entries for it, and the second Consume() at the infrastructure layer would throw against a
+        // row the first already drained.
+        Assert.Throws<ArgumentException>(() => TestJob(itemRequirements:
+        [
+            new ItemRequirement("switchblade", 2),
+            new ItemRequirement("switchblade", 3)
+        ]).EnsureValid());
+    }
+
+    [Fact]
+    public void A_negative_item_success_chance_per_surplus_point_is_rejected()
+    {
+        // Same reasoning as the stat gain: a negative rate would make spare stock actively harmful.
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => TestJob(itemSuccessChancePerSurplusPoint: -0.01).EnsureValid());
+    }
+
+    // -------------------------------------------------------------------------
+    // MeetsItemRequirements
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void A_job_with_no_item_requirements_admits_anyone()
+    {
+        Assert.True(TestJob().MeetsItemRequirements(new Dictionary<string, int>()));
+    }
+
+    [Fact]
+    public void A_job_with_no_item_requirements_admits_a_null_holding()
+    {
+        // A caller with nothing to report should not need to construct a dictionary just to ask.
+        Assert.True(TestJob().MeetsItemRequirements(null));
+    }
+
+    [Fact]
+    public void Holding_exactly_the_minimum_quantity_meets_the_gate()
+    {
+        // The gate is >=, not >, matching MeetsStatRequirements: content saying "2" admits a player
+        // holding exactly 2.
+        Assert.True(ItemGatedJob(minQuantity: 2).MeetsItemRequirements(
+            new Dictionary<string, int> { ["switchblade"] = 2 }));
+    }
+
+    [Fact]
+    public void Holding_less_than_the_minimum_quantity_fails_the_gate()
+    {
+        Assert.False(ItemGatedJob(minQuantity: 2).MeetsItemRequirements(
+            new Dictionary<string, int> { ["switchblade"] = 1 }));
+    }
+
+    [Fact]
+    public void Holding_none_of_the_required_item_fails_the_gate()
+    {
+        Assert.False(ItemGatedJob(minQuantity: 2).MeetsItemRequirements(new Dictionary<string, int>()));
+    }
+
+    [Fact]
+    public void Unrelated_held_items_do_not_satisfy_a_different_requirement()
+    {
+        Assert.False(ItemGatedJob(minQuantity: 2).MeetsItemRequirements(
+            new Dictionary<string, int> { ["brass-knuckles"] = 50 }));
+    }
+
+    [Fact]
+    public void A_job_with_multiple_item_requirements_needs_every_one_met()
+    {
+        var job = TestJob(itemRequirements:
+        [
+            new ItemRequirement("switchblade", 2),
+            new ItemRequirement("kevlar-vest", 1)
+        ]);
+
+        // Only one of the two requirements met.
+        Assert.False(job.MeetsItemRequirements(
+            new Dictionary<string, int> { ["switchblade"] = 2 }));
+
+        Assert.True(job.MeetsItemRequirements(
+            new Dictionary<string, int> { ["switchblade"] = 2, ["kevlar-vest"] = 1 }));
     }
 
     // -------------------------------------------------------------------------
@@ -241,6 +359,82 @@ public class JobTests
         // The exact collision that caught this: TestJob's default 1.0 under the shipped 0.95.
         var chance = TestJob().SuccessChanceFor(
             effectiveAttack: 5, effectiveDefense: 5, maxSuccessChance: 0.95);
+
+        Assert.Equal(0.95, chance, precision: 10);
+    }
+
+    // -------------------------------------------------------------------------
+    // SuccessChanceFor — item surplus
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void Omitting_held_items_computes_exactly_what_it_always_has()
+    {
+        // No heldItemQuantities argument at all — every pre-existing call site (and every job with
+        // no ItemRequirements) must see the identical figure it always has.
+        var chance = RiskyJob().SuccessChanceFor(
+            effectiveAttack: 9, effectiveDefense: 5, maxSuccessChance: 0.95);
+
+        Assert.Equal(0.81, chance, precision: 10);
+    }
+
+    [Fact]
+    public void Item_surplus_raises_the_chance_alongside_the_stat_term()
+    {
+        // Requirement is 2, holding 5: three points of item surplus at 1% each, on top of the 0.75
+        // base with no stat surplus (requirements are 0/0 by default).
+        var job = ItemGatedJob(minQuantity: 2, itemSuccessChancePerSurplusPoint: 0.01);
+
+        var chance = job.SuccessChanceFor(
+            effectiveAttack: 0, effectiveDefense: 0, maxSuccessChance: 0.95,
+            heldItemQuantities: new Dictionary<string, int> { ["switchblade"] = 5 });
+
+        Assert.Equal(0.78, chance, precision: 10);
+    }
+
+    [Fact]
+    public void Item_surplus_floors_at_zero_and_does_not_paper_over_a_shortfall_elsewhere()
+    {
+        // Holding fewer than the minimum contributes no *negative* surplus — the shortfall is what
+        // the gate is for, not a penalty layered onto the odds of an attempt that should be refused.
+        var job = ItemGatedJob(minQuantity: 5, itemSuccessChancePerSurplusPoint: 0.01);
+
+        var chance = job.SuccessChanceFor(
+            effectiveAttack: 0, effectiveDefense: 0, maxSuccessChance: 0.95,
+            heldItemQuantities: new Dictionary<string, int> { ["switchblade"] = 1 });
+
+        Assert.Equal(0.75, chance, precision: 10);
+    }
+
+    [Fact]
+    public void Item_surplus_and_stat_surplus_add_independently()
+    {
+        // 5 points of stat surplus at 1% (from RiskyJob's 5/3 requirement) plus 3 points of item
+        // surplus at 1%: neither term is folded into the other's floor.
+        var job = TestJob(
+            attackRequirement: 5,
+            defenseRequirement: 3,
+            baseSuccessChance: 0.75,
+            successChancePerSurplusPoint: 0.01,
+            itemRequirements: [new ItemRequirement("switchblade", 2)],
+            itemSuccessChancePerSurplusPoint: 0.01);
+
+        var chance = job.SuccessChanceFor(
+            effectiveAttack: 8, effectiveDefense: 5, maxSuccessChance: 0.95,
+            heldItemQuantities: new Dictionary<string, int> { ["switchblade"] = 5 });
+
+        // Stat surplus: (8-5) + (5-3) = 5. Item surplus: 5-2 = 3. Total 8 points at 1% = 0.08.
+        Assert.Equal(0.83, chance, precision: 10);
+    }
+
+    [Fact]
+    public void The_item_surplus_ceiling_still_wins()
+    {
+        var job = ItemGatedJob(minQuantity: 2, itemSuccessChancePerSurplusPoint: 0.5);
+
+        var chance = job.SuccessChanceFor(
+            effectiveAttack: 0, effectiveDefense: 0, maxSuccessChance: 0.95,
+            heldItemQuantities: new Dictionary<string, int> { ["switchblade"] = 100 });
 
         Assert.Equal(0.95, chance, precision: 10);
     }

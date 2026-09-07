@@ -67,6 +67,14 @@ class JobResultPanel extends StatelessWidget {
                     label: 'Health',
                     value: '-${result.healthLost}',
                   ),
+                // One tile per item requirement the job gated on — spent whether the attempt won or
+                // lost, since it is a one-time-use cost of the attempt itself, not of success.
+                for (final consumed in result.itemsConsumed)
+                  _Stat(
+                    key: Key('job-result-item-${consumed.itemId}'),
+                    label: consumed.itemId,
+                    value: '-${consumed.quantityConsumed} (${consumed.quantityRemaining} left)',
+                  ),
               ],
             ),
             if (!result.succeeded) ...[

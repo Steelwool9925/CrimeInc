@@ -174,9 +174,18 @@ class _JobCard extends StatelessWidget {
         'level' => 'Requires level ${job.levelRequirement}',
         'stats' =>
           'Needs ${job.attackRequirement} attack / ${job.defenseRequirement} defense',
+        'items' => 'Needs $_unmetItemRequirementsLabel',
         'energy' => 'Needs ${job.energyCost} energy',
         _ => 'Unavailable',
       };
+
+  /// Describes the item requirements this player has not yet met, e.g. "2 switchblade" — or every
+  /// unmet one joined together, for a job with more than one. Uses the raw content id since the
+  /// server does not send a display name here; a friendlier label is a later, client-side lookup.
+  String get _unmetItemRequirementsLabel => job.itemRequirements
+      .where((r) => !r.met)
+      .map((r) => '${r.minQuantity} ${r.itemId}')
+      .join(', ');
 
   /// The success chance as a whole percentage.
   ///
@@ -242,15 +251,16 @@ class _JobCard extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                if (!job.canAttempt)
-                  Text(
-                    _lockLabel,
-                    key: Key('job-lock-${job.id}'),
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: theme.colorScheme.error),
-                  )
-                else
-                  const SizedBox.shrink(),
+                Expanded(
+                  child: !job.canAttempt
+                      ? Text(
+                          _lockLabel,
+                          key: Key('job-lock-${job.id}'),
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: theme.colorScheme.error),
+                        )
+                      : const SizedBox.shrink(),
+                ),
                 ElevatedButton(
                   key: Key('do-job-${job.id}'),
                   onPressed: enabled ? onDo : null,

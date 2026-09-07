@@ -19,6 +19,15 @@ public readonly record struct JobRiskRules(
     double ConsolationXpFraction);
 
 /// <summary>
+/// What one job attempt spent from one item requirement — always 1 unit for Tier 1's fixed rate,
+/// win or lose.
+/// </summary>
+/// <param name="ItemId">The item consumed.</param>
+/// <param name="QuantityConsumed">Copies spent this attempt. Always 1 in this first pass.</param>
+/// <param name="QuantityRemaining">Copies left in the holding after this attempt.</param>
+public readonly record struct ItemConsumption(string ItemId, int QuantityConsumed, int QuantityRemaining);
+
+/// <summary>
 /// What one <b>applied</b> job attempt produced — successful or not. Every figure is the server's
 /// decision; the client receives this, it never proposes it.
 /// </summary>
@@ -47,6 +56,10 @@ public readonly record struct JobRiskRules(
 /// <param name="CompletionsUntilNextRank">
 ///     Completions still needed for the next rank, or <see langword="null"/> at max rank.
 /// </param>
+/// <param name="ItemsConsumed">
+///     One entry per item requirement the job gates on, spent on this attempt — win or lose. Empty
+///     for the jobs that opt into no item gate, which is every job shipped before this field existed.
+/// </param>
 public record JobOutcome(
     string JobId,
     bool Succeeded,
@@ -57,7 +70,8 @@ public record JobOutcome(
     int Completions,
     int MasteryRank,
     bool MasteryRankedUp,
-    int? CompletionsUntilNextRank);
+    int? CompletionsUntilNextRank,
+    IReadOnlyList<ItemConsumption> ItemsConsumed);
 
 /// <summary>
 /// The result of asking to perform a job: either a refusal with a reason, or an outcome.

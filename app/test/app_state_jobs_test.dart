@@ -197,6 +197,79 @@ void main() {
     });
   });
 
+  group('AppState.doJob() — item-quantity gate carry-forward', () {
+    test(
+        'a successful item-gated attempt updates held quantity and re-locks below the minimum',
+        () async {
+      final state = await bootstrapped(FakeApiClient(
+        jobsResult: const JobList(jobs: [kItemReadyJob], currentEnergy: 7, level: 3),
+        doJobResult: const DoJobResult(result: kItemConsumingJobResult, player: kFakeMe),
+      ));
+      await state.loadJobs();
+
+      await state.doJob('hijack-a-delivery-truck');
+
+      final job = state.jobs.single;
+      final requirement = job.itemRequirements.single;
+      expect(requirement.held, 1);
+      expect(requirement.met, isFalse);
+      expect(job.canAttempt, isFalse);
+      expect(job.unavailableReason, 'items');
+    });
+
+    test('consuming stock that stays above the minimum leaves the job attemptable', () async {
+      const aboveMinimum = JobResult(
+        jobId: 'hijack-a-delivery-truck',
+        succeeded: true,
+        energySpent: 4,
+        cashEarned: 200,
+        xpEarned: 55,
+        healthLost: 0,
+        mastery: kFakeMastery,
+        masteryRankedUp: false,
+        itemsConsumed: [
+          ItemConsumption(itemId: 'switchblade', quantityConsumed: 1, quantityRemaining: 4),
+        ],
+      );
+      final state = await bootstrapped(FakeApiClient(
+        jobsResult: const JobList(jobs: [kItemReadyJob], currentEnergy: 7, level: 3),
+        doJobResult: const DoJobResult(result: aboveMinimum, player: kFakeMe),
+      ));
+      await state.loadJobs();
+
+      await state.doJob('hijack-a-delivery-truck');
+
+      final requirement = state.jobs.single.itemRequirements.single;
+      expect(requirement.held, 4);
+      expect(requirement.met, isTrue);
+      expect(state.jobs.single.canAttempt, isTrue);
+    });
+
+    test('a job with no item requirements of its own is untouched by a different jobs consumption',
+        () async {
+      final state = await bootstrapped(FakeApiClient(
+        jobsResult: const JobList(jobs: [kCheapJob, kItemReadyJob], currentEnergy: 7, level: 3),
+        doJobResult: const DoJobResult(result: kItemConsumingJobResult, player: kFakeMe),
+      ));
+      await state.loadJobs();
+
+      await state.doJob('hijack-a-delivery-truck');
+
+      final cheap = state.jobs.firstWhere((j) => j.id == 'shake-down-corner-store');
+      expect(cheap.itemRequirements, isEmpty);
+    });
+
+    test('an attempt at a job with no item requirements never derives an items lock', () async {
+      final state = await bootstrapped(FakeApiClient());
+      await state.loadJobs();
+
+      await state.doJob('shake-down-corner-store');
+
+      expect(state.jobs.first.itemRequirements, isEmpty);
+      expect(state.jobs.first.unavailableReason, isNot('items'));
+    });
+  });
+
   group('AppState.allocateSkill()', () {
     test('updates the player from the server response', () async {
       final api = FakeApiClient(

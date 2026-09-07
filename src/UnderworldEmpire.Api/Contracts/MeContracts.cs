@@ -24,6 +24,7 @@ public record MeterState(int Current, int Max, int RegenSecondsPerPoint, int? Se
 /// <param name="SkillPoints">Unspent skill points available for allocation (M2+).</param>
 /// <param name="Attack">Current attack stat.</param>
 /// <param name="Defense">Current defense stat.</param>
+/// <param name="Username">The player's claimed username, or <see langword="null"/> for a guest player who hasn't claimed an account.</param>
 public record MeDto(
     Guid PlayerId,
     MeterState Energy,
@@ -35,4 +36,5 @@ public record MeDto(
     long Xp,
     int SkillPoints,
     int Attack,
-    int Defense);
+    int Defense,
+    string? Username);

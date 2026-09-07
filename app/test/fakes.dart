@@ -89,6 +89,78 @@ const kStatLockedJob = Job(
   unavailableReason: 'stats',
 );
 
+/// An item-quantity gate the player has not yet met: needs 2 switchblade, holds 1.
+const kUnmetItemRequirement = JobItemRequirement(
+  itemId: 'switchblade',
+  minQuantity: 2,
+  held: 1,
+  met: false,
+);
+
+/// The same gate, now met — holds enough.
+const kMetItemRequirement = JobItemRequirement(
+  itemId: 'switchblade',
+  minQuantity: 2,
+  held: 2,
+  met: true,
+);
+
+/// A job locked behind an item-quantity gate — level and stats already cleared, so 'items' is the
+/// only reason left.
+const kItemGatedJob = Job(
+  id: 'hijack-a-delivery-truck',
+  name: 'Hijack a Delivery Truck',
+  description: 'Wait at the light.',
+  area: 'docks',
+  energyCost: 4,
+  levelRequirement: 1,
+  cashMin: 140,
+  cashMax: 260,
+  xp: 55,
+  attackRequirement: 9,
+  defenseRequirement: 7,
+  itemRequirements: [kUnmetItemRequirement],
+  successChance: 0.65,
+  mastery: kFakeMastery,
+  canAttempt: false,
+  unavailableReason: 'items',
+);
+
+/// The same job as [kItemGatedJob], but attemptable — every gate cleared, including the item one.
+const kItemReadyJob = Job(
+  id: 'hijack-a-delivery-truck',
+  name: 'Hijack a Delivery Truck',
+  description: 'Wait at the light.',
+  area: 'docks',
+  energyCost: 4,
+  levelRequirement: 1,
+  cashMin: 140,
+  cashMax: 260,
+  xp: 55,
+  attackRequirement: 9,
+  defenseRequirement: 7,
+  itemRequirements: [kMetItemRequirement],
+  successChance: 0.68,
+  mastery: kFakeMastery,
+  canAttempt: true,
+);
+
+/// A successful attempt at [kItemReadyJob] that consumed one unit of its item requirement, leaving
+/// stock one below what it started with.
+const kItemConsumingJobResult = JobResult(
+  jobId: 'hijack-a-delivery-truck',
+  succeeded: true,
+  energySpent: 4,
+  cashEarned: 200,
+  xpEarned: 55,
+  healthLost: 0,
+  mastery: kFakeMastery,
+  masteryRankedUp: false,
+  itemsConsumed: [
+    ItemConsumption(itemId: 'switchblade', quantityConsumed: 1, quantityRemaining: 1),
+  ],
+);
+
 /// A failed attempt: energy still spent, 1% cash and 10% XP, three health gone, mastery unmoved.
 const kFailedJobResult = JobResult(
   jobId: 'shake-down-corner-store',
@@ -378,7 +450,17 @@ class FakeApiClient implements ApiClient {
     this.refuseAllocateWith,
     this.refuseItemActionWith,
     this.refusePropertyActionWith,
-  })  : _inventoryResult = inventoryResult ??
+    this.refuseLoginWith,
+    SessionResult? loginResult,
+    this.refuseRegisterWith,
+    Me? registerResult,
+  })  : _loginResult = loginResult ??
+            const SessionResult(
+              deviceToken: 'fake-token-abc',
+              playerId: 'player-guid-123',
+            ),
+        _registerResult = registerResult ?? kFakeMe,
+        _inventoryResult = inventoryResult ??
             const InventoryList(
               items: [kOwnedWeapon, kUnaffordableArmor, kLockedWeapon],
               loadout: kBareLoadout,
@@ -525,6 +607,22 @@ class FakeApiClient implements ApiClient {
   /// reason — the shape a 409 from the item endpoints takes.
   final String? refuseItemActionWith;
 
+  /// When set, login throws a [JobRefusedException] with this reason — the shape a 409 from
+  /// POST /account/login takes (always `invalidCredentials` from the real endpoint, but the fake
+  /// accepts any string so a test can assert on whatever it passes here).
+  final String? refuseLoginWith;
+
+  final SessionResult _loginResult;
+  final List<({String username, String password})> loginCalls = [];
+
+  /// When set, registerAccount throws a [JobRefusedException] with this reason — the shape a 409
+  /// from POST /account/register takes (`alreadyClaimed`, `usernameInvalid`, `passwordTooWeak`,
+  /// or `usernameTaken` from the real endpoint; the fake accepts any string).
+  final String? refuseRegisterWith;
+
+  final Me _registerResult;
+  final List<({String deviceToken, String username, String password})> registerCalls = [];
+
   final List<String?> sessionCalls = [];
   int meCalls = 0;
   int contentPackCalls = 0;
@@ -544,6 +642,25 @@ class FakeApiClient implements ApiClient {
     sessionCalls.add(deviceToken);
     if (_throwOnSession) throw const ApiException(500, 'session error');
     return _sessionResult;
+  }
+
+  @override
+  Future<SessionResult> login(String username, String password) async {
+    loginCalls.add((username: username, password: password));
+    if (refuseLoginWith != null) {
+      throw JobRefusedException(refuseLoginWith!, 'Invalid username or password.');
+    }
+    return _loginResult;
+  }
+
+  @override
+  Future<Me> registerAccount(
+      String deviceToken, String username, String password) async {
+    registerCalls.add((deviceToken: deviceToken, username: username, password: password));
+    if (refuseRegisterWith != null) {
+      throw JobRefusedException(refuseRegisterWith!, 'The account could not be claimed.');
+    }
+    return _registerResult;
   }
 
   @override

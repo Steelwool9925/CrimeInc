@@ -40,6 +40,19 @@ abstract class ApiClient {
   Future<Me> me(String deviceToken);
   Future<ContentPack> contentPack();
 
+  /// Exchanges an account's username/password for its device token — the same shape
+  /// [SessionResult] already carries, since the server's own response is that same
+  /// `{deviceToken, playerId}` pair. Throws [JobRefusedException] with reason
+  /// `invalidCredentials` on any failure (unknown username or wrong password — the server never
+  /// distinguishes them).
+  Future<SessionResult> login(String username, String password);
+
+  /// Claims the calling device's own player with a username/password. Returns the updated [Me] —
+  /// the server's response is the same shared player projection every other action returns, not a
+  /// new shape. Throws [JobRefusedException] with reason `alreadyClaimed`, `usernameInvalid`,
+  /// `passwordTooWeak`, or `usernameTaken`.
+  Future<Me> registerAccount(String deviceToken, String username, String password);
+
   /// The job catalog with this player's mastery and affordability folded in.
   Future<JobList> jobs(String deviceToken);
 
@@ -140,6 +153,35 @@ class HttpApiClient implements ApiClient {
       Uri.parse('$_baseUrl/me'),
       headers: {'Authorization': 'Bearer $deviceToken'},
     );
+    _checkStatus(response);
+    return Me.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  @override
+  Future<SessionResult> login(String username, String password) async {
+    final response = await _client.post(
+      Uri.parse('$_baseUrl/account/login'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'username': username, 'password': password}),
+    );
+    _throwIfRefused(response);
+    _checkStatus(response);
+    return SessionResult.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  @override
+  Future<Me> registerAccount(
+      String deviceToken, String username, String password) async {
+    final response = await _client.post(
+      Uri.parse('$_baseUrl/account/register'),
+      headers: {
+        'Authorization': 'Bearer $deviceToken',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'username': username, 'password': password}),
+    );
+    _throwIfRefused(response);
     _checkStatus(response);
     return Me.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }

@@ -1,6 +1,21 @@
 namespace UnderworldEmpire.Domain.Jobs;
 
 /// <summary>
+/// One item-quantity gate on a job: the player must hold at least <see cref="MinQuantity"/> copies
+/// of <see cref="ItemId"/> to attempt it, and every attempt spends exactly one — win or lose (see
+/// <see cref="JobOutcome.ItemsConsumed"/>).
+/// </summary>
+/// <remarks>
+/// Sits alongside <see cref="Job.MeetsStatRequirements"/>, not instead of it: a job can gate on
+/// stats, items, both, or neither, and the two gates are answered independently. Fixed at "consume 1
+/// per requirement per attempt" for this first pass — a variable rate is a later refinement, not a
+/// Tier-1 requirement.
+/// </remarks>
+/// <param name="ItemId">Content id of the required weapon/armor item.</param>
+/// <param name="MinQuantity">Minimum copies held to attempt the job. Always &gt;= 1.</param>
+public readonly record struct ItemRequirement(string ItemId, int MinQuantity);
+
+/// <summary>
 /// A single job definition as the domain sees it, projected from the content pack's
 /// <c>jobs.json</c>. Immutable: the catalog is loaded once at startup and never mutated.
 /// </summary>
@@ -67,6 +82,21 @@ public sealed record Job
     /// <summary>How much one point of surplus stat adds to the success chance.</summary>
     public double SuccessChancePerSurplusPoint { get; init; }
 
+    /// <summary>
+    /// Item-quantity gates this job additionally requires, alongside the stat gate. Empty — the
+    /// default — means ungated: every job that does not opt in behaves exactly as it did before this
+    /// field existed.
+    /// </summary>
+    public IReadOnlyList<ItemRequirement> ItemRequirements { get; init; } = [];
+
+    /// <summary>
+    /// How much one point of surplus held-item quantity (above a requirement's minimum) adds to the
+    /// success chance. Mirrors <see cref="SuccessChancePerSurplusPoint"/> as its own rate rather than
+    /// being blended into it, so a large item surplus cannot paper over a stats shortfall or vice
+    /// versa.
+    /// </summary>
+    public double ItemSuccessChancePerSurplusPoint { get; init; }
+
     /// <summary>Lowest health lost on a failed attempt, inclusive.</summary>
     public int HealthLossMin { get; init; }
 
@@ -84,6 +114,29 @@ public sealed record Job
     /// </remarks>
     public bool MeetsStatRequirements(int effectiveAttack, int effectiveDefense) =>
         effectiveAttack >= AttackRequirement && effectiveDefense >= DefenseRequirement;
+
+    /// <summary>
+    /// Whether <paramref name="held"/> — the player's current item quantities, keyed by item id —
+    /// clears every one of this job's <see cref="ItemRequirements"/>.
+    /// </summary>
+    /// <remarks>
+    /// A gate, not a penalty: below it the attempt is refused and nothing is spent, exactly like
+    /// <see cref="MeetsStatRequirements"/>. A job with no <see cref="ItemRequirements"/> admits
+    /// anyone — <c>null</c> is treated the same as an empty holding, so a caller with nothing to
+    /// report need not construct a dictionary just to ask.
+    /// </remarks>
+    public bool MeetsItemRequirements(IReadOnlyDictionary<string, int>? held)
+    {
+        held ??= EmptyHeldItems;
+        return ItemRequirements.All(r => held.GetValueOrDefault(r.ItemId) >= r.MinQuantity);
+    }
+
+    /// <summary>
+    /// Shared empty holding, so callers with nothing to report need not allocate one. Internal
+    /// (not private) so <see cref="JobService"/> can reuse the same instance rather than keeping its
+    /// own copy of a constant the two classes would otherwise need to keep in sync by hand.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, int> EmptyHeldItems = new Dictionary<string, int>();
 
     /// <summary>
     /// This job's success chance for a player with the given effective stats, under the pack-wide
@@ -112,15 +165,33 @@ public sealed record Job
     /// rejects a <c>baseSuccessChance</c> above <c>risk.maxSuccessChance</c> at startup, naming the
     /// job.
     /// </para>
+    /// <para>
+    /// The optional <paramref name="heldItemQuantities"/> feeds a second, independent surplus term
+    /// at <see cref="ItemSuccessChancePerSurplusPoint"/> per point — added alongside the stat term,
+    /// not blended into it, for the same reason stat surplus floors per stat rather than summing
+    /// algebraically: a large item surplus must not paper over a stats shortfall or vice versa.
+    /// Omitted (or a job with no <see cref="ItemRequirements"/>), the term is simply zero, so every
+    /// existing call site and every job that does not opt in computes exactly what it always has.
+    /// </para>
     /// </remarks>
-    public double SuccessChanceFor(int effectiveAttack, int effectiveDefense, double maxSuccessChance)
+    public double SuccessChanceFor(
+        int effectiveAttack,
+        int effectiveDefense,
+        double maxSuccessChance,
+        IReadOnlyDictionary<string, int>? heldItemQuantities = null)
     {
         double ceiling = Math.Min(1.0, maxSuccessChance);
 
-        int surplus = Math.Max(0, effectiveAttack - AttackRequirement)
-                    + Math.Max(0, effectiveDefense - DefenseRequirement);
+        int statSurplus = Math.Max(0, effectiveAttack - AttackRequirement)
+                        + Math.Max(0, effectiveDefense - DefenseRequirement);
 
-        double chance = BaseSuccessChance + SuccessChancePerSurplusPoint * surplus;
+        var held = heldItemQuantities ?? EmptyHeldItems;
+        int itemSurplus = ItemRequirements.Sum(
+            r => Math.Max(0, held.GetValueOrDefault(r.ItemId) - r.MinQuantity));
+
+        double chance = BaseSuccessChance
+            + SuccessChancePerSurplusPoint * statSurplus
+            + ItemSuccessChancePerSurplusPoint * itemSurplus;
 
         // The floor is the job's base, but never above the ceiling — otherwise Math.Clamp is handed
         // an inverted range and throws.
@@ -174,5 +245,31 @@ public sealed record Job
         if (HealthLossMax < HealthLossMin)
             throw new ArgumentOutOfRangeException(nameof(HealthLossMax), HealthLossMax,
                 $"Job '{Id}' has healthLossMax below healthLossMin ({HealthLossMin}).");
+        var seenItemIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var requirement in ItemRequirements)
+        {
+            if (string.IsNullOrWhiteSpace(requirement.ItemId))
+                throw new ArgumentException(
+                    $"Job '{Id}' has an item requirement with a blank item id.",
+                    nameof(ItemRequirements));
+            if (requirement.MinQuantity < 1)
+                throw new ArgumentOutOfRangeException(nameof(ItemRequirements), requirement.MinQuantity,
+                    $"Job '{Id}' has an item requirement for '{requirement.ItemId}' with a minimum " +
+                    "quantity below 1.");
+            // A duplicate would let MeetsItemRequirements evaluate the same held quantity against
+            // the same minimum twice — harmless there, but JobService.Attempt would then build two
+            // ItemConsumption entries for the one item, and the second Consume() at the
+            // infrastructure layer would throw against a row already drained by the first.
+            if (!seenItemIds.Add(requirement.ItemId))
+                throw new ArgumentException(
+                    $"Job '{Id}' has a duplicate item requirement for '{requirement.ItemId}'.",
+                    nameof(ItemRequirements));
+        }
+        if (ItemSuccessChancePerSurplusPoint < 0.0)
+            // Same reasoning as SuccessChancePerSurplusPoint: a negative gain would make surplus
+            // stock actively harmful, which no content should be able to say.
+            throw new ArgumentOutOfRangeException(nameof(ItemSuccessChancePerSurplusPoint),
+                ItemSuccessChancePerSurplusPoint,
+                $"Job '{Id}' cannot lose success chance per item surplus point.");
     }
 }

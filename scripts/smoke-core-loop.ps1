@@ -85,7 +85,7 @@ $cheapest = @($props.properties | Sort-Object price | Select-Object -First 1)[0]
 $affordable = @($props.properties | Where-Object { $_.canBuy })
 Check "property catalog loads" ($props.properties.Count -gt 0) `
     "$($props.properties.Count) properties, cheapest '$($cheapest.id)' at $($cheapest.price)"
-# One energy bar cannot reach 500, and energy regens at five minutes a point, so the correct
+# One energy bar cannot reach 500, and energy regens at 90 seconds a point, so the correct
 # behaviour here is a refusal naming cash. The buy/collect path itself is covered by
 # PropertyEndpointTests, PropertyIncomeTests and PropertyConcurrencyTests.
 $me = Invoke-RestMethod "$base/me" -Headers $h

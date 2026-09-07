@@ -46,6 +46,13 @@ public sealed class JobService
     /// <param name="maxRank">Content-supplied mastery rank ceiling.</param>
     /// <param name="risk">Content-supplied pack-wide risk rules.</param>
     /// <param name="nowUtc">The instant to evaluate meter regeneration against.</param>
+    /// <param name="heldItemQuantities">
+    ///     The player's current item quantities, keyed by item id — read independently of
+    ///     <paramref name="loadout"/>'s equipped-only view, since a job's item gate asks "how many do
+    ///     you hold" rather than "what do you have on". Omitted (or <see langword="null"/>) for a job
+    ///     with no <see cref="Job.ItemRequirements"/>, which every job shipped before this parameter
+    ///     existed is.
+    /// </param>
     public JobAttemptResult Attempt(
         Player player,
         Job job,
@@ -54,22 +61,30 @@ public sealed class JobService
         int completionsPerRank,
         int maxRank,
         JobRiskRules risk,
-        DateTimeOffset nowUtc)
+        DateTimeOffset nowUtc,
+        IReadOnlyDictionary<string, int>? heldItemQuantities = null)
     {
         ArgumentNullException.ThrowIfNull(player);
         ArgumentNullException.ThrowIfNull(job);
         ArgumentNullException.ThrowIfNull(mastery);
         ArgumentNullException.ThrowIfNull(loadout);
 
+        var held = heldItemQuantities ?? Job.EmptyHeldItems;
+
         // ---- Validate before mutating anything ----
 
-        // Precedence is level -> stats -> energy: most permanent reason first, so a player failing
-        // several gates is told the one that will take longest to fix. Same order as GET /jobs.
+        // Precedence is level -> stats -> items -> energy: most permanent reason first, so a player
+        // failing several gates is told the one that will take longest to fix. Items sits with
+        // stats — both are "go buy something" fixes — ahead of energy, which just needs waiting out.
+        // Same order as GET /jobs.
         if (player.Level < job.LevelRequirement)
             return JobAttemptResult.Refused(JobFailure.LevelTooLow);
 
         if (!job.MeetsStatRequirements(loadout.TotalAttack, loadout.TotalDefense))
             return JobAttemptResult.Refused(JobFailure.StatsTooLow);
+
+        if (!job.MeetsItemRequirements(held))
+            return JobAttemptResult.Refused(JobFailure.InsufficientItems);
 
         int currentEnergy = player.Energy.CurrentAt(nowUtc, MeterRates.Energy);
         if (currentEnergy < job.EnergyCost)
@@ -84,7 +99,7 @@ public sealed class JobService
 
         // Roll order is part of the contract, because FakeRandomSource.Sequence scripts against it:
         // (1) success, (2) cash, (3) health loss on the failure branch only.
-        bool succeeded = RollSucceeded(job, loadout, risk);
+        bool succeeded = RollSucceeded(job, loadout, risk, held);
 
         // The cash range is rolled on both branches — the consolation is a fraction of what the
         // attempt *would* have earned, and skipping the roll on a failure would also shift every
@@ -121,6 +136,18 @@ public sealed class JobService
         // Mastery measures completions, not attempts. A failure advances nothing.
         bool rankedUp = succeeded && mastery.RecordCompletion(completionsPerRank, maxRank);
 
+        // Consumption is deterministic, not rolled: every requirement spends exactly 1 unit whether
+        // the attempt succeeds or fails, so it is computed here rather than needing its own place in
+        // the roll order. Empty for the jobs that opt into no item gate.
+        IReadOnlyList<ItemConsumption> itemsConsumed = job.ItemRequirements.Count == 0
+            ? Array.Empty<ItemConsumption>()
+            : job.ItemRequirements
+                .Select(requirement => new ItemConsumption(
+                    ItemId: requirement.ItemId,
+                    QuantityConsumed: 1,
+                    QuantityRemaining: held.GetValueOrDefault(requirement.ItemId) - 1))
+                .ToList();
+
         return JobAttemptResult.Applied(new JobOutcome(
             JobId: job.Id,
             Succeeded: succeeded,
@@ -131,7 +158,8 @@ public sealed class JobService
             Completions: mastery.Completions,
             MasteryRank: mastery.Rank,
             MasteryRankedUp: rankedUp,
-            CompletionsUntilNextRank: mastery.CompletionsUntilNextRank(completionsPerRank, maxRank)),
+            CompletionsUntilNextRank: mastery.CompletionsUntilNextRank(completionsPerRank, maxRank),
+            ItemsConsumed: itemsConsumed),
             levelUp);
     }
 
@@ -144,10 +172,10 @@ public sealed class JobService
     /// exactly assertable. The comparison is <c>&lt;=</c>, so a chance of 0.95 wins on a roll of
     /// 9500 and loses on 9501.
     /// </remarks>
-    private bool RollSucceeded(Job job, Loadout loadout, JobRiskRules risk)
+    private bool RollSucceeded(Job job, Loadout loadout, JobRiskRules risk, IReadOnlyDictionary<string, int> held)
     {
         double chance = job.SuccessChanceFor(
-            loadout.TotalAttack, loadout.TotalDefense, risk.MaxSuccessChance);
+            loadout.TotalAttack, loadout.TotalDefense, risk.MaxSuccessChance, held);
 
         long chanceBasisPoints = (long)Math.Round(chance * BasisPoints, MidpointRounding.AwayFromZero);
 

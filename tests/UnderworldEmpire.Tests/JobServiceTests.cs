@@ -43,6 +43,8 @@ public class JobServiceTests
         int defenseRequirement = 0,
         double baseSuccessChance = 1.0,
         double successChancePerSurplusPoint = 0.0,
+        IReadOnlyList<ItemRequirement>? itemRequirements = null,
+        double itemSuccessChancePerSurplusPoint = 0.0,
         int healthLossMin = 0,
         int healthLossMax = 0) => new()
         {
@@ -57,9 +59,18 @@ public class JobServiceTests
             DefenseRequirement = defenseRequirement,
             BaseSuccessChance = baseSuccessChance,
             SuccessChancePerSurplusPoint = successChancePerSurplusPoint,
+            ItemRequirements = itemRequirements ?? [],
+            ItemSuccessChancePerSurplusPoint = itemSuccessChancePerSurplusPoint,
             HealthLossMin = healthLossMin,
             HealthLossMax = healthLossMax
         };
+
+    /// <summary>A job gated on holding at least 2 switchblades, mirroring the shipped demo content.</summary>
+    private static Job ItemGatedJob(int minQuantity = 2, double itemSuccessChancePerSurplusPoint = 0.0) =>
+        TestJob(
+            baseSuccessChance: 0.8,
+            itemRequirements: [new ItemRequirement("switchblade", minQuantity)],
+            itemSuccessChancePerSurplusPoint: itemSuccessChancePerSurplusPoint);
 
     private static Player TestPlayer(
         int level = 1, int energy = 10, long cash = 100, long xp = 0, int health = PlayerDefaults.HealthMax)
@@ -88,9 +99,11 @@ public class JobServiceTests
         Player player,
         Job job,
         PlayerJobMastery mastery,
-        Loadout? loadout = null) =>
+        Loadout? loadout = null,
+        IReadOnlyDictionary<string, int>? heldItemQuantities = null) =>
         service.Attempt(
-            player, job, mastery, loadout ?? Bare(player), PerRank, MaxRank, Rules, Now);
+            player, job, mastery, loadout ?? Bare(player), PerRank, MaxRank, Rules, Now,
+            heldItemQuantities);
 
     // -------------------------------------------------------------------------
     // Refusals — nothing may be mutated
@@ -253,18 +266,20 @@ public class JobServiceTests
     [Fact]
     public void Spending_energy_forfeits_progress_toward_the_next_point()
     {
-        // SpendAt resets the regen clock. Four minutes into a five-minute point, that partial
-        // progress is deliberately lost — documented Meter behaviour, pinned here because the job
-        // loop is where a player would actually notice it.
+        // SpendAt resets the regen clock. Whatever partial progress had built up toward the next
+        // point is deliberately lost — documented Meter behaviour, pinned here because the job
+        // loop is where a player would actually notice it. Both deltas below are 60s, under the
+        // 90s-per-point rate, so neither alone ticks a point over — but 60s + 60s = 120s *would*
+        // if the clock did not reset on spend, which is exactly what this test pins.
         var player = TestPlayer(energy: 5);
-        var fourMinutesLater = Now.AddMinutes(4);
+        var sixtySecondsLater = Now.AddSeconds(60);
         var service = new JobService(FakeRandomSource.AlwaysMin());
 
         service.Attempt(player, TestJob(energyCost: 1), TestMastery(player.Id), Bare(player),
-            PerRank, MaxRank, Rules, fourMinutesLater);
+            PerRank, MaxRank, Rules, sixtySecondsLater);
 
-        // 5 - 1 = 4, and the clock restarts, so a further minute does not tip a point over.
-        Assert.Equal(4, player.Energy.CurrentAt(fourMinutesLater.AddMinutes(1), MeterRates.Energy));
+        // 5 - 1 = 4, and the clock restarts, so a further 60 seconds does not tip a point over.
+        Assert.Equal(4, player.Energy.CurrentAt(sixtySecondsLater.AddSeconds(60), MeterRates.Energy));
     }
 
     [Fact]
@@ -495,6 +510,229 @@ public class JobServiceTests
         var result = Attempt(service, player, GatedJob(), TestMastery(player.Id));
 
         Assert.Equal(JobFailure.StatsTooLow, result.Failure);
+    }
+
+    // -------------------------------------------------------------------------
+    // The item gate — sits between stats and energy, a refusal so nothing may be mutated
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void Attempt_below_the_item_minimum_is_refused()
+    {
+        var player = TestPlayer();
+        var service = new JobService(FakeRandomSource.AlwaysMin());
+
+        var result = Attempt(service, player, ItemGatedJob(minQuantity: 2), TestMastery(player.Id),
+            heldItemQuantities: new Dictionary<string, int> { ["switchblade"] = 1 });
+
+        Assert.Equal(JobFailure.InsufficientItems, result.Failure);
+        Assert.False(result.WasApplied);
+    }
+
+    [Fact]
+    public void Attempt_with_no_held_items_at_all_is_refused_by_the_item_gate()
+    {
+        var player = TestPlayer();
+        var service = new JobService(FakeRandomSource.AlwaysMin());
+
+        // No heldItemQuantities argument at all, mirroring a caller with nothing to report.
+        var result = Attempt(service, player, ItemGatedJob(minQuantity: 2), TestMastery(player.Id));
+
+        Assert.Equal(JobFailure.InsufficientItems, result.Failure);
+    }
+
+    [Fact]
+    public void Holding_exactly_the_item_minimum_is_admitted()
+    {
+        var player = TestPlayer();
+        var service = new JobService(FakeRandomSource.AlwaysMin());
+
+        var result = Attempt(service, player, ItemGatedJob(minQuantity: 2), TestMastery(player.Id),
+            heldItemQuantities: new Dictionary<string, int> { ["switchblade"] = 2 });
+
+        Assert.Equal(JobFailure.None, result.Failure);
+    }
+
+    [Fact]
+    public void The_item_gate_spends_nothing_and_rolls_nothing()
+    {
+        // A gate, not a penalty — exactly like the stat gate. Spamming a job you lack the stock for
+        // must cost neither energy nor a position in the roll stream.
+        var random = FakeRandomSource.AlwaysMin();
+        var player = TestPlayer();
+        var service = new JobService(random);
+
+        Attempt(service, player, ItemGatedJob(minQuantity: 2), TestMastery(player.Id),
+            heldItemQuantities: new Dictionary<string, int> { ["switchblade"] = 1 });
+
+        Assert.Equal(PlayerDefaults.EnergyMax, player.Energy.CurrentAt(Now, MeterRates.Energy));
+        Assert.Equal(100, player.Cash);
+        Assert.Equal(0, random.RollCount);
+    }
+
+    [Fact]
+    public void The_stat_gate_is_reported_before_the_item_gate()
+    {
+        // Precedence is level -> stats -> items -> energy: a player failing both is told the stat
+        // reason, matching GET /jobs.
+        var player = TestPlayer();
+        var service = new JobService(FakeRandomSource.AlwaysMin());
+        var job = TestJob(
+            attackRequirement: 99,
+            itemRequirements: [new ItemRequirement("switchblade", 2)]);
+
+        var result = Attempt(service, player, job, TestMastery(player.Id));
+
+        Assert.Equal(JobFailure.StatsTooLow, result.Failure);
+    }
+
+    [Fact]
+    public void The_item_gate_is_reported_before_the_energy_gate()
+    {
+        var player = TestPlayer(energy: 0);
+        var service = new JobService(FakeRandomSource.AlwaysMin());
+
+        var result = Attempt(service, player, ItemGatedJob(minQuantity: 2), TestMastery(player.Id),
+            heldItemQuantities: new Dictionary<string, int> { ["switchblade"] = 1 });
+
+        Assert.Equal(JobFailure.InsufficientItems, result.Failure);
+    }
+
+    [Fact]
+    public void A_job_with_no_item_requirements_ignores_held_items_entirely()
+    {
+        // No ItemRequirements at all: the gate must admit a player even with an empty holding, and
+        // behave exactly as every job did before this field existed.
+        var player = TestPlayer();
+        var service = new JobService(FakeRandomSource.AlwaysMin());
+
+        var result = Attempt(service, player, TestJob(), TestMastery(player.Id),
+            heldItemQuantities: new Dictionary<string, int>());
+
+        Assert.Equal(JobFailure.None, result.Failure);
+    }
+
+    // -------------------------------------------------------------------------
+    // Item consumption — deterministic, applied on both success and failure
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void A_successful_attempt_consumes_exactly_one_unit_per_requirement()
+    {
+        var player = TestPlayer();
+        var service = new JobService(FakeRandomSource.AlwaysMin());
+
+        var result = Attempt(service, player, ItemGatedJob(minQuantity: 2), TestMastery(player.Id),
+            heldItemQuantities: new Dictionary<string, int> { ["switchblade"] = 5 });
+
+        var consumed = Assert.Single(result.Outcome!.ItemsConsumed);
+        Assert.Equal("switchblade", consumed.ItemId);
+        Assert.Equal(1, consumed.QuantityConsumed);
+        Assert.Equal(4, consumed.QuantityRemaining);
+    }
+
+    [Fact]
+    public void A_failed_attempt_still_consumes_exactly_one_unit_per_requirement()
+    {
+        // True one-time-use: the item is spent on the attempt, not the outcome.
+        var player = TestPlayer();
+        var service = new JobService(ScriptedFailure());
+
+        var result = Attempt(service, player,
+            TestJob(baseSuccessChance: 0.5, healthLossMax: 5,
+                itemRequirements: [new ItemRequirement("switchblade", 2)]),
+            TestMastery(player.Id),
+            heldItemQuantities: new Dictionary<string, int> { ["switchblade"] = 5 });
+
+        Assert.False(result.Outcome!.Succeeded);
+        var consumed = Assert.Single(result.Outcome.ItemsConsumed);
+        Assert.Equal(1, consumed.QuantityConsumed);
+        Assert.Equal(4, consumed.QuantityRemaining);
+    }
+
+    [Fact]
+    public void A_refused_attempt_consumes_nothing()
+    {
+        var player = TestPlayer();
+        var service = new JobService(FakeRandomSource.AlwaysMin());
+
+        var result = Attempt(service, player, ItemGatedJob(minQuantity: 2), TestMastery(player.Id),
+            heldItemQuantities: new Dictionary<string, int> { ["switchblade"] = 1 });
+
+        Assert.Null(result.Outcome);
+    }
+
+    [Fact]
+    public void A_job_with_no_item_requirements_reports_no_consumption()
+    {
+        var player = TestPlayer();
+        var service = new JobService(FakeRandomSource.AlwaysMin());
+
+        var result = Attempt(service, player, TestJob(), TestMastery(player.Id));
+
+        Assert.Empty(result.Outcome!.ItemsConsumed);
+    }
+
+    [Fact]
+    public void An_attempt_with_multiple_item_requirements_consumes_one_unit_of_each()
+    {
+        var player = TestPlayer();
+        var service = new JobService(FakeRandomSource.AlwaysMin());
+        var job = TestJob(itemRequirements:
+        [
+            new ItemRequirement("switchblade", 2),
+            new ItemRequirement("kevlar-vest", 1)
+        ]);
+
+        var result = Attempt(service, player, job, TestMastery(player.Id),
+            heldItemQuantities: new Dictionary<string, int>
+            {
+                ["switchblade"] = 2,
+                ["kevlar-vest"] = 3
+            });
+
+        Assert.Equal(2, result.Outcome!.ItemsConsumed.Count);
+        Assert.Contains(result.Outcome.ItemsConsumed,
+            c => c.ItemId == "switchblade" && c.QuantityConsumed == 1 && c.QuantityRemaining == 1);
+        Assert.Contains(result.Outcome.ItemsConsumed,
+            c => c.ItemId == "kevlar-vest" && c.QuantityConsumed == 1 && c.QuantityRemaining == 2);
+    }
+
+    // -------------------------------------------------------------------------
+    // Item surplus raises the odds the attempt actually rolls against
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void Item_surplus_raises_the_chance_the_attempt_rolls_against()
+    {
+        // Base 0.8, +1% per surplus item, holding 3 above the minimum of 2: 0.8 -> 0.83, so 8300
+        // wins where it would have lost at the base chance.
+        var random = FakeRandomSource.Sequence(8300, 20);
+        var player = TestPlayer();
+        var service = new JobService(random);
+
+        var result = Attempt(service, player,
+            ItemGatedJob(minQuantity: 2, itemSuccessChancePerSurplusPoint: 0.01),
+            TestMastery(player.Id),
+            heldItemQuantities: new Dictionary<string, int> { ["switchblade"] = 5 });
+
+        Assert.True(result.Outcome!.Succeeded);
+    }
+
+    [Fact]
+    public void Item_surplus_does_not_change_the_roll_order()
+    {
+        // Proves this milestone did not touch the contract: still success, then cash, on a success.
+        var random = FakeRandomSource.Sequence(1, 20);
+        var player = TestPlayer();
+        var service = new JobService(random);
+
+        Attempt(service, player,
+            ItemGatedJob(minQuantity: 2, itemSuccessChancePerSurplusPoint: 0.01),
+            TestMastery(player.Id),
+            heldItemQuantities: new Dictionary<string, int> { ["switchblade"] = 5 });
+
+        Assert.Equal(2, random.RollCount);
     }
 
     // -------------------------------------------------------------------------

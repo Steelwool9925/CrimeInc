@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../api/models.dart';
 import '../state/app_state.dart';
 import '../widgets/item_gating.dart';
+import 'inventory_screen.dart';
 
 /// The store — the whole item catalog, priced, with the server's buy gating rendered as-is.
 ///
@@ -38,7 +39,7 @@ class _StoreScreenState extends State<StoreScreen> {
 
         return Scaffold(
           appBar: AppBar(
-            title: const Text('Store'),
+            title: const Text('Market'),
             actions: [
               if (state.me != null)
                 Padding(
@@ -50,6 +51,15 @@ class _StoreScreenState extends State<StoreScreen> {
                     ),
                   ),
                 ),
+              IconButton(
+                key: const Key('go-to-inventory'),
+                icon: const Icon(Icons.backpack_outlined),
+                tooltip: 'Inventory',
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                      builder: (_) => InventoryScreen(appState: widget.appState)),
+                ),
+              ),
             ],
           ),
           body: _buildBody(context, state, cashLabel),
@@ -174,15 +184,16 @@ class _StoreCard extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                if (!item.canBuy)
-                  Text(
-                    buyLockLabel(item),
-                    key: Key('store-lock-${item.id}'),
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: theme.colorScheme.error),
-                  )
-                else
-                  const SizedBox.shrink(),
+                Expanded(
+                  child: !item.canBuy
+                      ? Text(
+                          buyLockLabel(item),
+                          key: Key('store-lock-${item.id}'),
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: theme.colorScheme.error),
+                        )
+                      : const SizedBox.shrink(),
+                ),
                 ElevatedButton(
                   key: Key('buy-item-${item.id}'),
                   onPressed: enabled ? onBuy : null,
