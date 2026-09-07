@@ -80,7 +80,7 @@ public class MeEndpointTests : IClassFixture<CustomWebApplicationFactory>
 
         Assert.Equal(PlayerDefaults.EnergyMax, energyMax);
         Assert.Equal(energyMax, energyCurrent);           // Current == Max for a brand-new player
-        Assert.Equal(300, energyRegen);                   // 5 minutes = 300 seconds
+        Assert.Equal(90, energyRegen);                     // 90 seconds per point
         Assert.True(energy.GetProperty("secondsUntilNextPoint").ValueKind == JsonValueKind.Null,
             "secondsUntilNextPoint must be null when the meter is full");
     }

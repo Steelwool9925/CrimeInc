@@ -54,3 +54,7 @@ gru-ledger.md
 # Stray artifact from a PowerShell "2>$null" redirect reaching a non-PowerShell shell,
 # which creates a literal file named $null. Junk; never intentional.
 $null
+
+# ---- Python bytecode cache (scripts/*.py, e.g. generate-pack-art.py, generate-android-icon.py) ----
+__pycache__/
+*.pyc

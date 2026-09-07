@@ -266,18 +266,20 @@ public class JobServiceTests
     [Fact]
     public void Spending_energy_forfeits_progress_toward_the_next_point()
     {
-        // SpendAt resets the regen clock. Four minutes into a five-minute point, that partial
-        // progress is deliberately lost — documented Meter behaviour, pinned here because the job
-        // loop is where a player would actually notice it.
+        // SpendAt resets the regen clock. Whatever partial progress had built up toward the next
+        // point is deliberately lost — documented Meter behaviour, pinned here because the job
+        // loop is where a player would actually notice it. Both deltas below are 60s, under the
+        // 90s-per-point rate, so neither alone ticks a point over — but 60s + 60s = 120s *would*
+        // if the clock did not reset on spend, which is exactly what this test pins.
         var player = TestPlayer(energy: 5);
-        var fourMinutesLater = Now.AddMinutes(4);
+        var sixtySecondsLater = Now.AddSeconds(60);
         var service = new JobService(FakeRandomSource.AlwaysMin());
 
         service.Attempt(player, TestJob(energyCost: 1), TestMastery(player.Id), Bare(player),
-            PerRank, MaxRank, Rules, fourMinutesLater);
+            PerRank, MaxRank, Rules, sixtySecondsLater);
 
-        // 5 - 1 = 4, and the clock restarts, so a further minute does not tip a point over.
-        Assert.Equal(4, player.Energy.CurrentAt(fourMinutesLater.AddMinutes(1), MeterRates.Energy));
+        // 5 - 1 = 4, and the clock restarts, so a further 60 seconds does not tip a point over.
+        Assert.Equal(4, player.Energy.CurrentAt(sixtySecondsLater.AddSeconds(60), MeterRates.Energy));
     }
 
     [Fact]

@@ -238,9 +238,9 @@ public class MeterTests
     // -------------------------------------------------------------------------
 
     [Fact]
-    public void MeterRates_energy_is_five_minutes_per_point()
+    public void MeterRates_energy_is_ninety_seconds_per_point()
     {
-        Assert.Equal(TimeSpan.FromMinutes(5), MeterRates.Energy);
+        Assert.Equal(TimeSpan.FromSeconds(90), MeterRates.Energy);
     }
 
     [Fact]
