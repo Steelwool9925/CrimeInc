@@ -23,7 +23,9 @@ Future<AppState> pumpShell(WidgetTester tester, FakeApiClient api) async {
   final state = AppState(apiClient: api, tokenStore: InMemoryTokenStore());
   await state.bootstrap();
 
-  await tester.pumpWidget(MaterialApp(home: AppShell(appState: state)));
+  await tester.pumpWidget(
+    MaterialApp(home: AppShell(appState: state, onChangeServer: () {})),
+  );
   await tester.pumpAndSettle();
 
   return state;
@@ -108,6 +110,26 @@ void main() {
       await tapNavLabel(tester, 'Home');
 
       expect(find.text('12345'), findsOneWidget);
+    });
+  });
+
+  group('AppShell — onChangeServer', () {
+    testWidgets("forwards onChangeServer to Home's error screen", (tester) async {
+      await setWidth(tester, 400);
+      final api = FakeApiClient(throwOnSession: true);
+      final state = AppState(apiClient: api, tokenStore: InMemoryTokenStore());
+      await state.bootstrap();
+
+      var called = false;
+      await tester.pumpWidget(MaterialApp(
+        home: AppShell(appState: state, onChangeServer: () => called = true),
+      ));
+      await tester.pump();
+
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Change Server'));
+      await tester.pump();
+
+      expect(called, isTrue);
     });
   });
 }

@@ -15,9 +15,12 @@ import 'coming_soon_screen.dart';
 /// before this shell existed; this widget only decides which of the five already-complete screens
 /// is on screen.
 class AppShell extends StatefulWidget {
-  const AppShell({super.key, required this.appState});
+  const AppShell({super.key, required this.appState, required this.onChangeServer});
 
   final AppState appState;
+
+  /// Forwarded to Home's error screen — see [HomeScreen.onChangeServer].
+  final VoidCallback onChangeServer;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -51,7 +54,7 @@ class _AppShellState extends State<AppShell> {
   /// owns a complete `Scaffold`+`AppBar`; that scaffolding is intentionally left in place rather
   /// than stripped out, so a full `Scaffold` here is the correct nested pattern, not a bug.
   Widget _bodyFor(int index) => switch (index) {
-        0 => HomeScreen(appState: widget.appState),
+        0 => HomeScreen(appState: widget.appState, onChangeServer: widget.onChangeServer),
         1 => JobsScreen(appState: widget.appState),
         2 => PropertiesScreen(appState: widget.appState),
         3 => crewComingSoonScreen,

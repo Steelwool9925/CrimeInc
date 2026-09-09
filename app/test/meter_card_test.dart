@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:underworld_empire/api/models.dart';
+import 'package:underworld_empire/theme/pack_theme.dart';
 import 'package:underworld_empire/widgets/meter_card.dart';
 
 /// T4.2: the meter countdown ticks locally instead of standing still between polls.
@@ -151,6 +152,22 @@ void main() {
       );
 
       expect(find.textContaining('+1'), findsNothing);
+    });
+
+    testWidgets('"Full" is neutral text, not the theme\'s spot/danger colour', (tester) async {
+      // The pack's primary IS the theme's one spot colour (danger/CTA/selected-nav) -- a full
+      // meter is good news, and painting "Full" in that same red would read as a warning.
+      await tester.pumpWidget(MaterialApp(
+        theme: packTheme(null),
+        home: Scaffold(
+          body: MeterCard(label: 'Energy', meter: meter(current: 10, max: 10, secondsUntilNextPoint: null)),
+        ),
+      ));
+
+      final fullText = tester.widget<Text>(find.text('Full'));
+      final theme = packTheme(null);
+      expect(fullText.style?.color, isNot(theme.colorScheme.primary));
+      expect(fullText.style?.color, theme.colorScheme.onSurface);
     });
 
     testWidgets('does not tick once the meter is full', (tester) async {

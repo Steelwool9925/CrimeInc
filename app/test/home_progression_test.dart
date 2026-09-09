@@ -24,7 +24,9 @@ Future<AppState> pumpHome(WidgetTester tester, FakeApiClient api) async {
   final state = AppState(apiClient: api, tokenStore: InMemoryTokenStore());
   await state.bootstrap();
 
-  await tester.pumpWidget(MaterialApp(home: HomeScreen(appState: state)));
+  await tester.pumpWidget(
+    MaterialApp(home: HomeScreen(appState: state, onChangeServer: () {})),
+  );
   await tester.pumpAndSettle();
 
   return state;

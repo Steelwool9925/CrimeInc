@@ -6,8 +6,8 @@ import 'package:underworld_empire/state/app_state.dart';
 
 import 'fakes.dart';
 
-Widget _wrap(AppState state) => MaterialApp(
-      home: HomeScreen(appState: state),
+Widget _wrap(AppState state, {VoidCallback? onChangeServer}) => MaterialApp(
+      home: HomeScreen(appState: state, onChangeServer: onChangeServer ?? () {}),
     );
 
 AppState _readyState() {
@@ -49,6 +49,37 @@ void main() {
 
       expect(find.textContaining('error'), findsWidgets);
       expect(find.widgetWithText(ElevatedButton, 'Retry'), findsOneWidget);
+    });
+
+    testWidgets('shows a Change Server button next to Retry', (tester) async {
+      final api = FakeApiClient(throwOnSession: true);
+      final store = InMemoryTokenStore();
+      final state = AppState(apiClient: api, tokenStore: store);
+      await state.bootstrap();
+
+      await tester.pumpWidget(_wrap(state));
+      await tester.pump();
+
+      // A stuck server address (e.g. a friend's tunnel URL that has since rotated, per
+      // docs/hosting-a-friend.md) is otherwise a dead end: Retry can only ever hit the same
+      // unreachable host again, with no in-app way back to ServerAddressScreen.
+      expect(find.widgetWithText(OutlinedButton, 'Change Server'), findsOneWidget);
+    });
+
+    testWidgets('Change Server button calls onChangeServer', (tester) async {
+      final api = FakeApiClient(throwOnSession: true);
+      final store = InMemoryTokenStore();
+      final state = AppState(apiClient: api, tokenStore: store);
+      await state.bootstrap();
+
+      var called = false;
+      await tester.pumpWidget(_wrap(state, onChangeServer: () => called = true));
+      await tester.pump();
+
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Change Server'));
+      await tester.pump();
+
+      expect(called, isTrue);
     });
   });
 

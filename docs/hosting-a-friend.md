@@ -16,11 +16,20 @@ up, and it's meant for "let a friend try this," not for anything you'd rely on s
    to allow it — say yes for private networks).
 4. **A tunnel**, so your friend can reach it from anywhere, not just your WiFi. Two options that
    need no router configuration and no domain of your own:
+   - **[ngrok](https://ngrok.com/)** (`scripts/ngrok.exe`, recommended): needs a free account —
+     grab an auth token from
+     [dashboard.ngrok.com/get-started/your-authtoken](https://dashboard.ngrok.com/get-started/your-authtoken)
+     and run `ngrok config add-authtoken <token>` once. After that, `ngrok http 5080` prints an
+     `https://<name>.ngrok-free.dev` URL — **the same hostname every time**, since the free plan
+     assigns one stable dev-domain per account rather than minting a new one per run. If it
+     refuses to start with `ERR_NGROK_334` ("endpoint already online"), a stale session from a
+     previous run hasn't cleared yet — add `--pooling-enabled` to let the new one join it, or wait
+     a minute and retry.
    - **[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/)**
-     (`cloudflared`): `cloudflared tunnel --url http://localhost:5080` — prints a random
-     `https://*.trycloudflare.com` URL, free, no account required for a quick tunnel.
-   - **[ngrok](https://ngrok.com/)**: `ngrok http 5080` — prints an `https://*.ngrok-free.app` URL;
-     free tier requires a (free) account.
+     (`scripts/cloudflared.exe`): `cloudflared tunnel --url http://localhost:5080` — no account
+     needed, but prints a **random** `https://*.trycloudflare.com` URL every single run. Fine for
+     a one-off session; a poor fit for anything you'll restart, since the address you handed out
+     stops working the moment you do.
 
    Either way, run the tunnel command in its own terminal alongside `run-api-hosted.ps1` — it
    needs to keep running the whole time your friend is playing.
@@ -41,10 +50,11 @@ their copy of the app's server-address screen. Two things matter here:
 ## What "up" looks like
 
 Three things need to be running at once, in three terminals: Postgres (via Docker, in the
-background already), the hosted API (`run-api-hosted.ps1`), and the tunnel (`cloudflared` or
-`ngrok`). Closing any one of them ends the session for whoever's connected. There's no persistence
-beyond that — restarting later gets your friend a new tunnel URL (Cloudflare's quick tunnels and
-ngrok's free tier both mint a fresh address each run) to send them again.
+background already), the hosted API (`run-api-hosted.ps1`), and the tunnel (`ngrok` or
+`cloudflared`). Closing any one of them ends the session for whoever's connected. With
+**cloudflared**, restarting later gets your friend a new tunnel URL to send them again — its quick
+tunnels mint a fresh random address every run. With **ngrok**, the URL is tied to your account and
+stays the same across restarts, so once you've sent it once you don't need to send it again.
 
 ## What this isn't
 

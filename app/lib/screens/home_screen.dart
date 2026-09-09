@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../api/models.dart';
 import '../state/app_state.dart';
+import '../theme/pack_theme.dart';
 import '../widgets/coming_soon_screen.dart';
+import '../widgets/halftone_wash.dart';
 import '../widgets/meter_card.dart';
 import '../widgets/pack_logo.dart';
+import '../widgets/speedline_divider.dart';
 import 'jobs_screen.dart';
 import 'profile_screen.dart';
 import 'properties_screen.dart';
@@ -12,9 +15,15 @@ import 'skills_screen.dart';
 import 'store_screen.dart';
 
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key, required this.appState});
+  const HomeScreen({super.key, required this.appState, required this.onChangeServer});
 
   final AppState appState;
+
+  /// Escapes a stuck server address — e.g. a friend's tunnel URL that has since rotated (quick
+  /// tunnels mint a fresh hostname every restart; see docs/hosting-a-friend.md) — back to
+  /// ServerAddressScreen. Without this, a permanently unreachable host has no recovery: Retry can
+  /// only ever hit the same dead hostname again.
+  final VoidCallback onChangeServer;
 
   @override
   Widget build(BuildContext context) {
@@ -30,6 +39,9 @@ class HomeScreen extends StatelessWidget {
             // a code change. Colours are left unset so the AppBar inherits the dark
             // Steamnoir AppBarTheme from pack_theme.dart.
             title: PackLogo(appState: appState, pack: pack),
+            // Atmosphere only -- flexibleSpace paints behind the title/actions, so the wash
+            // never affects hit-testing or the logo's legibility.
+            flexibleSpace: HalftoneWash(color: Theme.of(context).colorScheme.onSurface),
           ),
           body: _buildBody(context, appState),
         );
@@ -55,6 +67,12 @@ class HomeScreen extends StatelessWidget {
               ElevatedButton(
                 onPressed: appState.bootstrap,
                 child: const Text('Retry'),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton(
+                key: const Key('change-server'),
+                onPressed: onChangeServer,
+                child: const Text('Change Server'),
               ),
             ],
           ),
@@ -92,7 +110,7 @@ class HomeScreen extends StatelessWidget {
                   ),
                   Text(
                     '${me.cash}',
-                    style: Theme.of(context).textTheme.titleLarge,
+                    style: statNumberStyle(context, fontSize: 20),
                   ),
                 ],
               ),
@@ -111,6 +129,11 @@ class HomeScreen extends StatelessWidget {
               MaterialPageRoute(builder: (_) => SkillsScreen(appState: appState)),
             ),
           ),
+          const SizedBox(height: 16),
+          // Marks the section break between "your character" (meters, cash, progression) and
+          // "where to go next" (the dashboard) -- used once, not on every divider, so it still
+          // reads as a scene break rather than becoming background noise.
+          SpeedlineDivider(color: Theme.of(context).colorScheme.onSurface),
           const SizedBox(height: 16),
           _DashboardGrid(appState: appState),
         ],
@@ -214,12 +237,25 @@ class _DashboardTile extends StatelessWidget {
   final String? subtitle;
   final VoidCallback onTap;
 
+  /// Whether this tile routes to a feature that doesn't exist yet.
+  bool get _isComingSoon => subtitle != null;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
+    // A "coming soon" tile is present but not actionable, not an error -- it gets a dimmer
+    // outline instead of the theme's one spot colour, which stays reserved for danger/CTA/active
+    // states. The ink-outline width itself (from CardTheme) is left alone; only its colour dims.
+    final dimBorder = theme.colorScheme.onSurface.withValues(alpha: 0.35);
+    final dimContent = theme.colorScheme.onSurface.withValues(alpha: 0.5);
+
     return Card(
       key: tileKey,
+      shape: _isComingSoon
+          ? (theme.cardTheme.shape as RoundedRectangleBorder?)
+              ?.copyWith(side: BorderSide(color: dimBorder, width: 2.5))
+          : null,
       child: InkWell(
         onTap: onTap,
         child: Padding(
@@ -227,19 +263,21 @@ class _DashboardTile extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 32),
+              Icon(icon, size: 32, color: _isComingSoon ? dimContent : null),
               const SizedBox(height: 8),
               Text(
                 title,
                 textAlign: TextAlign.center,
-                style: theme.textTheme.titleMedium,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: _isComingSoon ? dimContent : null,
+                ),
               ),
               if (subtitle != null) ...[
                 const SizedBox(height: 4),
                 Text(
                   subtitle!,
                   textAlign: TextAlign.center,
-                  style: theme.textTheme.bodySmall,
+                  style: theme.textTheme.bodySmall?.copyWith(color: dimContent),
                 ),
               ],
             ],
@@ -273,7 +311,7 @@ class _ProgressionCard extends StatelessWidget {
                 Text(
                   '${me.level}',
                   key: const Key('home-level'),
-                  style: theme.textTheme.titleLarge,
+                  style: statNumberStyle(context, fontSize: 20),
                 ),
               ],
             ),
