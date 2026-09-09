@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 
 import 'api/api_client.dart';
+import 'api/resilient_http_client.dart';
 import 'screens/server_address_screen.dart';
 import 'screens/welcome_screen.dart';
 import 'state/app_state.dart';
@@ -46,10 +46,24 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
   }
 
   Future<void> _resolveStartup() async {
-    final address = await _serverAddressStore.read();
-    if (address == null || address.isEmpty) {
-      setState(() => _resolvingStartup = false);
-      return;
+    final storedAddress = await _serverAddressStore.read();
+    final String address;
+    if (storedAddress == null || storedAddress.isEmpty) {
+      // A build baked with --dart-define=API_BASE_URL=... (same define api_client.dart's own
+      // fallback already reads) skips ServerAddressScreen entirely, for a build meant for someone
+      // who should never need to know a server exists — not just a prefilled convenience default.
+      // Written to storage immediately so every later read (a future cold start, anything that
+      // inspects the store) sees it exactly as if the player had typed it in themselves; a stored
+      // address always wins over the baked one, so this only ever fires once per install.
+      const baked = String.fromEnvironment('API_BASE_URL');
+      if (baked.isEmpty) {
+        setState(() => _resolvingStartup = false);
+        return;
+      }
+      await _serverAddressStore.write(baked);
+      address = baked;
+    } else {
+      address = storedAddress;
     }
 
     final storedToken = await _tokenStore.read();
@@ -66,7 +80,7 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
   }
 
   AppState _buildAppState(String address) => AppState(
-        apiClient: HttpApiClient(client: http.Client(), baseUrl: address),
+        apiClient: HttpApiClient(client: createResilientHttpClient(), baseUrl: address),
         tokenStore: _tokenStore,
       );
 
@@ -99,6 +113,20 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
     appState.bootstrap();
     appState.startPolling();
     setState(() => _needsWelcomeChoice = false);
+  }
+
+  /// Escapes a stuck server address back to [ServerAddressScreen] — the callback Home's error
+  /// screen offers next to Retry. Clears the stored address and device token together: a token
+  /// minted by one backend means nothing to another, so carrying it into the next address chosen
+  /// would just trade one broken state for a silently wrong one.
+  Future<void> _changeServer() async {
+    await _serverAddressStore.clear();
+    await _tokenStore.clear();
+    _appState?.dispose();
+    setState(() {
+      _appState = null;
+      _needsWelcomeChoice = false;
+    });
   }
 
   void _onLoggedIn() {
@@ -155,7 +183,7 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
         return MaterialApp(
           title: pack?.name.isNotEmpty == true ? pack!.name : 'Underworld Empire',
           theme: packTheme(pack),
-          home: AppShell(appState: appState),
+          home: AppShell(appState: appState, onChangeServer: _changeServer),
         );
       },
     );

@@ -58,3 +58,7 @@ $null
 # ---- Python bytecode cache (scripts/*.py, e.g. generate-pack-art.py, generate-android-icon.py) ----
 __pycache__/
 *.pyc
+
+# ---- Cloudflare Tunnel binary (docs/hosting-a-friend.md) -- each dev downloads their own; not
+# committed like scripts/ngrok.exe, since it wasn't in active use here and adds 50+MB to history.
+scripts/cloudflared.exe

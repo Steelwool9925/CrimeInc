@@ -1,4 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Every API call the app makes (session bootstrap, jobs, the content pack, DoH fallback
+         queries) is a network socket. Without this, Android denies the sockets outright at the
+         OS level: DNS resolution fails (surfacing as "Failed host lookup") and direct-IP connects
+         fail with EPERM, which is exactly the pair of symptoms that sent us hunting through VPNs,
+         Private DNS, Battery Saver, and per-app data toggles before finding the real cause here. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="Underworld Empire"
         android:name="${applicationName}"

@@ -130,10 +130,12 @@ class _MeterCardState extends State<MeterCard> {
 
   Widget _status(ThemeData theme) {
     if (_isFull) {
+      // Deliberately onSurface, not colorScheme.primary: primary is the theme's one spot
+      // colour (danger/CTA/selected-nav) and a full meter is good news, not a warning.
       return Text(
         'Full',
         style: theme.textTheme.bodySmall?.copyWith(
-          color: theme.colorScheme.primary,
+          color: theme.colorScheme.onSurface,
           fontWeight: FontWeight.w600,
         ),
       );

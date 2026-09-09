@@ -22,7 +22,9 @@ void main() {
     );
     await state.bootstrap();
 
-    await tester.pumpWidget(MaterialApp(home: HomeScreen(appState: state)));
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(appState: state, onChangeServer: () {})),
+    );
     await tester.pump();
 
     final attack = tester.widget<Text>(find.byKey(const Key('home-attack')));
@@ -39,7 +41,9 @@ void main() {
     );
     await state.bootstrap();
 
-    await tester.pumpWidget(MaterialApp(home: HomeScreen(appState: state)));
+    await tester.pumpWidget(
+      MaterialApp(home: HomeScreen(appState: state, onChangeServer: () {})),
+    );
     await tester.pump();
 
     final attack = tester.widget<Text>(find.byKey(const Key('home-attack')));

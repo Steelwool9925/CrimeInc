@@ -169,5 +169,58 @@ void main() {
         expect(theme.colorScheme.onSurface, isNot(theme.scaffoldBackgroundColor));
       });
     });
+
+    group('comic-noir chrome', () {
+      test('cards render as ink-outline panels: sharp corners, visible bone border', () {
+        final theme = packTheme(packWith());
+
+        final shape = theme.cardTheme.shape;
+        expect(shape, isA<RoundedRectangleBorder>());
+        final rect = shape as RoundedRectangleBorder;
+        // Comic panels are square-cornered -- Material's default rounded Card would read as
+        // a soft app tile, not an inked panel border.
+        expect(rect.borderRadius, BorderRadius.zero);
+        expect(rect.side.width, greaterThanOrEqualTo(2));
+        expect(theme.cardTheme.elevation, 0);
+      });
+
+      test('elevated buttons (primary actions) use the pack primary as a filled, square CTA',
+          () {
+        final theme = packTheme(packWith(primary: '#C81E2C'));
+        final style = theme.elevatedButtonTheme.style!;
+
+        expect(style.backgroundColor?.resolve({}), const Color(0xFFC81E2C));
+        final shape = style.shape?.resolve({}) as RoundedRectangleBorder?;
+        expect(shape?.borderRadius, BorderRadius.zero);
+      });
+
+      test('outlined buttons (secondary actions) get a visible ink-outline border, not a hairline',
+          () {
+        final theme = packTheme(packWith());
+        final style = theme.outlinedButtonTheme.style!;
+
+        final side = style.side?.resolve({});
+        expect(side, isNotNull);
+        expect(side!.width, greaterThanOrEqualTo(2));
+        final shape = style.shape?.resolve({}) as RoundedRectangleBorder?;
+        expect(shape?.borderRadius, BorderRadius.zero);
+      });
+
+      test('error/danger colour is the same red as primary -- one spot colour, not two reds', () {
+        // The theme's whole point is colour discipline: a second, independently-generated
+        // "error red" from ColorScheme.fromSeed would quietly break that.
+        final theme = packTheme(packWith(primary: '#C81E2C'));
+
+        expect(theme.colorScheme.error, theme.colorScheme.primary);
+      });
+
+      test('display text roles use the Bebas Neue face', () {
+        final theme = packTheme(packWith());
+
+        expect(theme.textTheme.titleLarge?.fontFamily, 'Bebas Neue');
+        expect(theme.textTheme.titleMedium?.fontFamily, 'Bebas Neue');
+        expect(theme.textTheme.headlineSmall?.fontFamily, 'Bebas Neue');
+      });
+    });
   });
 }

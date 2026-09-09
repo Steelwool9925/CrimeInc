@@ -26,7 +26,8 @@ void main() {
         assets: assets,
       );
 
-  Widget wrap(AppState state) => MaterialApp(home: HomeScreen(appState: state));
+  Widget wrap(AppState state) =>
+      MaterialApp(home: HomeScreen(appState: state, onChangeServer: () {}));
 
   testWidgets('requests the logo from the manifest-driven asset route', (tester) async {
     final state = stateWith(packWith(const {'logo': 'assets/logo.png'}));
