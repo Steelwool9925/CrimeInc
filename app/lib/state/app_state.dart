@@ -336,60 +336,59 @@ class AppState extends ChangeNotifier {
   }
 
   /// Folds a job outcome into the cached catalog so the list reflects the new mastery, item stock
-  /// and energy without a second network call.
+  /// and gating for the attempted job immediately, without waiting on a network round trip — all
+  /// three are exact values this method can derive safely, for that one job specifically.
+  ///
+  /// Every *other* job's gating (level, stats, items, energy) is left exactly as it was until
+  /// `JobsScreen`'s own periodic re-read asks the server again — the same ~10s cadence
+  /// `PropertiesScreen` already re-reads on for its own passively-changing values.
+  ///
+  /// This used to also re-derive level and energy locally for every job and carry a 'stats' lock
+  /// forward, on the reasoning that nothing a job attempt does can change stats (gear is untouched;
+  /// a level-up grants skill points without spending them). That reasoning had a hole: the server's
+  /// gate precedence is level -> stats -> items -> energy, so a job blocked by *level* never has
+  /// its stats checked at all — the server simply doesn't know yet. Carrying forward
+  /// `unavailableReason == 'stats'` is therefore blind to a job that was blocked by level *and*
+  /// would also fail stats: the moment its level cleared, the local recompute lit its button up
+  /// enabled, and the server correctly refused it.
+  ///
+  /// The attempted job is the one exception where recomputing is still safe, and still necessary:
+  /// attempting a job only ever happens when it was already `canAttempt: true`, which means level,
+  /// stats, items and energy were *all* confirmed passing the instant before this outcome arrived.
+  /// Nothing about attempting a job can move level or stats. Only items (just consumed) and energy
+  /// (just spent) can have changed — and both are exact, known values from this same outcome and
+  /// the fresh post-action player, not a guess. Recomputing just those two, for just this one job,
+  /// is what keeps a job correctly re-locking the instant its item stock runs out (e.g. the last
+  /// unit of a required item consumed by the attempt itself), without resurrecting the guesswork
+  /// that caused the stats bug for every other job in the list.
   void _applyOutcomeToCatalog(DoJobResult outcome) {
     final energy = _me?.energy.current;
-    final level = _me?.level;
 
-    // Keyed by item id so the fourth rule below is an O(1) lookup per requirement rather than a
-    // nested scan. Empty for the jobs that opt into no item gate, in which case every requirement
-    // list below is empty too and this is never consulted.
+    // Keyed by item id so this is an O(1) lookup per requirement rather than a nested scan. Empty
+    // for jobs that opt into no item gate, in which case every requirement list below is empty too
+    // and this is never consulted.
     final consumedByItemId = {
       for (final consumed in outcome.result.itemsConsumed) consumed.itemId: consumed,
     };
 
     _jobs = _jobs.map((job) {
-      final isAttemptedJob = job.id == outcome.result.jobId;
-      final mastery = isAttemptedJob ? outcome.result.mastery : job.mastery;
+      if (job.id != outcome.result.jobId) return job;
 
-      final meetsLevel = level == null || level >= job.levelRequirement;
-      final affords = energy == null || energy >= job.energyCost;
+      final itemRequirements = job.itemRequirements.map((requirement) {
+        final consumed = consumedByItemId[requirement.itemId];
+        if (consumed == null) return requirement;
 
-      // The stats gate is carried across rather than re-derived. The client does not know the
-      // player's effective stats here — that needs the loadout, which /jobs does not return — and
-      // nothing a job attempt does can change them: gear is untouched, and a level-up grants skill
-      // points without spending them. Recomputing from level and energy alone would silently clear
-      // a 'stats' lock and light up a button the server will refuse.
-      final wasStatLocked = job.unavailableReason == 'stats';
+        return JobItemRequirement(
+          itemId: requirement.itemId,
+          minQuantity: requirement.minQuantity,
+          held: consumed.quantityRemaining,
+          met: consumed.quantityRemaining >= requirement.minQuantity,
+        );
+      }).toList(growable: false);
 
-      // Fourth carry-forward rule: item stock. Unlike stats, the just-attempted job's outcome names
-      // its exact new remaining quantity per requirement (ItemConsumption.quantityRemaining), so
-      // this one is recomputed precisely rather than carried forward blind — but only for the job
-      // that was actually attempted; a different job referencing the same item id (not in the
-      // shipped pack, but the domain allows it) is not touched, matching Tier 1's scope. See the
-      // Tier 2 sketch for a general reconciliation instead of this fourth ad-hoc rule.
-      final itemRequirements = isAttemptedJob
-          ? job.itemRequirements.map((requirement) {
-              final consumed = consumedByItemId[requirement.itemId];
-              if (consumed == null) return requirement;
-
-              return JobItemRequirement(
-                itemId: requirement.itemId,
-                minQuantity: requirement.minQuantity,
-                held: consumed.quantityRemaining,
-                met: consumed.quantityRemaining >= requirement.minQuantity,
-              );
-            }).toList(growable: false)
-          : job.itemRequirements;
       final meetsItems = itemRequirements.every((requirement) => requirement.met);
-
-      final reason = !meetsLevel
-          ? 'level'
-          : wasStatLocked
-              ? 'stats'
-              : (!meetsItems
-                  ? 'items'
-                  : (!affords ? 'energy' : null));
+      final affords = energy == null || energy >= job.energyCost;
+      final reason = !meetsItems ? 'items' : (!affords ? 'energy' : null);
 
       return Job(
         id: job.id,
@@ -405,7 +404,7 @@ class AppState extends ChangeNotifier {
         defenseRequirement: job.defenseRequirement,
         itemRequirements: itemRequirements,
         successChance: job.successChance,
-        mastery: mastery,
+        mastery: outcome.result.mastery,
         canAttempt: reason == null,
         unavailableReason: reason,
       );

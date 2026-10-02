@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../api/models.dart';
@@ -9,22 +11,51 @@ import '../widgets/level_up_dialog.dart';
 ///
 /// Every gating decision shown here comes from the server (`canAttempt`, `unavailableReason`); the
 /// client only renders it. Re-deriving affordability locally would risk showing a job as available
-/// that the server then refuses.
+/// that the server then refuses — which is exactly why this screen re-reads on a timer (below)
+/// rather than trying to guess gating locally between reads.
 class JobsScreen extends StatefulWidget {
-  const JobsScreen({super.key, required this.appState});
+  const JobsScreen({
+    super.key,
+    required this.appState,
+    this.refreshInterval = const Duration(seconds: 10),
+  });
 
   final AppState appState;
+
+  /// How often the catalog is re-read while this screen is open.
+  ///
+  /// Energy regenerates and gear-driven stats change on their own, with nothing that visits this
+  /// screen to say so — the same reason `PropertiesScreen` re-reads on a timer. Mirrors that
+  /// screen's cadence and in-flight guard exactly (see `_refresher` below).
+  final Duration refreshInterval;
 
   @override
   State<JobsScreen> createState() => _JobsScreenState();
 }
 
 class _JobsScreenState extends State<JobsScreen> {
+  Timer? _refresher;
+
   @override
   void initState() {
     super.initState();
     // Load after the first frame so the screen can show its loading state.
     WidgetsBinding.instance.addPostFrameCallback((_) => widget.appState.loadJobs());
+
+    _refresher = Timer.periodic(widget.refreshInterval, (_) {
+      // Never while an action is mid-flight: that action holds its own guard across its own
+      // outcome handling, and a poll landing inside it would be collapsed into that read and lost —
+      // the same reasoning `PropertiesScreen`'s `_refresher` guards on `propertyInFlight` for.
+      if (widget.appState.jobInFlight == null) {
+        widget.appState.loadJobs();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _refresher?.cancel();
+    super.dispose();
   }
 
   /// Shows the level-up dialog when one is pending, then clears it.

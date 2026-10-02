@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:underworld_empire/api/models.dart';
@@ -7,12 +9,26 @@ import 'package:underworld_empire/state/app_state.dart';
 import 'fakes.dart';
 
 /// Pumps JobsScreen with a bootstrapped AppState.
-Future<AppState> pumpJobs(WidgetTester tester, FakeApiClient api) async {
+///
+/// [refreshInterval] is pushed far out by default so a test that isn't about the periodic re-read
+/// is never disturbed by an extra `/jobs` call mid-test — mirrors `pumpProperties`'s identical
+/// reasoning for `PropertiesScreen`. The tests that are about the re-read set it themselves.
+Future<AppState> pumpJobs(
+  WidgetTester tester,
+  FakeApiClient api, {
+  Duration refreshInterval = const Duration(hours: 1),
+}) async {
   final state = AppState(apiClient: api, tokenStore: InMemoryTokenStore());
   await state.bootstrap();
 
-  await tester.pumpWidget(MaterialApp(home: JobsScreen(appState: state)));
+  await tester.pumpWidget(MaterialApp(
+    home: JobsScreen(appState: state, refreshInterval: refreshInterval),
+  ));
   await tester.pumpAndSettle();
+
+  // Tear the tree down inside the test's own zone, so the screen's periodic timer is cancelled
+  // before the binding checks for timers still pending — same reasoning as `pumpProperties`.
+  addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
 
   return state;
 }
@@ -494,6 +510,38 @@ void main() {
 
       // Otherwise every successful job would read "Health -0".
       expect(find.byKey(const Key('job-result-health')), findsNothing);
+    });
+  });
+
+  group('JobsScreen — refreshing', () {
+    testWidgets('re-reads the catalog on its refresh interval', (tester) async {
+      final api = FakeApiClient();
+      await pumpJobs(tester, api, refreshInterval: const Duration(seconds: 10));
+
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pump();
+      await tester.pump();
+
+      // Energy regenerates and gear-driven stats change with nothing that visits this screen to
+      // say so, so it keeps asking — the same reasoning PropertiesScreen already re-reads for.
+      expect(api.jobsCalls, 2);
+    });
+
+    testWidgets('does not poll again while an action is in flight', (tester) async {
+      final api = FakeApiClient()..doJobGate = Completer<void>();
+      await pumpJobs(tester, api, refreshInterval: const Duration(seconds: 10));
+
+      // Dispatches the tap and lets doJob's onPressed closure run; the request itself stays open
+      // on doJobGate.
+      await tester.tap(find.byKey(const Key('do-job-shake-down-corner-store')));
+      await tester.pump();
+
+      // The tick lands while that request is still open.
+      await tester.pump(const Duration(seconds: 10));
+      expect(api.jobsCalls, 1);
+
+      api.doJobGate!.complete();
+      await tester.pumpAndSettle();
     });
   });
 }

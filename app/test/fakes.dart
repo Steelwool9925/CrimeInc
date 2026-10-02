@@ -564,6 +564,17 @@ class FakeApiClient implements ApiClient {
   final Me _meResult;
   final ContentPack _contentPackResult;
   final JobList _jobsResult;
+
+  /// When set, the next GET /jobs (and every one after, until changed again) serves this instead
+  /// of [_jobsResult].
+  ///
+  /// Lets a test simulate the periodic re-read picking up a since-changed server state (energy
+  /// regenerated, a level-up landed, gear was equipped) between polls, the same way
+  /// [_inventoryResult]/[_propertiesResult] are advanced for their own actions — except nothing
+  /// about the jobs catalog changes as a side effect of an action in this fake, so the test sets it
+  /// directly rather than the fake deriving it.
+  JobList? jobsOverride;
+
   final DoJobResult _doJobResult;
   final Me? _allocateResult;
   final bool _throwOnSession;
@@ -684,12 +695,20 @@ class FakeApiClient implements ApiClient {
   Future<JobList> jobs(String deviceToken) async {
     jobsCalls++;
     if (_throwOnJobs) throw const ApiException(500, 'jobs error');
-    return _jobsResult;
+    return jobsOverride ?? _jobsResult;
   }
+
+  /// When set, doJob waits on this before returning.
+  ///
+  /// Lets a test hold an attempt open and observe what the client does while it is still in
+  /// flight — same purpose as [inventoryGate]/[propertiesGate], for the job-gating equivalent:
+  /// confirming the screen's periodic re-read skips a tick that lands mid-action.
+  Completer<void>? doJobGate;
 
   @override
   Future<DoJobResult> doJob(String deviceToken, String jobId) async {
     doJobCalls.add(jobId);
+    if (doJobGate != null) await doJobGate!.future;
     if (refuseDoJobWith != null) {
       throw JobRefusedException(refuseDoJobWith!, 'refused: $refuseDoJobWith');
     }
