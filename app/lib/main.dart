@@ -9,6 +9,7 @@ import 'storage/server_address_store.dart';
 import 'storage/token_store.dart';
 import 'theme/pack_theme.dart';
 import 'widgets/app_shell.dart';
+import 'widgets/content_width_limit.dart';
 
 void main() {
   runApp(const UnderworldEmpireApp());
@@ -143,6 +144,12 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
     super.dispose();
   }
 
+  /// Wraps every route in [ContentWidthLimit]. Passed as `MaterialApp.builder` on all four of the
+  /// app's `MaterialApp`s below, so the cap applies to the startup gates as well as the shell, and
+  /// to routes pushed with `Navigator.push` that never pass through `AppShell`.
+  static Widget _widthLimited(BuildContext context, Widget? child) =>
+      ContentWidthLimit(child: child ?? const SizedBox.shrink());
+
   @override
   Widget build(BuildContext context) {
     // Before a server address is known, there is no ContentPack to theme from yet — packTheme(null)
@@ -150,6 +157,7 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
     // looks the same as the app's ordinary pre-load frame.
     if (_resolvingStartup) {
       return MaterialApp(
+        builder: _widthLimited,
         theme: packTheme(null),
         home: const Scaffold(body: Center(child: CircularProgressIndicator())),
       );
@@ -158,6 +166,7 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
     final appState = _appState;
     if (appState == null) {
       return MaterialApp(
+        builder: _widthLimited,
         theme: packTheme(null),
         home: ServerAddressScreen(onSaved: _onAddressSaved),
       );
@@ -165,6 +174,7 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
 
     if (_needsWelcomeChoice) {
       return MaterialApp(
+        builder: _widthLimited,
         theme: packTheme(null),
         home: WelcomeScreen(
           appState: appState,
@@ -181,6 +191,7 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
       builder: (context, _) {
         final pack = appState.contentPack;
         return MaterialApp(
+          builder: _widthLimited,
           title: pack?.name.isNotEmpty == true ? pack!.name : 'Underworld Empire',
           theme: packTheme(pack),
           home: AppShell(appState: appState, onChangeServer: _changeServer),

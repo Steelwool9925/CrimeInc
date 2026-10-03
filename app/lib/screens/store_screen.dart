@@ -82,7 +82,7 @@ class _StoreScreenState extends State<StoreScreen> {
               state.inventoryError!,
               key: const Key('store-error'),
               textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.red),
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
             const SizedBox(height: 16),
             ElevatedButton(
@@ -122,6 +122,7 @@ class _StoreScreenState extends State<StoreScreen> {
                   busy: state.itemInFlight == item.id,
                   anyBusy: state.itemInFlight != null,
                   onBuy: () => state.buyItem(item.id),
+                  onEquip: () => state.equipItem(item.id),
                 ),
               );
             },
@@ -139,6 +140,7 @@ class _StoreCard extends StatelessWidget {
     required this.busy,
     required this.anyBusy,
     required this.onBuy,
+    required this.onEquip,
   });
 
   final InventoryItem item;
@@ -146,6 +148,7 @@ class _StoreCard extends StatelessWidget {
   final bool busy;
   final bool anyBusy;
   final VoidCallback onBuy;
+  final VoidCallback onEquip;
 
   @override
   Widget build(BuildContext context) {
@@ -178,7 +181,17 @@ class _StoreCard extends StatelessWidget {
             ),
             if (item.quantity > 0) ...[
               const SizedBox(height: 4),
-              Text('Owned: ${item.quantity}', style: theme.textTheme.bodySmall),
+              Text(
+                // Owning a thing and wearing it are different states, and the card used to show
+                // only the first. A player who bought a weapon saw "Owned: 1", no change to their
+                // attack, and nothing anywhere explaining why — the Equip action lived behind an
+                // unlabelled icon in the app bar, two screens away.
+                item.equipped
+                    ? 'Owned: ${item.quantity}  ·  worn'
+                    : 'Owned: ${item.quantity}  ·  not worn',
+                key: Key('store-owned-${item.id}'),
+                style: theme.textTheme.bodySmall,
+              ),
             ],
             const SizedBox(height: 8),
             Row(
@@ -194,6 +207,18 @@ class _StoreCard extends StatelessWidget {
                         )
                       : const SizedBox.shrink(),
                 ),
+                // Offered right here, next to Buy, for anything owned but not yet worn. Buying
+                // does not equip, and gear that is not worn changes nothing at all — not the
+                // player's stats and not which jobs unlock. Surfacing it on the card is what makes
+                // that recoverable without knowing the app bar icon exists.
+                if (item.quantity > 0 && !item.equipped) ...[
+                  OutlinedButton(
+                    key: Key('equip-item-${item.id}'),
+                    onPressed: item.canEquip && !anyBusy ? onEquip : null,
+                    child: const Text('Equip'),
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 ElevatedButton(
                   key: Key('buy-item-${item.id}'),
                   onPressed: enabled ? onBuy : null,

@@ -269,6 +269,58 @@ void main() {
       expect(state.pendingLevelUp, isNull);
     });
 
+    testWidgets('a refresh tick while the dialog is open does not stack a second copy',
+        (tester) async {
+      // Regression. `_maybeShowLevelUp` is called from `build`, and `build` re-runs on every
+      // `notifyListeners` — including the periodic re-read. It used to push a *fresh* dialog on
+      // each of those rebuilds while `pendingLevelUp` was still set, so a player who took longer
+      // than one tick to dismiss it ended up behind a stack of identical copies: tapping "Nice"
+      // popped the top one and revealed the next, which reads as a button that does nothing.
+      //
+      // This went unseen because every other test in this file pushes `refreshInterval` out to an
+      // hour, so no rebuild ever landed while the dialog was open. This one deliberately does not.
+      final api = FakeApiClient(
+        doJobResult: const DoJobResult(
+          result: JobResult(
+            jobId: 'shake-down-corner-store',
+            succeeded: true,
+            energySpent: 1,
+            cashEarned: 25,
+            xpEarned: 10,
+            healthLost: 0,
+            mastery: kFakeMastery,
+            masteryRankedUp: false,
+          ),
+          player: kFakeMe,
+          levelUp: LevelUp(
+            levelsGained: 1,
+            newLevel: 2,
+            skillPointsGranted: 1,
+            metersRefilled: true,
+          ),
+        ),
+      );
+      final state = await pumpJobs(tester, api, refreshInterval: const Duration(seconds: 10));
+
+      await tester.tap(find.byKey(const Key('do-job-shake-down-corner-store')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('level-up-dialog')), findsOneWidget);
+
+      // Three re-reads land while the dialog is still up — roughly the half-minute a real player
+      // spends reading it. Still exactly one dialog.
+      for (var i = 0; i < 3; i++) {
+        await tester.pump(const Duration(seconds: 10));
+        await tester.pumpAndSettle();
+      }
+      expect(find.byKey(const Key('level-up-dialog')), findsOneWidget);
+
+      // And a single tap is enough to be rid of it.
+      await tester.tap(find.byKey(const Key('level-up-ok')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('level-up-dialog')), findsNothing);
+      expect(state.pendingLevelUp, isNull);
+    });
+
     testWidgets('a multi-level gain says so', (tester) async {
       final api = FakeApiClient(
         doJobResult: const DoJobResult(
@@ -475,6 +527,41 @@ void main() {
       expect(find.byKey(const Key('action-message')), findsNothing);
     });
 
+    testWidgets('the panel is the same height whichever way the job goes', (tester) async {
+      // Regression, and the reason the trailing lines in JobResultPanel are always laid out.
+      // The panel sits above the job list, so a change in its height moves every "Do job" button
+      // under it. A failure used to add an outcome note that a success did not have, and a
+      // rank-up added another line again, so the primary button jumped by about a line between
+      // consecutive taps — on the control a new player presses roughly thirty times in their
+      // first session. These three outcomes must occupy exactly the same box.
+      Future<double> panelHeight(FakeApiClient api) async {
+        // Tear the previous tree down first. Pumping a second JobsScreen into the same slot lets
+        // Flutter reuse `_JobsScreenState`, so `initState` — and the `loadJobs` it schedules —
+        // never runs again, and the screen renders against an AppState that has no jobs yet.
+        await tester.pumpWidget(const SizedBox.shrink());
+        await pumpJobs(tester, api);
+        await tester.tap(find.byKey(const Key('do-job-shake-down-corner-store')));
+        await tester.pumpAndSettle();
+        return tester.getSize(find.byKey(const Key('job-result-panel'))).height;
+      }
+
+      final failed = await panelHeight(failing());
+      final succeeded = await panelHeight(FakeApiClient(
+        doJobResult: const DoJobResult(result: kSucceededJobResult, player: kFakeMe),
+      ));
+      final rankedUp = await panelHeight(FakeApiClient(
+        doJobResult: const DoJobResult(
+          result: kSucceededJobResultWithRankUp,
+          player: kFakeMe,
+        ),
+      ));
+
+      expect(succeeded, failed,
+          reason: 'a success and a failure must not move the job list relative to each other');
+      expect(rankedUp, succeeded,
+          reason: 'a mastery rank-up must not move the job list either');
+    });
+
     testWidgets('it says the job failed', (tester) async {
       await pumpJobs(tester, failing());
 
@@ -483,7 +570,10 @@ void main() {
 
       final title = tester.widget<Text>(find.byKey(const Key('job-result-title')));
       expect(title.data, isNot('Job complete'));
-      expect(find.byKey(const Key('job-result-failed-note')), findsOneWidget);
+      // The note line is always laid out now (it keeps the panel one height — see
+      // JobResultPanel), so assert on what it *says* rather than merely that it exists.
+      final note = tester.widget<Text>(find.byKey(const Key('job-result-note')));
+      expect(note.data, contains('The job failed'));
     });
 
     testWidgets('it shows the consolation payout and the health lost', (tester) async {

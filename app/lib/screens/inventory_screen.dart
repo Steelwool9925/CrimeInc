@@ -55,7 +55,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
               state.inventoryError!,
               key: const Key('inv-error'),
               textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.red),
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
             const SizedBox(height: 16),
             ElevatedButton(

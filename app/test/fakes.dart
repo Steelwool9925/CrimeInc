@@ -173,6 +173,30 @@ const kFailedJobResult = JobResult(
   masteryRankedUp: false,
 );
 
+/// A clean win on the same job: no health lost, mastery unmoved.
+const kSucceededJobResult = JobResult(
+  jobId: 'shake-down-corner-store',
+  succeeded: true,
+  energySpent: 1,
+  cashEarned: 25,
+  xpEarned: 10,
+  healthLost: 0,
+  mastery: kFakeMastery,
+  masteryRankedUp: false,
+);
+
+/// The same win, but it also crossed a mastery rank — the outcome that adds the celebratory line.
+const kSucceededJobResultWithRankUp = JobResult(
+  jobId: 'shake-down-corner-store',
+  succeeded: true,
+  energySpent: 1,
+  cashEarned: 25,
+  xpEarned: 10,
+  healthLost: 0,
+  mastery: kFakeMastery,
+  masteryRankedUp: true,
+);
+
 const kFakeMe = Me(
   playerId: 'player-guid-123',
   energy: MeterState(

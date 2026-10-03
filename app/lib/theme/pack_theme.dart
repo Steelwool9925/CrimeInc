@@ -31,6 +31,40 @@ const Color _bone = Color(0xFFEDE7DA);
 /// background information without competing with `_bone` body text.
 const Color _smoke = Color(0xFF8B8680);
 
+/// WCAG 2.x contrast ratio between two opaque colours.
+///
+/// `Color.computeLuminance` already returns WCAG relative luminance, so this is only the ratio
+/// formula around it. 4.5:1 is the AA threshold for body text; 3:1 covers large text and non-text
+/// UI.
+double _contrastRatio(Color a, Color b) {
+  final la = a.computeLuminance();
+  final lb = b.computeLuminance();
+  final lighter = la > lb ? la : lb;
+  final darker = la > lb ? lb : la;
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+/// Mixes [foreground] toward [_bone] until it clears [minRatio] against [background].
+///
+/// Used for the danger/error colour, which in this app is only ever applied to text. Keeping the
+/// pack's own hue matters for the one-spot-colour design, but a saturated red on a near-black
+/// card is not readable at body-text size, and gate labels are exactly the text a player has to
+/// read to understand a refusal. Mixing toward bone preserves the hue while buying luminance.
+///
+/// Computed per pack rather than baked as a constant: how far the mix has to go depends entirely
+/// on how dark that pack's surface is, so a fixed ratio that satisfies the crime pack silently
+/// fails a pack with a lighter secondary.
+Color _legibleOn(Color foreground, Color background, {double minRatio = 4.5}) {
+  const steps = 20;
+  for (var step = 0; step <= steps; step++) {
+    final candidate = Color.lerp(foreground, _bone, step / steps)!;
+    if (_contrastRatio(candidate, background) >= minRatio) return candidate;
+  }
+  // Bone is the most legible colour in the palette; if even that misses the bar the pack has
+  // given us a background it cannot support, and bone is still the best available answer.
+  return _bone;
+}
+
 /// Ink-outline width shared by every card, button and panel border, so the line weight reads as
 /// one consistent pen stroke across the app rather than a mix of hairlines and thick strokes.
 const double _inkWidth = 2.5;
@@ -83,7 +117,18 @@ ThemeData packTheme(ContentPack? pack) {
     surface: surface,
     // One spot colour, not two reds: fromSeed would otherwise generate its own independent
     // error red, which reads as a second, slightly-off accent hue next to the pack's primary.
-    error: primary,
+    //
+    // It is the pack's primary *lifted until it is readable*, though, not the primary itself.
+    // Every use of `error` in this app is text — gate labels ("Requires level 3", "Costs more
+    // than you have"), field validation, the failed-job title; nothing fills with it, so this
+    // only affects glyphs. At full strength the crime pack's primary measures 2.92:1 against its
+    // card surface, short of the 4.5:1 WCAG asks of body text, and these are precisely the labels
+    // a player must read to learn why something was refused.
+    //
+    // The lift is computed, not a constant: how far a red has to travel to become legible depends
+    // on how dark the pack made its surface, and a pack with a lighter secondary needs more of it
+    // than the crime pack does. See [_legibleOn].
+    error: _legibleOn(primary, surface),
     onError: _bone,
   );
 

@@ -88,6 +88,13 @@ class _ServerAddressScreenState extends State<ServerAddressScreen> {
       _saving = true;
     });
 
+    // Close the text-input connection before handing off. On web, Flutter keeps a real DOM input
+    // alive for the focused field; leaving this screen with the field still focused left that
+    // element — and the form wrapper around it — in the accessibility tree for the rest of the
+    // session. A screen-reader or keyboard user deep in the game could still tab onto a server
+    // address box belonging to a screen that is long gone.
+    FocusManager.instance.primaryFocus?.unfocus();
+
     await widget.onSaved(address);
     // No further setState here: onSaved moves the app past this screen entirely, so this widget
     // is expected to be gone by the time the future completes.

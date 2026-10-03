@@ -36,6 +36,9 @@ class JobsScreen extends StatefulWidget {
 class _JobsScreenState extends State<JobsScreen> {
   Timer? _refresher;
 
+  /// Whether a level-up dialog is already on screen. See [_maybeShowLevelUp].
+  bool _levelUpShowing = false;
+
   @override
   void initState() {
     super.initState();
@@ -59,12 +62,27 @@ class _JobsScreenState extends State<JobsScreen> {
   }
 
   /// Shows the level-up dialog when one is pending, then clears it.
+  ///
+  /// `_levelUpShowing` is load-bearing, and this is why: this method is called from [build], which
+  /// re-runs on every `notifyListeners` — including the ten-second `_refresher` tick. Without the
+  /// guard, each of those rebuilds saw `pendingLevelUp` still set and pushed *another* identical
+  /// dialog on top of the one already open. A player who took longer than one tick to dismiss it
+  /// ended up behind a stack of copies, and tapping "Nice" popped only the top one and revealed
+  /// the next — which reads as a button that does nothing. (Barrier taps behaved the same way, so
+  /// the dialog also looked non-dismissible.)
+  ///
+  /// The flag is set synchronously here rather than inside the post-frame callback: two builds can
+  /// be scheduled before either callback runs, and both would otherwise pass the check.
   void _maybeShowLevelUp(BuildContext context, AppState state) {
     final levelUp = state.pendingLevelUp;
-    if (levelUp == null) return;
+    if (levelUp == null || _levelUpShowing) return;
+    _levelUpShowing = true;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!context.mounted || state.pendingLevelUp == null) return;
+      if (!context.mounted || state.pendingLevelUp == null) {
+        _levelUpShowing = false;
+        return;
+      }
 
       showDialog<void>(
         context: context,
@@ -75,7 +93,13 @@ class _JobsScreenState extends State<JobsScreen> {
             state.acknowledgeLevelUp();
           },
         ),
-      );
+      ).whenComplete(() {
+        _levelUpShowing = false;
+        // Escape and barrier taps pop the route without running `onAcknowledge`, which would leave
+        // `pendingLevelUp` set and re-open the dialog on the very next rebuild. Treat any dismissal
+        // as acknowledgement; the call is idempotent.
+        state.acknowledgeLevelUp();
+      });
     });
   }
 
@@ -123,7 +147,7 @@ class _JobsScreenState extends State<JobsScreen> {
               state.jobsError!,
               key: const Key('jobs-error'),
               textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.red),
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
             const SizedBox(height: 16),
             ElevatedButton(
