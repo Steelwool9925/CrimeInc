@@ -72,8 +72,14 @@ public class JobServiceTests
             itemRequirements: [new ItemRequirement("switchblade", minQuantity)],
             itemSuccessChancePerSurplusPoint: itemSuccessChancePerSurplusPoint);
 
+    // `energy` defaults to a full bar, like `health` beside it — the 32 bare TestPlayer() callers
+    // mean "a healthy player, energy is not what this test is about", and every test that does care
+    // passes an explicit value. It was previously a literal 10, which silently stopped meaning
+    // "full" when PlayerDefaults.EnergyMax moved to 20 and broke the two gate tests that assert
+    // energy is untouched.
     private static Player TestPlayer(
-        int level = 1, int energy = 10, long cash = 100, long xp = 0, int health = PlayerDefaults.HealthMax)
+        int level = 1, int energy = PlayerDefaults.EnergyMax, long cash = 100, long xp = 0,
+        int health = PlayerDefaults.HealthMax)
     {
         var player = new Player
         {

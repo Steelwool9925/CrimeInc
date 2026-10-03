@@ -28,7 +28,7 @@
         "defense": 1
       },
       "risk": {
-        "baseSuccessChance": 0.65,
+        "baseSuccessChance": 0.80,
         "successChancePerSurplusPoint": 0.010,
         "healthLossMin": 0,
         "healthLossMax": 1

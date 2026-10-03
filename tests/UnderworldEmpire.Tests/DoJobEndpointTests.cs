@@ -283,14 +283,26 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task Running_out_of_energy_is_refused_with_reason_energy()
     {
-        // Ten 1-energy runs empty a full starting bar — but they also award exactly 100 XP, which
-        // levels the player to 2 and refills the meters. So the bar has to be drained twice before
-        // energy actually runs out. That interaction is the tuning that makes CP2 work, and this test
-        // documents it.
+        // Draining the bar does not refuse on the first empty: a 1-energy job awards 10 XP, and
+        // crossing a level threshold refills every meter. So the bar refills underneath the drain
+        // several times before energy genuinely runs out. At a 20-energy bar the refills land on
+        // attempts 10 (level 2, 100 XP) and 30 (level 3, 300 XP), which pushes the first real
+        // refusal out to attempt 51.
+        //
+        // The bound scales with EnergyMax rather than being a bare literal. It was previously 40,
+        // sufficient only while the bar was 10, and it silently became too small when the bar moved
+        // to 20 — failing with an unhelpful "value is null" instead of naming the problem.
+        //
+        // Honest caveat: x10 is a safety factor, not a real derivation. The true bound depends on
+        // the level-threshold cascade (how far apart consecutive level-ups get before a gap exceeds
+        // one bar), which is a property of LevelCurve and the job's XP, not of EnergyMax alone. A
+        // future curve change could in principle outgrow it — so the assertion below says so
+        // explicitly rather than leaving the next reader to rediscover it.
         var token = await NewGuestTokenAsync();
 
+        int maxAttempts = PlayerDefaults.EnergyMax * 10;
         HttpResponseMessage? refusal = null;
-        for (int i = 0; i < 40; i++)
+        for (int i = 0; i < maxAttempts; i++)
         {
             var response = await DoJobAsync(token, CheapJob);
             if (response.StatusCode == HttpStatusCode.Conflict)
@@ -300,7 +312,12 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
             }
         }
 
-        Assert.NotNull(refusal);
+        Assert.True(refusal is not null,
+            $"No energy refusal arrived within {maxAttempts} attempts at a " +
+            $"{PlayerDefaults.EnergyMax}-energy bar. Either the drain is being outrun by level-up " +
+            $"meter refills further than the x10 safety factor allows (see the note above), or " +
+            $"running out of energy has stopped producing a 409.");
+
         using var doc = await BodyAsync(refusal!);
         Assert.Equal("energy", doc.RootElement.GetProperty("reason").GetString());
     }
@@ -312,13 +329,21 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task Ten_runs_of_the_cheap_job_level_the_player_and_refill_meters()
     {
-        // The load-bearing CP2 tuning: one full starting energy bar of the cheapest job is exactly
-        // the level-2 threshold, and crosses a mastery rank along the way.
+        // Ten successful runs of the cheapest job are exactly the level-2 threshold (10 XP each),
+        // and cross a mastery rank along the way. Both instants are checked: the sixth run for the
+        // rank, the tenth for the level.
         //
-        // The rank has moved twice. M3R dropped `completionsPerRank` 10 -> 8 so the first rank
-        // stayed reachable once attempts could fail; lowering the first job base chance to 0.65
-        // dropped it again, 8 -> 6. So the rank-up lands on the sixth run. Both instants are
-        // checked: the sixth for the rank, the tenth for the level.
+        // Outcomes are forced, not rolled — CustomWebApplicationFactory swaps IRandomSource for a
+        // deterministic SwitchableRandomSource so "ten jobs" really means "ten completions". The
+        // starter job's base success chance is therefore irrelevant to this test, which is why
+        // raising it 0.65 -> 0.80 did not move these numbers.
+        //
+        // `completionsPerRank` has moved twice (10 -> 8 -> 6) to keep the first rank reachable on
+        // one bar as the odds changed; at 6 the rank-up lands on the sixth run.
+        //
+        // Note ten runs is no longer a *full* bar: PlayerDefaults.EnergyMax is 20, so this test
+        // spends half of one. The level-2 reachability property that depends on the whole bar is
+        // pinned separately by FirstSessionTests.
         var token = await NewGuestTokenAsync();
 
         JsonDocument? sixth = null;

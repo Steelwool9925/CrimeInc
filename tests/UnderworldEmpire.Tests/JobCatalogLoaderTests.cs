@@ -393,7 +393,7 @@ public class JobCatalogLoaderTests : IDisposable
     [Fact]
     public void Real_crime_catalog_loads_and_is_reachable_for_a_new_player()
     {
-        var catalog = new ContentPackLoader(FindRepoContentRoot()).LoadJobs("crime");
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadJobs("crime");
 
         Assert.NotEmpty(catalog.Jobs);
 
@@ -725,7 +725,7 @@ public class JobCatalogLoaderTests : IDisposable
     {
         // Integration proof: the real jobs.json + items.json pairing loads and cross-validates
         // cleanly, and the demo content is wired the way the README documents it.
-        var realLoader = new ContentPackLoader(FindRepoContentRoot());
+        var realLoader = new ContentPackLoader(RepoContent.FindRoot());
         var itemCatalog = realLoader.LoadItems("crime");
 
         var job = realLoader.LoadJobs("crime", itemCatalog).Jobs
@@ -750,7 +750,7 @@ public class JobCatalogLoaderTests : IDisposable
         // would leave this test green while the property it names quietly became false. It counts
         // expected completions instead, against the job's base chance: the floor a player sitting
         // exactly on the requirements gets, not the better odds a geared one enjoys.
-        var catalog = new ContentPackLoader(FindRepoContentRoot()).LoadJobs("crime");
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadJobs("crime");
 
         var cheapest = catalog.Jobs
             .Where(j => j.LevelRequirement == 1)
@@ -765,26 +765,5 @@ public class JobCatalogLoaderTests : IDisposable
             $"energy bar, expected to yield {expectedCompletions:0.##} completions at its base " +
             $"chance of {cheapest.BaseSuccessChance}, but {catalog.CompletionsPerRank} completions " +
             $"are needed for a mastery rank.");
-    }
-
-    /// <summary>
-    /// Walks up from the test assembly to the repo root's <c>content</c> folder, the same approach
-    /// <see cref="ContentPackLoaderTests"/> uses — the test project does not copy content to output.
-    /// </summary>
-    private static string FindRepoContentRoot()
-    {
-        var dir = AppContext.BaseDirectory;
-        for (int i = 0; i < 10; i++)
-        {
-            var candidate = Path.Combine(dir, "content");
-            if (Directory.Exists(candidate))
-                return candidate;
-
-            var parent = Path.GetDirectoryName(dir);
-            if (parent is null) break;
-            dir = parent;
-        }
-
-        throw new DirectoryNotFoundException("Could not locate the repo 'content' folder from the test assembly.");
     }
 }

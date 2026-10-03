@@ -7,8 +7,36 @@ namespace UnderworldEmpire.Domain;
 /// </summary>
 public static class PlayerDefaults
 {
-    /// <summary>Default maximum Energy for a new player.</summary>
-    public const int EnergyMax = 10;
+    /// <summary>Default maximum Energy for a new player. Tunable balance value.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The property this value exists to produce:</b> one full opening bar, spent on the
+    /// cheapest level-1 job, must be enough to reach level 2. That is the first session's only
+    /// reward moment — no level-up means no skill point, no meter refill and no job unlock, so
+    /// the game's entire reward vocabulary fires zero times.
+    /// </para>
+    /// <para>
+    /// At 10 this failed. Measured over 400 seeded runs per temperament, a new player banked 68.6
+    /// of the 100 XP level 2 needs, and only <b>1%</b> reached it in their first session. At 20,
+    /// paired with the starter job's 0.80 success chance, 100% do:
+    /// 20 energy &#215; (0.80 &#215; 10 XP + 0.20 &#215; 1 consolation XP) = 164 XP, clearing the
+    /// threshold around the thirteenth tap.
+    /// </para>
+    /// <para>
+    /// <b>This is a buffer, not a rate.</b> <see cref="Meter.CurrentAt"/> computes
+    /// <c>min(Max, stored + elapsed / regenPerPoint)</c>, so this constant bounds how much energy
+    /// can bank between visits, and <see cref="MeterRates.Energy"/> alone sets how much is earned
+    /// per hour. Raising it lengthens the opening session and widens the away-storage window from
+    /// 15 to 30 minutes; it does <b>not</b> change steady-state throughput, which stays at 40/hr.
+    /// Do not reach for this constant to change the earn rate.
+    /// </para>
+    /// <para>
+    /// Pinned by <c>FirstSessionTests</c>. Note this is only the default for <i>new</i> players
+    /// — <c>Meter.Max</c> is persisted per player as the <c>EnergyMax</c> column, so existing
+    /// rows keep whatever they were created with until a migration rewrites them.
+    /// </para>
+    /// </remarks>
+    public const int EnergyMax = 20;
 
     /// <summary>Default maximum Stamina for a new player.</summary>
     public const int StaminaMax = 5;

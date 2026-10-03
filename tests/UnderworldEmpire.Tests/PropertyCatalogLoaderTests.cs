@@ -353,7 +353,7 @@ public class PropertyCatalogLoaderTests : IDisposable
     [Fact]
     public void The_crime_pack_loads()
     {
-        Assert.NotEmpty(new ContentPackLoader(FindRepoContentRoot()).LoadProperties("crime").Properties);
+        Assert.NotEmpty(new ContentPackLoader(RepoContent.FindRoot()).LoadProperties("crime").Properties);
     }
 
     [Fact]
@@ -362,7 +362,7 @@ public class PropertyCatalogLoaderTests : IDisposable
         // CP3 asks a tester to buy a property and watch it earn. If the cheapest one needed a long grind
         // first, the checkpoint would not be reachable in one sitting. 1000 cash is roughly two full
         // energy bars of the starting job; anything at or under that is a short grind, not a project.
-        var catalog = new ContentPackLoader(FindRepoContentRoot()).LoadProperties("crime");
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadProperties("crime");
 
         Assert.Contains(catalog.Properties, p => p.LevelRequirement == 1 && p.Price <= 1000);
     }
@@ -371,7 +371,7 @@ public class PropertyCatalogLoaderTests : IDisposable
     public void The_cheapest_level_one_property_fills_up_fast_enough_to_watch()
     {
         // "Watch income accrue to cap" has to be observable inside a test session, not overnight.
-        var catalog = new ContentPackLoader(FindRepoContentRoot()).LoadProperties("crime");
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadProperties("crime");
 
         var starter = catalog.Properties
             .Where(p => p.LevelRequirement == 1)
@@ -386,7 +386,7 @@ public class PropertyCatalogLoaderTests : IDisposable
     public void The_starter_property_earns_a_visible_coin_within_a_minute()
     {
         // A rate below one coin a minute makes the CP3 screen look frozen for the first few minutes.
-        var catalog = new ContentPackLoader(FindRepoContentRoot()).LoadProperties("crime");
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadProperties("crime");
 
         var starter = catalog.Properties
             .Where(p => p.LevelRequirement == 1)
@@ -400,7 +400,7 @@ public class PropertyCatalogLoaderTests : IDisposable
     [Fact]
     public void No_property_is_free()
     {
-        var catalog = new ContentPackLoader(FindRepoContentRoot()).LoadProperties("crime");
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadProperties("crime");
 
         Assert.All(catalog.Properties, p => Assert.True(p.Price > 0, $"Property '{p.Id}' is free."));
     }
@@ -410,31 +410,10 @@ public class PropertyCatalogLoaderTests : IDisposable
     {
         // A property whose lifetime income never repays the purchase is a trap rather than a choice.
         // Full collections needed to break even is the honest measure, since income stops at the cap.
-        var catalog = new ContentPackLoader(FindRepoContentRoot()).LoadProperties("crime");
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadProperties("crime");
 
         Assert.All(catalog.Properties, p =>
             Assert.True(p.CapPerUnit > 0 && p.Price / p.CapPerUnit <= 200,
                 $"Property '{p.Id}' needs {p.Price / Math.Max(p.CapPerUnit, 1)} full collections to break even."));
-    }
-
-    /// <summary>
-    /// Walks up from the test assembly to the repo root's <c>content</c> folder, the same approach
-    /// <see cref="ItemCatalogLoaderTests"/> uses — the test project does not copy content to output.
-    /// </summary>
-    private static string FindRepoContentRoot()
-    {
-        var dir = AppContext.BaseDirectory;
-        for (int i = 0; i < 10; i++)
-        {
-            var candidate = Path.Combine(dir, "content");
-            if (Directory.Exists(candidate))
-                return candidate;
-
-            var parent = Path.GetDirectoryName(dir);
-            if (parent is null) break;
-            dir = parent;
-        }
-
-        throw new DirectoryNotFoundException("Could not locate the repo 'content' folder from the test assembly.");
     }
 }

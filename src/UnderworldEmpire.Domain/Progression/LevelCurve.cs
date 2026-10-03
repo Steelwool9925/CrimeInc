@@ -17,16 +17,32 @@ namespace UnderworldEmpire.Domain.Progression;
 /// <b>The formula.</b> Cumulative XP to reach level <c>L</c> is
 /// <c>XpPerLevelStep × (L − 1) × L</c>, so thresholds run 0, 100, 300, 600, 1000, 1500 … and the
 /// gap between consecutive levels grows linearly (100, 200, 300 …). Level 2 landing at exactly 100
-/// was chosen against the crime pack's cheapest job: ten runs of it are one full starting energy
-/// bar, and at 10 XP each that was exactly the level-2 threshold.
+/// was originally chosen against the crime pack's cheapest job, back when jobs could not fail: ten
+/// runs of it were one full starting energy bar, and at 10 XP each that was exactly the level-2
+/// threshold.
 /// </para>
 /// <para>
-/// <b>M3R weakened that, deliberately.</b> Jobs can now fail, and a failure grants only the pack's
-/// consolation fraction of the XP, so one bar of *Shake Down a Corner Store* expects roughly 91 XP
-/// rather than exactly 100 — level 2 usually takes an eleventh run once energy ticks back. The
-/// curve was left alone rather than retuned to chase the old guarantee. What CP2 asks the tester to
-/// *watch* is the mastery bar, and that half was protected instead, by dropping the pack's
-/// <c>completionsPerRank</c> from 10 to 8. See <c>content/crime/README.md</c>.
+/// <b>M3R broke that premise, and this remark then described the breakage wrongly for some time.</b>
+/// Once jobs could fail, a failure granted only the pack's consolation fraction of the XP. An
+/// earlier version of this text put the resulting figure at "roughly 91 XP" and said level 2
+/// "usually takes an eleventh run". Both were wrong, and not by a little: simulating the real rules
+/// over 400 seeded first sessions measured <b>68.6 XP</b> on a full bar, around 15 runs to reach
+/// 100, and — because the bar ran dry first — only <b>1%</b> of new players reaching level 2 in
+/// their first session at all. The same paragraph also claimed the pack's
+/// <c>completionsPerRank</c> had been dropped "from 10 to 8"; the shipped value is <b>6</b>.
+/// </para>
+/// <para>
+/// <b>The premise was restored by moving the other two numbers, not the curve.</b>
+/// <see cref="PlayerDefaults.EnergyMax"/> is now 20 and the starter job's base success chance is
+/// 0.80, which puts a full opening bar at 20 &#215; (0.80 &#215; 10 + 0.20 &#215; 1) = <b>164 XP</b> —
+/// clearing the 100 threshold around the thirteenth tap, with headroom. So level 2 is once again
+/// reachable in one sitting and <see cref="XpPerLevelStep"/> did not have to move.
+/// </para>
+/// <para>
+/// <b>Retuning the curve itself is deliberately out of scope here</b> and belongs with
+/// <see cref="PlayerDefaults.MaxLevel"/> and the mastery payout — see the <c>progression-depth</c>
+/// roadmap item. Note the curve is pinned in two places by <c>ProgressionTests</c>, so any change
+/// to it is test-visible by design. See <c>content/crime/README.md</c>.
 /// </para>
 /// </remarks>
 public static class LevelCurve

@@ -85,13 +85,30 @@ $cheapest = @($props.properties | Sort-Object price | Select-Object -First 1)[0]
 $affordable = @($props.properties | Where-Object { $_.canBuy })
 Check "property catalog loads" ($props.properties.Count -gt 0) `
     "$($props.properties.Count) properties, cheapest '$($cheapest.id)' at $($cheapest.price)"
-# One energy bar cannot reach 500, and energy regens at 90 seconds a point, so the correct
-# behaviour here is a refusal naming cash. The buy/collect path itself is covered by
-# PropertyEndpointTests, PropertyIncomeTests and PropertyConcurrencyTests.
-$me = Invoke-RestMethod "$base/me" -Headers $h
+# The cash gate is checked against a FRESH guest, not the account that just ground the opener.
+#
+# This used to reuse the grinding account on the premise that "one energy bar cannot reach 500".
+# That premise died when PlayerDefaults.EnergyMax went 10 -> 20: the opening bar now buys ~35
+# attempts instead of ~17, so the player finishes the grind able to afford the cheapest property and
+# the cash gate correctly does not fire. A fresh guest starts at 0 cash by PlayerDefaults.StartingCash,
+# so it exercises the gate itself rather than depending on how much the grinder happened to earn.
+# The buy/collect path is covered by PropertyEndpointTests, PropertyIncomeTests and
+# PropertyConcurrencyTests.
+$broke = Invoke-RestMethod -Method Post "$base/session" -ContentType 'application/json' -Body '{}'
+$brokeHeaders = @{ Authorization = "Bearer $($broke.deviceToken)" }
+$brokeProps = Invoke-RestMethod "$base/properties" -Headers $brokeHeaders
+$brokeCheapest = @($brokeProps.properties | Sort-Object price | Select-Object -First 1)[0]
+$brokeAffordable = @($brokeProps.properties | Where-Object { $_.canBuy })
+$brokeMe = Invoke-RestMethod "$base/me" -Headers $brokeHeaders
 Check "unaffordable property is gated on cash" `
-    ($affordable.Count -eq 0 -and $cheapest.buyUnavailableReason -eq 'cash') `
-    "cash=$($me.cash) vs price=$($cheapest.price), reason='$($cheapest.buyUnavailableReason)'"
+    ($brokeAffordable.Count -eq 0 -and $brokeCheapest.buyUnavailableReason -eq 'cash') `
+    "fresh guest cash=$($brokeMe.cash) vs price=$($brokeCheapest.price), reason='$($brokeCheapest.buyUnavailableReason)'"
+
+# Informational, not a gate: the 20-energy opening bar means a first session can now reach the
+# cheapest property. Reported rather than asserted, because it depends on how the attempt rolls fell.
+$me = Invoke-RestMethod "$base/me" -Headers $h
+Write-Host "  NOTE  after one opening bar the grinding account holds $($me.cash) cash" `
+    "(cheapest property $($cheapest.price)) - affordable: $($affordable.Count -gt 0)"
 
 Write-Host "`n=== result ==="
 if ($fail -eq 0) { Write-Host "ALL SMOKE CHECKS PASSED" } else { Write-Host "$fail CHECK(S) FAILED" }

@@ -367,7 +367,7 @@ public class ItemCatalogLoaderTests : IDisposable
     [Fact]
     public void Real_crime_catalog_loads_and_fills_every_slot()
     {
-        var catalog = new ContentPackLoader(FindRepoContentRoot()).LoadItems("crime");
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadItems("crime");
 
         Assert.NotEmpty(catalog.Items);
 
@@ -387,7 +387,7 @@ public class ItemCatalogLoaderTests : IDisposable
         // reachable on one full energy bar of the pack's first job — measured at that job's cash
         // floor and its base success chance, so the figure is what an unlucky player can rely on
         // rather than what a lucky one might see.
-        var loader = new ContentPackLoader(FindRepoContentRoot());
+        var loader = new ContentPackLoader(RepoContent.FindRoot());
         var items = loader.LoadItems("crime");
         var jobs = loader.LoadJobs("crime");
 
@@ -416,7 +416,7 @@ public class ItemCatalogLoaderTests : IDisposable
     public void Real_crime_catalog_prices_every_item_above_zero()
     {
         // A free item would let a level-1 player fill a slot without engaging the economy at all.
-        var catalog = new ContentPackLoader(FindRepoContentRoot()).LoadItems("crime");
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadItems("crime");
 
         Assert.All(catalog.Items, i => Assert.True(i.Price > 0, $"Item '{i.Id}' is free."));
     }
@@ -428,7 +428,7 @@ public class ItemCatalogLoaderTests : IDisposable
     [Fact]
     public void Resolving_equipped_holdings_returns_only_the_worn_ones()
     {
-        var catalog = new ContentPackLoader(FindRepoContentRoot()).LoadItems("crime");
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadItems("crime");
         var playerId = Guid.NewGuid();
 
         var worn = new PlayerItem { PlayerId = playerId, ItemId = "brass-knuckles" };
@@ -449,32 +449,11 @@ public class ItemCatalogLoaderTests : IDisposable
         // Content dropped the item after the player bought it. The row stays — so a restored item comes
         // back with its history — but an item that no longer exists can no longer score anything, and a
         // throw here would lock the player out of their own inventory screen.
-        var catalog = new ContentPackLoader(FindRepoContentRoot()).LoadItems("crime");
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadItems("crime");
         var ghost = new PlayerItem { PlayerId = Guid.NewGuid(), ItemId = "retired-item" };
         ghost.AddCopies(1);
         ghost.Equip();
 
         Assert.Empty(catalog.ResolveEquipped([ghost]));
-    }
-
-    /// <summary>
-    /// Walks up from the test assembly to the repo root's <c>content</c> folder, the same approach
-    /// <see cref="JobCatalogLoaderTests"/> uses — the test project does not copy content to output.
-    /// </summary>
-    private static string FindRepoContentRoot()
-    {
-        var dir = AppContext.BaseDirectory;
-        for (int i = 0; i < 10; i++)
-        {
-            var candidate = Path.Combine(dir, "content");
-            if (Directory.Exists(candidate))
-                return candidate;
-
-            var parent = Path.GetDirectoryName(dir);
-            if (parent is null) break;
-            dir = parent;
-        }
-
-        throw new DirectoryNotFoundException("Could not locate the repo 'content' folder from the test assembly.");
     }
 }

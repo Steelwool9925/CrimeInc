@@ -247,7 +247,9 @@ public class JobEndpointTests : IClassFixture<CustomWebApplicationFactory>
 
         using var doc = await GetJobsAsync(token);
 
-        Assert.Equal(0.65, Job(doc, "shake-down-corner-store").GetProperty("successChance").GetDouble(), precision: 10);
+        // A fresh guest is 1/1 against the starter job's 1/1 requirement, so there is no surplus
+        // bonus and the reported chance is the pack's base value exactly.
+        Assert.Equal(0.80, Job(doc, "shake-down-corner-store").GetProperty("successChance").GetDouble(), precision: 10);
     }
 
     [Fact]
