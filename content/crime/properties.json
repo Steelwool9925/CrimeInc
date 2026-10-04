@@ -8,7 +8,7 @@
       "description": "A patch of pavement nobody works without your say-so.",
       "levelRequirement": 1,
       "price": 500,
-      "income": { "perHour": 240, "capMinutes": 15 }
+      "income": { "perHour": 240, "capMinutes": 480 }
     },
     {
       "id": "pawn-shop",
@@ -16,7 +16,7 @@
       "description": "Buys low, asks nothing, and keeps no paperwork worth subpoenaing.",
       "levelRequirement": 2,
       "price": 1800,
-      "income": { "perHour": 300, "capMinutes": 120 }
+      "income": { "perHour": 300, "capMinutes": 480 }
     },
     {
       "id": "car-wash",
@@ -24,7 +24,7 @@
       "description": "Twelve dollars a wash and a great deal more than twelve dollars a day.",
       "levelRequirement": 4,
       "price": 6000,
-      "income": { "perHour": 640, "capMinutes": 240 }
+      "income": { "perHour": 640, "capMinutes": 720 }
     },
     {
       "id": "night-club",
@@ -32,7 +32,7 @@
       "description": "Loud enough that nobody upstairs hears the counting room.",
       "levelRequirement": 6,
       "price": 18000,
-      "income": { "perHour": 1100, "capMinutes": 480 }
+      "income": { "perHour": 1100, "capMinutes": 720 }
     },
     {
       "id": "shipping-warehouse",
@@ -40,7 +40,7 @@
       "description": "Half the crates are honest. The manifest says all of them are.",
       "levelRequirement": 9,
       "price": 52000,
-      "income": { "perHour": 2000, "capMinutes": 720 }
+      "income": { "perHour": 2000, "capMinutes": 1440 }
     },
     {
       "id": "riverside-casino",

@@ -368,18 +368,59 @@ public class PropertyCatalogLoaderTests : IDisposable
     }
 
     [Fact]
-    public void The_cheapest_level_one_property_fills_up_fast_enough_to_watch()
+    public void Every_property_banks_at_least_a_night_away()
     {
-        // "Watch income accrue to cap" has to be observable inside a test session, not overnight.
+        // This assertion used to say the opposite — that the starter property must fill within
+        // half an hour, so a tester could "watch income accrue to cap" inside one session. That
+        // optimised the mechanic for being demonstrated rather than for being played: a daily
+        // player collected the same 60 cash from a street corner whether they had been gone an
+        // hour or a week, forfeiting 99.65% of what it generated over three days. Property
+        // accrual is the only thing in this game shaped like a daily habit, and a cap shorter
+        // than a night is a cap that punishes the habit.
+        //
+        // The watchability concern it was protecting is real and is still covered — by
+        // The_starter_property_earns_a_visible_coin_within_a_minute, which pins the *rate*. Rate
+        // is where that belongs: a casino should out-earn a street corner because it earns
+        // faster, not because the street corner forgets sooner.
+        const int oneNight = 8 * 60;
         var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadProperties("crime");
 
-        var starter = catalog.Properties
-            .Where(p => p.LevelRequirement == 1)
-            .OrderBy(p => p.Price)
-            .First();
+        foreach (var property in catalog.Properties)
+        {
+            Assert.True(property.AccrualCapMinutes >= oneNight,
+                $"'{property.Id}' stops earning after {property.AccrualCapMinutes} minutes, so a " +
+                $"player who sleeps loses everything it would have made past that point. A " +
+                $"property's cap is a return cadence, not a difficulty tier.");
+        }
+    }
 
-        Assert.True(starter.AccrualCapMinutes <= 30,
-            $"Starter property '{starter.Id}' takes {starter.AccrualCapMinutes} minutes to fill.");
+    [Fact]
+    public void A_dearer_property_never_banks_less_than_a_cheaper_one()
+    {
+        // Caps may still widen with price — they do, 8h at the entry up to 24h at the casino, and
+        // that spread is deliberate. What must never happen again is the ordering running
+        // *backwards*, which is the shape the old tuning had: the 500-cash street corner banked 15
+        // minutes while the 140,000-cash casino banked a full day, so the longer you could afford
+        // to be patient, the less patience the game asked of you.
+        //
+        // Stated as monotonicity rather than as six expected numbers, so a future balance pass is
+        // free to retune the windows and only fails if it re-inverts them.
+        var ordered = new ContentPackLoader(RepoContent.FindRoot())
+            .LoadProperties("crime")
+            .Properties
+            .OrderBy(p => p.Price)
+            .ToList();
+
+        for (int i = 1; i < ordered.Count; i++)
+        {
+            var cheaper = ordered[i - 1];
+            var dearer = ordered[i];
+
+            Assert.True(dearer.AccrualCapMinutes >= cheaper.AccrualCapMinutes,
+                $"'{dearer.Id}' costs {dearer.Price} and banks {dearer.AccrualCapMinutes} minutes, " +
+                $"but the cheaper '{cheaper.Id}' ({cheaper.Price}) banks " +
+                $"{cheaper.AccrualCapMinutes}. Caps must not run backwards against affordability.");
+        }
     }
 
     [Fact]

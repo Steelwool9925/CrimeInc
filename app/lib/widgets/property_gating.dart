@@ -34,8 +34,12 @@ String propertyIncomeLabel(Property property, String cashLabel) =>
 
 /// A fill window in the largest unit that stays exact.
 ///
-/// The shipped pack runs from fifteen minutes to a full day, and "1440 min" is a number a player
-/// has to do arithmetic on before it means anything.
+/// The shipped pack now runs from eight hours to a full day — every property banks at least a
+/// night, so in practice every value takes the hours branch. The sub-hour and ragged-minute
+/// branches are kept because the content schema still permits them (1 to 43,200 minutes) and a
+/// pack is data: a future pack, or a rebalance, may well use them again.
+///
+/// "1440 min" is a number a player has to do arithmetic on before it means anything.
 String accrualWindowLabel(int minutes) {
   if (minutes < 60) return '$minutes min';
   if (minutes % 60 != 0) return '$minutes min';

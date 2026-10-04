@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:underworld_empire/api/models.dart';
+import 'package:underworld_empire/widgets/property_gating.dart';
 
 /// One catalog row as GET /properties sends it.
 Map<String, dynamic> propertyJson({
@@ -192,6 +193,26 @@ void main() {
       expect(result.pending, 0);
       expect(result.cap, 60);
       expect(result.player.cash, 630);
+    });
+  });
+
+  group('accrualWindowLabel', () {
+    // Untested until now, and the rebalance moved every shipped cap into the hours branch:
+    // the pack used to run from 15 minutes to a day, and now runs from 8 hours to a day.
+    test('renders every cap the shipped pack actually uses', () {
+      expect(accrualWindowLabel(480), '8 hours');
+      expect(accrualWindowLabel(720), '12 hours');
+      expect(accrualWindowLabel(1440), '24 hours');
+    });
+
+    test('still handles the windows the schema permits but the pack no longer uses', () {
+      // content/crime/README.md allows 1..43,200 minutes, so a future pack may use these again.
+      expect(accrualWindowLabel(15), '15 min');
+      expect(accrualWindowLabel(59), '59 min');
+      expect(accrualWindowLabel(60), '1 hour');
+      // Not a whole number of hours, so minutes is the largest unit that stays exact —
+      // "1.5 hours" would be a rounding the player cannot check against the counter.
+      expect(accrualWindowLabel(90), '90 min');
     });
   });
 }

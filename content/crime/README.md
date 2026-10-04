@@ -241,9 +241,22 @@ Income is **accrued lazily**, exactly as the resource meters regenerate: nothing
 what a property has earned is derived from elapsed time whenever somebody asks. Buying another unit
 raises both the rate and the ceiling, so owning more never shortens how long you may stay away.
 
-`capMinutes` is the reason to come back. Past that window a property stops earning, so one left alone
-for a week pays exactly what one left alone for its window pays. It is expressed in **minutes** rather
-than hours so an early-game property can have a window short enough to watch fill.
+`capMinutes` is the reason to come back, and it is a **return cadence, not a difficulty tier.** Past
+that window a property stops earning, so one left alone for a week pays exactly what one left alone
+for its window pays. It is expressed in **minutes** rather than hours because the windows are not
+round numbers of hours.
+
+**Every property banks at least a night — eight hours — and the entry property is no exception.**
+This is the rule, and it is pinned by `PropertyCatalogLoaderTests`. The caps used to run the other
+way: the cheapest property capped at fifteen minutes and only the level-12 casino banked a full day.
+That inverted the mechanic against the player who needed it most. Property accrual is the only thing
+in this game shaped like a daily habit, and a once-daily player owning a street corner collected the
+same 60 cash whether they had been away an hour or a week — forfeiting 99.65% of what it generated
+over three days. The first property that banked a whole day arrived on day 40, by which point there
+was nothing left to spend it on.
+
+A later property earns more because `perHour` is higher, which is where that advantage belongs. It
+should out-earn an early one by earning faster, never by the early one forgetting sooner.
 
 `perHour` and `capMinutes` are each validated on their own **and as a product**: cap cash is
 `perHour × capMinutes ÷ 60` floored to whole cash, so `30/hour` over `1 minute` is half a coin and is
@@ -270,9 +283,12 @@ Two properties are load-bearing for the **CP3** checkpoint and are pinned by tes
 - The cheapest `levelRequirement: 1` property costs no more than roughly two full energy bars of the
   starting job, so "buy a property" is a short grind rather than a project. The current tuning makes
   that *Street Corner* at 500.
-- That same starter earns at least a coin a minute and fills its window in no more than 30 minutes,
-  so "watch income accrue to the cap, then collect" is observable inside one test session rather than
-  overnight. *Street Corner* earns 4 a minute and fills in 15.
+- That same starter earns at least a coin a minute, so "watch income accrue, then collect" is
+  observable inside one test session rather than overnight. *Street Corner* earns 4 a minute.
+  Note this is pinned on the **rate** and deliberately not on the cap: the cap was once held at 15
+  minutes for the same watchability reason, which optimised the property for being demonstrated
+  instead of for being played. Watchability is a property of `perHour`; the cap is a return cadence
+  (see above).
 
 Every property is also pinned to repay its own price within 200 full collections, so none of them is
 a trap rather than a choice.

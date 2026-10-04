@@ -33,7 +33,12 @@ public class PropertyEndpointTests : IClassFixture<CustomWebApplicationFactory>
     private const int StarterPerMinute = 4;
 
     /// <summary>What one unit of <see cref="Starter"/> holds when full, from content.</summary>
-    private const int StarterCapPerUnit = 60;
+    /// <remarks>
+    /// <c>perHour 240 × capMinutes 480 ÷ 60 = 1,920</c>. It was 60 while the street corner capped
+    /// at fifteen minutes; the caps were inverted so the entry property banks a night rather than
+    /// a coffee break, which is what makes it a reason to come back tomorrow.
+    /// </remarks>
+    private const int StarterCapPerUnit = 1_920;
 
     public PropertyEndpointTests(CustomWebApplicationFactory factory)
     {
@@ -196,7 +201,10 @@ public class PropertyEndpointTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Equal(1, corner.GetProperty("levelRequirement").GetInt32());
         Assert.Equal(500, corner.GetProperty("price").GetInt64());
         Assert.Equal(240, corner.GetProperty("incomePerHour").GetInt64());
-        Assert.Equal(15, corner.GetProperty("accrualCapMinutes").GetInt32());
+        // 480, not 15: the entry property is the one a returning player comes back to, so it
+        // banks a night rather than a quarter of an hour. PropertyCatalogLoaderTests pins the
+        // rule; this pins that the projection actually reports it.
+        Assert.Equal(480, corner.GetProperty("accrualCapMinutes").GetInt32());
     }
 
     [Fact]
