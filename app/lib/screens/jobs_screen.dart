@@ -286,20 +286,32 @@ class _JobCard extends StatelessWidget {
             ),
             if (job.mastery.maxRank > 0) ...[
               const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: LinearProgressIndicator(
-                      key: Key('mastery-bar-${job.id}'),
-                      value: job.mastery.rankProgress,
+              // The bar and its "Rank x/y" caption are one fact, announced as one.
+              //
+              // An unlabelled LinearProgressIndicator has no accessible name of its own, so the
+              // engine reaches outward and absorbs whatever text is nearby — this one announced
+              // itself as a progress bar named after the entire job card, title and description
+              // and all, while the rank it actually represents went unsaid. Naming it explicitly
+              // and excluding the caption it duplicates replaces that with the one short phrase
+              // a sighted player reads off it.
+              Semantics(
+                label: 'Mastery rank ${job.mastery.rank} of ${job.mastery.maxRank}',
+                excludeSemantics: true,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: LinearProgressIndicator(
+                        key: Key('mastery-bar-${job.id}'),
+                        value: job.mastery.rankProgress,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Rank ${job.mastery.rank}/${job.mastery.maxRank}',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ],
+                    const SizedBox(width: 8),
+                    Text(
+                      'Rank ${job.mastery.rank}/${job.mastery.maxRank}',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                ),
               ),
             ],
             const SizedBox(height: 8),
@@ -325,7 +337,19 @@ class _JobCard extends StatelessWidget {
                           height: 16,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text('Do job'),
+                      // Visually just "Do job" — the card above it supplies the context a sighted
+                      // player has at a glance. Non-visually that context is gone, and every one
+                      // of these buttons announced the identical name, so the job list read as six
+                      // indistinguishable "Do job" buttons and the core loop could not be operated
+                      // at all. The accessible name carries the job, and the reason when the
+                      // button is refused, since that reason otherwise sits in a separate node
+                      // the reader may never associate with it.
+                      : Text(
+                          'Do job',
+                          semanticsLabel: job.canAttempt
+                              ? 'Do job: ${job.name}'
+                              : 'Do job: ${job.name}. Unavailable: $_lockLabel',
+                        ),
                 ),
               ],
             ),

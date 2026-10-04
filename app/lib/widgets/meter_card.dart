@@ -105,27 +105,63 @@ class _MeterCardState extends State<MeterCard> {
     final progress = meter.max > 0 ? meter.current / meter.max : 0.0;
 
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      // One announcement per meter, not four.
+      //
+      // Visually this is a label, a count, a bar and a status line, and the eye fuses them
+      // instantly. To a screen reader they were four unrelated nodes — "Energy", "20 / 20", a
+      // progress bar, "Full" — read in sequence with nothing tying them together, and the bar
+      // announcing a bare percentage of its own. `MergeSemantics` plus an explicit label on the
+      // whole card collapses that into the sentence a sighted player actually perceives.
+      child: MergeSemantics(
+        child: Semantics(
+          label: _semanticSummary(),
+          excludeSemantics: true,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(widget.label, style: theme.textTheme.titleMedium),
-                Text('${meter.current} / ${meter.max}',
-                    style: theme.textTheme.bodyMedium),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(widget.label, style: theme.textTheme.titleMedium),
+                    Text('${meter.current} / ${meter.max}',
+                        style: theme.textTheme.bodyMedium),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                LinearProgressIndicator(value: progress.clamp(0.0, 1.0)),
+                const SizedBox(height: 4),
+                _status(theme),
               ],
             ),
-            const SizedBox(height: 8),
-            LinearProgressIndicator(value: progress.clamp(0.0, 1.0)),
-            const SizedBox(height: 4),
-            _status(theme),
-          ],
+          ),
         ),
       ),
     );
+  }
+
+  /// The whole card as one sentence, e.g. "Energy, 20 of 20, full" or
+  /// "Energy, 7 of 20, next point in 1m 30s".
+  ///
+  /// Spelled out rather than assembled from the visible glyphs: "20 / 20" is read as a date or a
+  /// fraction depending on the reader, and the status line is a fragment on its own.
+  String _semanticSummary() {
+    final meter = widget.meter;
+    final buffer = StringBuffer('${widget.label}, ${meter.current} of ${meter.max}');
+
+    if (_isFull) {
+      buffer.write(', full');
+    } else {
+      final remaining = _remaining;
+      if (remaining != null) {
+        buffer.write(remaining <= 0
+            ? ', next point due now'
+            : ', next point in ${formatCountdown(remaining)}');
+      }
+    }
+
+    return buffer.toString();
   }
 
   Widget _status(ThemeData theme) {

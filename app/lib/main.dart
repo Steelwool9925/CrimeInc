@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 
 import 'api/api_client.dart';
 import 'api/resilient_http_client.dart';
@@ -12,6 +13,24 @@ import 'widgets/app_shell.dart';
 import 'widgets/content_width_limit.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Build the semantics tree from startup, for everyone, always.
+  //
+  // Flutter only collects semantics while some client holds a handle. On web nothing holds one
+  // until assistive tech is detected, and detection is unreliable — so in practice the engine
+  // renders the whole app to a canvas and publishes a DOM containing one "Enable accessibility"
+  // button and nothing else. A screen-reader user landing on the game is told there is a button;
+  // they are not told there is a game. Expecting them to find and press an opt-in they have no
+  // way to know exists is the same as having no support at all.
+  //
+  // Holding a handle for the process lifetime removes that gate. The handle is deliberately never
+  // disposed and the return value deliberately dropped: disposing it is precisely what we are
+  // preventing. The documented cost is building and maintaining the semantics tree every frame
+  // for all users, which is the right trade for a turn-based game that is nowhere near
+  // frame-budget bound.
+  SemanticsBinding.instance.ensureSemantics();
+
   runApp(const UnderworldEmpireApp());
 }
 
