@@ -184,6 +184,18 @@ void main() {
         expect(theme.cardTheme.elevation, 0);
       });
 
+      test('filled buttons (Collect) are square and outlined like every other primary action', () {
+        // Material 3 draws a FilledButton as a rounded pill. Collect is the only one in the app, and
+        // with no theme of its own it was the single button that broke the square-corner rule.
+        final theme = packTheme(packWith(primary: '#C81E2C'));
+        final style = theme.filledButtonTheme.style!;
+
+        expect(style.backgroundColor?.resolve({}), const Color(0xFFC81E2C));
+        final shape = style.shape?.resolve({}) as RoundedRectangleBorder?;
+        expect(shape?.borderRadius, BorderRadius.zero);
+        expect(style.side?.resolve({})?.width, greaterThanOrEqualTo(2));
+      });
+
       test('elevated buttons (primary actions) use the pack primary as a filled, square CTA',
           () {
         final theme = packTheme(packWith(primary: '#C81E2C'));

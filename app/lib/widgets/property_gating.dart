@@ -24,13 +24,27 @@ String propertyCollectLockLabel(Property property) =>
       _ => 'Unavailable',
     };
 
-/// What one unit earns, and how long it takes to fill.
+/// What one unit earns, how long it takes to fill, and what a full window therefore holds.
 ///
-/// Both figures are per unit and come straight from content, so the line means something on a
+/// All three figures are per unit and come straight from content, so the line means something on a
 /// property nobody owns yet — which is the whole point of the store half of the screen.
+///
+/// The last figure is the one that matters and the one that used to be missing. "240 an hour,
+/// fills in 8 hours" makes the player multiply to learn what a night is worth, and the answer only
+/// appeared after buying, as the right-hand number of the owned card's meter. The decision to buy
+/// is made before that, so the payoff has to be on the card at the moment of choosing.
 String propertyIncomeLabel(Property property, String cashLabel) =>
     '$cashLabel ${property.incomePerHour} an hour  ·  fills in '
-    '${accrualWindowLabel(property.accrualCapMinutes)}';
+    '${accrualWindowLabel(property.accrualCapMinutes)}  ·  holds up to '
+    '${propertyWindowCash(property)}';
+
+/// The cash one unit holds when its window is full: rate × window, floored to whole cash.
+///
+/// Derived on the client because the server sends `cap: 0` for a property the player does not own
+/// yet (the ceiling it reports is for the units held). Floored to match the domain's own
+/// definition of a unit's cap, so the figure shown is the figure that will actually accrue.
+int propertyWindowCash(Property property) =>
+    property.incomePerHour * property.accrualCapMinutes ~/ 60;
 
 /// A fill window in the largest unit that stays exact.
 ///

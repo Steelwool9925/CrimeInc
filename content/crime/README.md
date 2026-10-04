@@ -258,6 +258,15 @@ was nothing left to spend it on.
 A later property earns more because `perHour` is higher, which is where that advantage belongs. It
 should out-earn an early one by earning faster, never by the early one forgetting sooner.
 
+**Release note: raising a cap pays out retroactively.** A holding never copies the window, so the
+window a player is judged by is always the one in the catalogue *now*. Deploying this change (or any
+later one that lengthens a `capMinutes`) means every owner's already-waiting time counts against the
+longer window on their next read: a Street Corner left for two hours under the old 15-minute cap pays
+two hours of income, once. That is a one-off windfall of at most one new window per unit, not a
+recurring effect, and it cannot be avoided without storing the window on the holding, which would
+break the retune-moves-everyone rule above. Expect cash-per-player to bump on the day it ships; it is
+not an exploit.
+
 `perHour` and `capMinutes` are each validated on their own **and as a product**: cap cash is
 `perHour × capMinutes ÷ 60` floored to whole cash, so `30/hour` over `1 minute` is half a coin and is
 rejected at startup. Both fields are individually legal there — only the product catches it, and a

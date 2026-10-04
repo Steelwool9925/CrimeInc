@@ -215,4 +215,39 @@ void main() {
       expect(accrualWindowLabel(90), '90 min');
     });
   });
+
+  group('propertyWindowCash', () {
+    // Derived on the client because the server sends cap: 0 for a property the player does not
+    // own. It must agree with the domain definition - rate x window, floored to whole cash - or
+    // the card promises a figure that never accrues.
+    Property p(int perHour, int minutes) => Property(
+          id: 'x',
+          name: 'X',
+          description: '',
+          levelRequirement: 1,
+          price: 1,
+          incomePerHour: perHour,
+          accrualCapMinutes: minutes,
+          quantity: 0,
+          pending: 0,
+          cap: 0,
+          canBuy: true,
+          canCollect: false,
+        );
+
+    test('is exact where the window divides evenly', () {
+      expect(propertyWindowCash(p(240, 480)), 1920);
+      expect(propertyWindowCash(p(3600, 1440)), 86400);
+    });
+
+    test('floors where it does not, as the domain does', () {
+      // 100 an hour over 100 minutes is 166.67: the player can be paid 166, never 167.
+      expect(propertyWindowCash(p(100, 100)), 166);
+    });
+
+    test('appears in the income line, per unit, whether or not the player owns any', () {
+      expect(propertyIncomeLabel(p(240, 480), 'Cash'),
+          'Cash 240 an hour  \u00b7  fills in 8 hours  \u00b7  holds up to 1920');
+    });
+  });
 }

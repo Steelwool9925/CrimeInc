@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api/models.dart';
 import '../state/app_state.dart';
+import '../widgets/accessible_name.dart';
 import '../widgets/item_gating.dart';
 import 'inventory_screen.dart';
 
@@ -215,20 +216,32 @@ class _StoreCard extends StatelessWidget {
                   OutlinedButton(
                     key: Key('equip-item-${item.id}'),
                     onPressed: item.canEquip && !anyBusy ? onEquip : null,
-                    child: const Text('Equip'),
+                    // Accessible names carry the item (and the refusal) — nine buttons all named
+                    // "Buy" on this screen were indistinguishable to a screen reader.
+                    child: AccessibleName(
+                      name: item.canEquip
+                          ? 'Equip ${item.name}'
+                          : 'Equip ${item.name}. Unavailable: ${equipLockLabel(item)}',
+                      visible: const Text('Equip'),
+                    ),
                   ),
                   const SizedBox(width: 8),
                 ],
                 ElevatedButton(
                   key: Key('buy-item-${item.id}'),
                   onPressed: enabled ? onBuy : null,
-                  child: busy
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Buy'),
+                  child: AccessibleName(
+                    name: item.canBuy
+                        ? 'Buy ${item.name}'
+                        : 'Buy ${item.name}. Unavailable: ${buyLockLabel(item)}',
+                    visible: busy
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Buy'),
+                  ),
                 ),
               ],
             ),

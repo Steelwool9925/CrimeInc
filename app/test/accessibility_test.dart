@@ -4,7 +4,10 @@ import 'package:underworld_empire/api/models.dart';
 import 'package:underworld_empire/widgets/meter_card.dart';
 
 import 'fakes.dart';
+import 'inventory_screen_test.dart' show pumpInventory;
 import 'jobs_screen_test.dart' show pumpJobs;
+import 'properties_screen_test.dart' show pumpProperties;
+import 'store_screen_test.dart' show pumpStore;
 
 /// Pins the things a player who cannot see the screen depends on.
 ///
@@ -123,6 +126,114 @@ void main() {
       // "20 / 20" is read as a date or a fraction depending on the reader, so the numbers are
       // spelled out rather than lifted from the visible glyphs.
       expect(find.bySemanticsLabel(RegExp(r'^Energy, 7 of 20, next point in ')), findsOneWidget);
+      semantics.dispose();
+    });
+  });
+
+  // The same defect the Jobs list had, on the other screens built the same way: a list of cards
+  // each ending in a button whose visible label is just "Buy" or "Equip". A sighted player gets
+  // the item from the card around it; a screen-reader user working from a list of buttons gets
+  // nothing, so six (Properties) or nine (Market) identically named controls were
+  // indistinguishable — and Buy is the one that spends cash.
+  group('Properties', () {
+    // A lazily built ListView only creates the cards it can see, and the default 800x600 test
+    // surface shows two. Tall enough for all three fixture properties.
+    void tallSurface(WidgetTester tester) {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+    }
+
+    Future<List<String>> names(WidgetTester tester, List<String> keys) async {
+      return [
+        for (final k in keys) tester.getSemantics(find.byKey(Key(k))).label,
+      ];
+    }
+
+    testWidgets('every Buy and Collect button names its property', (tester) async {
+      tallSurface(tester);
+      final semantics = tester.ensureSemantics();
+      await pumpProperties(tester, FakeApiClient());
+
+      final labels = await names(tester, const [
+        'buy-property-street-corner',
+        'buy-property-pawn-shop',
+        'buy-property-car-wash',
+        'collect-property-street-corner',
+        'collect-property-pawn-shop',
+      ]);
+
+      expect(labels[0], 'Buy Street Corner');
+      expect(labels[3], 'Collect from Street Corner');
+      expect(labels.toSet().length, labels.length,
+          reason: 'two property buttons announce the same name: $labels');
+      semantics.dispose();
+    });
+
+    testWidgets('a refused button says why in its accessible name', (tester) async {
+      // The reason sits in a separate text node that nothing ties to the control it refuses, so
+      // it has to travel with the button's own name.
+      tallSurface(tester);
+      final semantics = tester.ensureSemantics();
+      await pumpProperties(tester, FakeApiClient());
+
+      final locked = tester.getSemantics(find.byKey(const Key('buy-property-car-wash'))).label;
+      expect(locked, contains('Buy Car Wash'));
+      expect(locked, contains('Unavailable: Requires level 4'));
+
+      final empty =
+          tester.getSemantics(find.byKey(const Key('collect-property-pawn-shop'))).label;
+      expect(empty, contains('Collect from Pawn Shop'));
+      expect(empty, contains('Unavailable: Nothing on the counter yet'));
+      semantics.dispose();
+    });
+
+    testWidgets('the owned meter is one spoken fact, not a bare "30 / 60"', (tester) async {
+      // An unlabelled progress bar absorbs the surrounding text as its name: on the live build the
+      // owned card was exposed as a `progressbar` named after the entire card.
+      final semantics = tester.ensureSemantics();
+      await pumpProperties(tester, FakeApiClient());
+
+      expect(find.bySemanticsLabel(RegExp(r'Banked 30 of 60 Cash')), findsWidgets);
+      expect(find.bySemanticsLabel(RegExp(r'^30 / 60$')), findsNothing);
+      semantics.dispose();
+    });
+  });
+
+  group('Market and Inventory', () {
+    testWidgets('no two Market buttons announce the same name', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pumpStore(tester, FakeApiClient());
+
+      final labels = <String>[];
+      for (final item in [kOwnedWeapon, kUnaffordableArmor, kLockedWeapon]) {
+        labels.add(tester.getSemantics(find.byKey(Key('buy-item-${item.id}'))).label);
+      }
+
+      expect(labels, everyElement(startsWith('Buy ')));
+      expect(labels.any((l) => l.contains(kOwnedWeapon.name)), isTrue);
+      expect(labels.toSet().length, labels.length,
+          reason: 'two Market buttons announce the same name: $labels');
+      semantics.dispose();
+    });
+
+    testWidgets('the Market Equip button names the item it equips', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pumpStore(tester, FakeApiClient());
+
+      final label =
+          tester.getSemantics(find.byKey(Key('equip-item-${kOwnedWeapon.id}'))).label;
+      expect(label, 'Equip ${kOwnedWeapon.name}');
+      semantics.dispose();
+    });
+
+    testWidgets('the Inventory Equip button names the item it equips', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pumpInventory(tester, FakeApiClient());
+
+      final label =
+          tester.getSemantics(find.byKey(Key('equip-item-${kOwnedWeapon.id}'))).label;
+      expect(label, 'Equip ${kOwnedWeapon.name}');
       semantics.dispose();
     });
   });

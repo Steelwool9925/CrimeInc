@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api/models.dart';
 import '../state/app_state.dart';
+import '../widgets/accessible_name.dart';
 import '../widgets/item_gating.dart';
 
 /// The inventory — what the player owns, what they are wearing, and the stats that produces.
@@ -279,18 +280,28 @@ class _InventoryCard extends StatelessWidget {
           )
         : null;
 
+    // Accessible names carry the item, as on the Store and Properties screens: a list of bare
+    // "Equip" / "Unequip" buttons cannot be told apart by a screen reader.
     if (item.equipped) {
       return OutlinedButton(
         key: Key('unequip-item-${item.id}'),
         onPressed: anyBusy ? null : onUnequip,
-        child: spinner ?? const Text('Unequip'),
+        child: AccessibleName(
+          name: 'Unequip ${item.name}',
+          visible: spinner ?? const Text('Unequip'),
+        ),
       );
     }
 
     return ElevatedButton(
       key: Key('equip-item-${item.id}'),
       onPressed: (item.canEquip && !anyBusy) ? onEquip : null,
-      child: spinner ?? const Text('Equip'),
+      child: AccessibleName(
+        name: item.canEquip
+            ? 'Equip ${item.name}'
+            : 'Equip ${item.name}. Unavailable: ${equipLockLabel(item)}',
+        visible: spinner ?? const Text('Equip'),
+      ),
     );
   }
 }

@@ -164,6 +164,20 @@ ThemeData packTheme(ContentPack? pack) {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       ),
     ),
+    // FilledButton (Collect) is the same primary action as ElevatedButton in a different widget, so
+    // it gets the same style. It used to get none: Material 3 draws a FilledButton as a rounded
+    // pill, and Collect — the only one in the app — ended up the one button that broke the
+    // "square corners everywhere" rule the rest of this theme exists to enforce.
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        backgroundColor: primary,
+        foregroundColor: _bone,
+        elevation: 0,
+        shape: _sharpCorners,
+        side: const BorderSide(color: _bone, width: _inkWidth),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      ),
+    ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         foregroundColor: _bone,
