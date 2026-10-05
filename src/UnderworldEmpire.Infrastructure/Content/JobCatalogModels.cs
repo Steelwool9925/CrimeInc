@@ -77,11 +77,14 @@ public sealed record JobRiskJson
     public int HealthLossMax { get; init; }
 
     /// <summary>Success-chance gain per point of surplus held-item quantity. Defaults to 0 like its siblings.</summary>
-    [JsonPropertyName("itemSuccessChancePerSurplusPoint")]
-    public double ItemSuccessChancePerSurplusPoint { get; init; }
+    [JsonPropertyName("extraItemSuccessChance")]
+    public double ExtraItemSuccessChance { get; init; }
 }
 
-/// <summary>One item-quantity gate on a job: hold at least <see cref="MinQuantity"/> of <see cref="ItemId"/>.</summary>
+/// <summary>
+/// One item gate on a job: the attempt needs <see cref="MinQuantity"/> of <see cref="ItemId"/> and uses
+/// them all up, and a player may add up to <see cref="MaxExtras"/> more to improve the odds.
+/// </summary>
 public sealed record JobItemRequirementJson
 {
     [JsonPropertyName("itemId")]
@@ -91,11 +94,12 @@ public sealed record JobItemRequirementJson
     public int MinQuantity { get; init; }
 
     /// <summary>
-    /// Copies spent per attempt. Optional: absent means 1, which keeps every pack written before
-    /// this field valid. Must be between 1 and <see cref="MinQuantity"/>.
+    /// The most extra copies a player may commit on top of <see cref="MinQuantity"/>. Optional: absent
+    /// means none, which keeps every pack written before this field valid. When above zero the job's
+    /// <c>risk.extraItemSuccessChance</c> must also be above zero, or the extras would change nothing.
     /// </summary>
-    [JsonPropertyName("quantityConsumed")]
-    public int QuantityConsumed { get; init; } = 1;
+    [JsonPropertyName("maxExtras")]
+    public int MaxExtras { get; init; }
 }
 
 /// <summary>Pack-wide mastery thresholds, applied to every job.</summary>

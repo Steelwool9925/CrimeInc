@@ -12,6 +12,7 @@ import '../api/models.dart';
 String propertyBuyLockLabel(Property property) =>
     switch (property.buyUnavailableReason) {
       'level' => 'Requires level ${property.levelRequirement}',
+      'limit' => 'You hold the most you can',
       'cash' => 'Costs more than you have',
       _ => 'Unavailable',
     };
@@ -23,6 +24,19 @@ String propertyCollectLockLabel(Property property) =>
       'nothingToCollect' => 'Nothing on the counter yet',
       _ => 'Unavailable',
     };
+
+/// How many the player holds against how many they may: "Owned: 2 of 3", or what a player who owns
+/// none is allowed to hold. Null when the property has no limit and none are owned.
+///
+/// The limit is on the card before the player reaches it, so hitting it is not a surprise: the
+/// buy button greys out with "You hold the most you can" and this line already said why.
+String? propertyUnitsLabel(Property property) {
+  final max = property.maxUnits;
+  if (property.isOwned) {
+    return max == null ? 'Owned: ${property.quantity}' : 'Owned: ${property.quantity} of $max';
+  }
+  return max == null ? null : 'You can hold up to $max';
+}
 
 /// What one unit earns, how long it takes to fill, and what a full window therefore holds.
 ///

@@ -62,7 +62,7 @@ public static class PropertyEndpoints
                 var holding = holdingsByPropertyId.GetValueOrDefault(property.Id)
                               ?? new PlayerProperty { PlayerId = playerId, PropertyId = property.Id };
 
-                var buyObstacle = properties.CheckPurchase(player, property);
+                var buyObstacle = properties.CheckPurchase(player, property, holding.Quantity);
                 var collectObstacle = properties.CheckCollect(property, holding, nowUtc);
 
                 dtos.Add(new PropertyDto(
@@ -74,6 +74,7 @@ public static class PropertyEndpoints
                     IncomePerHour: property.IncomePerHour,
                     AccrualCapMinutes: property.AccrualCapMinutes,
                     Quantity: holding.Quantity,
+                    MaxUnits: property.MaxUnits == int.MaxValue ? null : property.MaxUnits,
                     Pending: holding.PendingAt(property, nowUtc),
                     Cap: holding.CapAt(property),
                     CanBuy: buyObstacle == PropertyFailure.None,
@@ -210,6 +211,7 @@ public static class PropertyEndpoints
         PropertyFailure.None => null,
         PropertyFailure.LevelTooLow => "level",
         PropertyFailure.InsufficientCash => "cash",
+        PropertyFailure.AtUnitLimit => "limit",
         PropertyFailure.NotOwned => "notOwned",
         PropertyFailure.NothingToCollect => "nothingToCollect",
         _ => "unknown"

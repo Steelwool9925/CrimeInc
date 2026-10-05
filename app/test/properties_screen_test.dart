@@ -357,6 +357,58 @@ void main() {
     });
   });
 
+  group('PropertiesScreen — the unit ceiling', () {
+    Future<void> pumpOne(WidgetTester tester, Property p) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await pumpProperties(
+        tester,
+        FakeApiClient(propertiesResult: PropertyList(properties: [p], cash: 100000, level: 12)),
+      );
+    }
+
+    Property street({required int quantity, required bool canBuy, String? reason}) => Property(
+          id: 'street-corner',
+          name: 'Street Corner',
+          description: 'A patch of pavement nobody works without your say-so.',
+          levelRequirement: 1,
+          price: 500,
+          incomePerHour: 240,
+          accrualCapMinutes: 480,
+          quantity: quantity,
+          maxUnits: 3,
+          pending: 0,
+          cap: quantity * 1920,
+          canBuy: canBuy,
+          buyUnavailableReason: reason,
+          canCollect: false,
+          collectUnavailableReason: quantity > 0 ? 'nothingToCollect' : 'notOwned',
+        );
+
+    testWidgets('an owned card says how many of how many', (tester) async {
+      await pumpOne(tester, street(quantity: 2, canBuy: true));
+
+      final units = tester.widget<Text>(find.byKey(const Key('property-units-street-corner')));
+      expect(units.data, 'Owned: 2 of 3');
+    });
+
+    testWidgets('a card nobody owns yet says what may be held', (tester) async {
+      await pumpOne(tester, street(quantity: 0, canBuy: true));
+
+      final units = tester.widget<Text>(find.byKey(const Key('property-units-street-corner')));
+      expect(units.data, 'You can hold up to 3');
+    });
+
+    testWidgets('at the ceiling the buy is disabled and the card says why', (tester) async {
+      await pumpOne(tester, street(quantity: 3, canBuy: false, reason: 'limit'));
+
+      final button = tester.widget<ElevatedButton>(find.byKey(const Key('buy-property-street-corner')));
+      expect(button.onPressed, isNull);
+      expect(find.text('Buy: You hold the most you can'), findsOneWidget);
+    });
+  });
+
   group('PropertiesScreen — what the card says before and after buying', () {
     void tallSurface(WidgetTester tester) {
       tester.view.physicalSize = const Size(800, 2400);

@@ -300,7 +300,10 @@ class AppState extends ChangeNotifier {
   /// call — that is the round trip the do-job response exists to remove. A refusal (not enough
   /// energy, level too low) is surfaced through [actionMessage] rather than as an error state,
   /// because it is normal play, not a failure.
-  Future<void> doJob(String jobId) async {
+  ///
+  /// [extras] is how many extra copies of each required item the player chose to spend on top of
+  /// what the job needs, keyed by item id. The server validates it and decides the resulting odds.
+  Future<void> doJob(String jobId, {Map<String, int> extras = const {}}) async {
     final token = _deviceToken;
     if (token == null || _jobInFlight != null) return;
 
@@ -309,7 +312,7 @@ class AppState extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final outcome = await _apiClient.doJob(token, jobId);
+      final outcome = await _apiClient.doJob(token, jobId, extras: extras);
 
       _lastJobResult = outcome.result;
       _me = outcome.player;
@@ -325,6 +328,7 @@ class AppState extends ChangeNotifier {
         'level' => 'Your level is too low for that job.',
         'stats' => 'Your attack or defense is too low for that job.',
         'items' => 'You do not have enough of a required item for that job.',
+        'extras' => 'That job does not take those extra items.',
         _ => e.detail,
       };
     } catch (e) {
@@ -381,6 +385,7 @@ class AppState extends ChangeNotifier {
         return JobItemRequirement(
           itemId: requirement.itemId,
           minQuantity: requirement.minQuantity,
+          maxExtras: requirement.maxExtras,
           held: consumed.quantityRemaining,
           met: consumed.quantityRemaining >= requirement.minQuantity,
         );
@@ -404,6 +409,7 @@ class AppState extends ChangeNotifier {
         defenseRequirement: job.defenseRequirement,
         itemRequirements: itemRequirements,
         successChance: job.successChance,
+        extraSuccessChance: job.extraSuccessChance,
         mastery: outcome.result.mastery,
         canAttempt: reason == null,
         unavailableReason: reason,

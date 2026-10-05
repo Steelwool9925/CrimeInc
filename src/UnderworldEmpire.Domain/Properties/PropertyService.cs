@@ -40,7 +40,7 @@ public sealed class PropertyService
 
         // ---- Validate before mutating anything ----
 
-        var obstacle = CheckPurchase(player, property);
+        var obstacle = CheckPurchase(player, property, holding.Quantity);
         if (obstacle != PropertyFailure.None)
             return PropertyPurchaseResult.Refused(obstacle);
 
@@ -64,16 +64,23 @@ public sealed class PropertyService
     /// refuses on exactly this answer, so a client told it may buy something will not then be rejected.
     /// Same arrangement as <see cref="Items.InventoryService.CheckPurchase"/>.
     /// <para>
-    /// Level is reported ahead of cash because it is the permanent obstacle.
+    /// Level, then the unit limit, are reported ahead of cash: they are the permanent obstacles, and a
+    /// player at the limit should be told so rather than invited to save up for a unit they cannot buy.
     /// </para>
     /// </remarks>
-    public PropertyFailure CheckPurchase(Player player, Property property)
+    /// <param name="player">The would-be buyer.</param>
+    /// <param name="property">The property definition from content.</param>
+    /// <param name="unitsOwned">How many units of it the player already holds.</param>
+    public PropertyFailure CheckPurchase(Player player, Property property, int unitsOwned)
     {
         ArgumentNullException.ThrowIfNull(player);
         ArgumentNullException.ThrowIfNull(property);
 
         if (player.Level < property.LevelRequirement)
             return PropertyFailure.LevelTooLow;
+
+        if (unitsOwned >= property.MaxUnits)
+            return PropertyFailure.AtUnitLimit;
 
         if (player.Cash < property.Price)
             return PropertyFailure.InsufficientCash;

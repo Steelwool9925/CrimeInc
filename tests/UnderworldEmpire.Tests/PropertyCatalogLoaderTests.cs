@@ -53,13 +53,15 @@ public class PropertyCatalogLoaderTests : IDisposable
         int levelRequirement = 1,
         long price = 250,
         long perHour = 120,
-        int capMinutes = 30) => new
+        int capMinutes = 30,
+        int? maxUnits = null) => new
         {
             id,
             name,
             description = "d",
             levelRequirement,
             price,
+            maxUnits,
             income = new { perHour, capMinutes }
         };
 
@@ -365,6 +367,89 @@ public class PropertyCatalogLoaderTests : IDisposable
         var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadProperties("crime");
 
         Assert.Contains(catalog.Properties, p => p.LevelRequirement == 1 && p.Price <= 1000);
+    }
+
+    [Fact]
+    public void A_declared_unit_ceiling_is_carried_onto_the_property()
+    {
+        WriteProperties("crime", ValidCatalog(ValidProperty(maxUnits: 3)));
+
+        Assert.Equal(3, Loader().LoadProperties("crime").Properties.Single().MaxUnits);
+    }
+
+    [Fact]
+    public void A_property_that_declares_no_ceiling_has_none()
+    {
+        WriteProperties("crime", ValidCatalog(ValidProperty()));
+
+        Assert.Equal(int.MaxValue, Loader().LoadProperties("crime").Properties.Single().MaxUnits);
+    }
+
+    [Fact]
+    public void A_unit_ceiling_below_one_is_a_named_load_error()
+    {
+        WriteProperties("crime", ValidCatalog(ValidProperty(maxUnits: 0)));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadProperties("crime"));
+
+        Assert.Contains("'maxUnits' must be >= 1 when present, found 0", ex.Message);
+    }
+
+    [Fact]
+    public void Every_property_in_the_pack_declares_a_unit_ceiling()
+    {
+        // The schema lets a property omit it (hand-built definitions and older packs have none), so
+        // nothing but this test stops a new property shipping with unlimited units. Unlimited units
+        // are what let reinvested income compound without bound.
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadProperties("crime");
+
+        foreach (var property in catalog.Properties)
+        {
+            Assert.True(property.MaxUnits != int.MaxValue,
+                $"'{property.Id}' declares no 'maxUnits'. Without one a player can stack it forever, and " +
+                $"every property pays for itself in under two nights, so the stack compounds.");
+        }
+    }
+
+    [Fact]
+    public void A_player_who_reinvests_everything_stops_growing()
+    {
+        // The measured defect: a daily player who put every coin back grew about 4.8x a night, to 4.36
+        // million a night by the fifth. This replays that player against the real pack, ignoring level
+        // gates (the worst case for compounding), and asserts income reaches a ceiling and stays there.
+        // It deliberately does not pin the plateau's value: balance may move it, and only a pack that
+        // lets income run away should fail.
+        var properties = new ContentPackLoader(RepoContent.FindRoot()).LoadProperties("crime").Properties;
+        var owned = properties.ToDictionary(p => p.Id, _ => 0L);
+        double cash = 600;
+
+        // Doubles and a per-night purchase cap, so a pack with no ceilings fails the assertion below
+        // instead of wrapping a long or buying units until the test run is killed.
+        double NightlyIncome() => properties.Sum(p => owned[p.Id] * (double)p.CapPerUnit);
+
+        var incomeByNight = new List<double>();
+        for (int night = 1; night <= 60; night++)
+        {
+            incomeByNight.Add(NightlyIncome());
+            cash += incomeByNight[^1];
+
+            for (int purchases = 0; purchases < 1_000; purchases++)
+            {
+                var best = properties
+                    .Where(p => owned[p.Id] < p.MaxUnits && cash >= p.Price)
+                    .OrderBy(p => (double)p.Price / p.CapPerUnit)
+                    .FirstOrDefault();
+                if (best is null) break;
+                cash -= best.Price;
+                owned[best.Id]++;
+            }
+        }
+
+        Assert.True(incomeByNight[39] == incomeByNight[^1],
+            $"Income was still growing between night 40 ({incomeByNight[39]:N0}) and night 60 " +
+            $"({incomeByNight[^1]:N0}): a player who reinvests everything compounds without bound. " +
+            $"Give every property a 'maxUnits'.");
+        Assert.True(incomeByNight[^1] <= properties.Sum(p => (double)p.MaxUnits * p.CapPerUnit));
     }
 
     [Fact]

@@ -58,7 +58,7 @@ public class JobEconomyInvariantTests
             var item = items.Find(requirement.ItemId)
                 ?? throw new InvalidOperationException(
                     $"Job '{job.Id}' consumes '{requirement.ItemId}', which is not in the item catalogue.");
-            return item.Price * requirement.QuantityConsumed;
+            return item.Price * requirement.MinQuantity;
         });
 
     [Fact]
@@ -81,6 +81,59 @@ public class JobEconomyInvariantTests
             string.Join("; ", losers) + ". Raise the payout, lower the consumed item's price, or drop " +
             "the consumable requirement. If the loss is deliberate, add an explicit exemption to " +
             "content — do not loosen this test.");
+    }
+
+    [Fact]
+    public void A_job_that_asks_for_a_higher_level_pays_more_per_energy_net_of_what_it_consumes()
+    {
+        // The audit's dominated-jobs finding, as a rule. A job should be worth unlocking: every job at a
+        // higher level must clear every lower-level job on net cash per energy, where net means after
+        // the price of the items an attempt uses up. Hijack broke it twice over: it lost money, and once
+        // fixed to merely break even it still ranked below the level-1 job. Jobs at the *same* level are
+        // not compared, since a level-1 player has two to choose between and either is a fair opener.
+        //
+        // Stated as an ordering, not as numbers, so a balance pass can retune any payout and only fails
+        // if it re-inverts the ladder.
+        var (catalog, items) = RealPack();
+
+        var rated = catalog.Jobs
+            .Select(job => (
+                job.Id,
+                job.LevelRequirement,
+                NetPerEnergy: (ExpectedCash(job, catalog.ConsolationCashFraction) - ConsumedItemCost(job, items))
+                              / job.EnergyCost))
+            .ToList();
+
+        foreach (var higher in rated)
+        foreach (var lower in rated.Where(l => l.LevelRequirement < higher.LevelRequirement))
+        {
+            Assert.True(higher.NetPerEnergy > lower.NetPerEnergy,
+                $"'{higher.Id}' (level {higher.LevelRequirement}) nets {higher.NetPerEnergy:0.##} cash per " +
+                $"energy but '{lower.Id}' (level {lower.LevelRequirement}) nets {lower.NetPerEnergy:0.##}. " +
+                "A player who has unlocked the higher job should not do better grinding the lower one.");
+        }
+    }
+
+    [Fact]
+    public void Extras_never_buy_chance_the_ceiling_would_discard()
+    {
+        // A player may add up to maxExtras items for better odds, and each one is spent. If the base
+        // chance plus every allowed extra overshoots the pack-wide ceiling, the last extras cost items
+        // and change nothing, and a player who commits them has been misled by the stepper. Stated
+        // against the ceiling rather than against numbers so retuning either side only fails if it
+        // creates a wasted item.
+        var (catalog, _) = RealPack();
+
+        foreach (var job in catalog.Jobs.Where(j => j.ItemRequirements.Any(r => r.MaxExtras > 0)))
+        {
+            double bestChance = job.BaseSuccessChance
+                + job.ExtraItemSuccessChance * job.ItemRequirements.Sum(r => r.MaxExtras);
+
+            Assert.True(bestChance <= catalog.MaxSuccessChance + 1e-9,
+                $"'{job.Id}' allows enough extras to reach {bestChance:P0}, past the pack's " +
+                $"{catalog.MaxSuccessChance:P0} ceiling, so the last extras would be spent for nothing. " +
+                "Lower maxExtras or extraItemSuccessChance.");
+        }
     }
 
     [Fact]
@@ -110,7 +163,9 @@ public class JobEconomyInvariantTests
             CashMax = 260,
             Xp = 55,
             BaseSuccessChance = 0.65,
-            ItemRequirements = [new ItemRequirement("switchblade", MinQuantity: 2)],
+            // The shipped job asked a player to hold two and quietly spent one, so it is priced by
+            // what it spent.
+            ItemRequirements = [new ItemRequirement("switchblade", MinQuantity: 1)],
         };
 
         double net = ExpectedCash(shipped, consolationCashFraction: 0.01)
@@ -124,7 +179,8 @@ public class JobEconomyInvariantTests
     public void A_job_that_pays_for_what_it_consumes_passes_the_same_arithmetic()
     {
         // The other half of "the guard is not vacuous": it must also *accept* a sound job, or it would
-        // pass the first test by rejecting everything. The same job with the payout the fix chose.
+        // pass the first test by rejecting everything. The same job with a payout that pays for the
+        // blade (400-620, the band the pack uses today).
         var items = new ItemCatalog([new Item
         {
             Id = "switchblade",
@@ -139,8 +195,8 @@ public class JobEconomyInvariantTests
             Name = "Hijack a Delivery Truck",
             EnergyCost = 4,
             LevelRequirement = 3,
-            CashMin = 260,
-            CashMax = 480,
+            CashMin = 400,
+            CashMax = 620,
             Xp = 55,
             BaseSuccessChance = 0.65,
             ItemRequirements = [new ItemRequirement("switchblade", MinQuantity: 1)],
@@ -149,6 +205,6 @@ public class JobEconomyInvariantTests
         double net = ExpectedCash(fixedJob, consolationCashFraction: 0.01)
                    - ConsumedItemCost(fixedJob, items);
 
-        Assert.Equal(61.8, net, precision: 1);
+        Assert.Equal(153.3, net, precision: 1);
     }
 }

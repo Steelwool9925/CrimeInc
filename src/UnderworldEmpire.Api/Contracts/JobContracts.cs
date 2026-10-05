@@ -17,14 +17,28 @@ public record JobMasteryState(int Completions, int Rank, int MaxRank, int? Compl
 /// player's current holding, so the client never needs a follow-up call to explain a lock.
 /// </summary>
 /// <param name="ItemId">Content id of the required weapon or armor item.</param>
-/// <param name="MinQuantity">Minimum spare copies needed to attempt the job.</param>
-/// <param name="QuantityConsumed">Copies each attempt uses up, win or lose.</param>
+/// <param name="MinQuantity">Spare copies the job needs. Every attempt uses all of them up, win or lose.</param>
+/// <param name="MaxExtras">
+/// The most extra copies the player may commit on top of <see cref="MinQuantity"/> to improve the odds;
+/// zero when this item cannot be committed beyond the requirement. Each extra is spent as well.
+/// </param>
 /// <param name="Held">
 /// How many <b>spare</b> copies this player has: the stack minus the one they are wearing, since a worn
 /// item is never spent.
 /// </param>
 /// <param name="Met">Whether <see cref="Held"/> meets <see cref="MinQuantity"/>.</param>
-public record JobItemRequirementDto(string ItemId, int MinQuantity, int QuantityConsumed, int Held, bool Met);
+public record JobItemRequirementDto(string ItemId, int MinQuantity, int MaxExtras, int Held, bool Met);
+
+/// <summary>
+/// The optional request body of POST /jobs/{id}/do. Absent, or with no extras, the attempt uses only
+/// what the job requires.
+/// </summary>
+/// <param name="Extras">
+/// Extra copies to commit beyond the requirement, keyed by item id. Each is spent win or lose and adds
+/// the job's <c>extraSuccessChance</c> to the odds. The server decides the resulting odds; the client
+/// only says how many it is willing to spend.
+/// </param>
+public record DoJobRequest(Dictionary<string, int>? Extras);
 
 /// <summary>
 /// One job as offered to the calling player: the content definition plus that player's mastery and
@@ -75,6 +89,7 @@ public record JobDto(
     int DefenseRequirement,
     IReadOnlyList<JobItemRequirementDto> ItemRequirements,
     double SuccessChance,
+    double ExtraSuccessChance,
     JobMasteryState Mastery,
     bool CanAttempt,
     string? UnavailableReason);

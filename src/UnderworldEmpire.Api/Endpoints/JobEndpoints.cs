@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Mvc.ModelBinding;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using UnderworldEmpire.Api.Auth;
@@ -98,7 +100,7 @@ public static class JobEndpoints
                             return new JobItemRequirementDto(
                                 ItemId: r.ItemId,
                                 MinQuantity: r.MinQuantity,
-                                QuantityConsumed: r.QuantityConsumed,
+                                MaxExtras: r.MaxExtras,
                                 Held: held,
                                 Met: held >= r.MinQuantity);
                         })
@@ -120,7 +122,8 @@ public static class JobEndpoints
                     // The same method the attempt rolls against — a second implementation here
                     // would let the displayed odds drift from the real ones.
                     SuccessChance: job.SuccessChanceFor(
-                        loadout.TotalAttack, loadout.TotalDefense, catalog.MaxSuccessChance, heldQuantities),
+                        loadout.TotalAttack, loadout.TotalDefense, catalog.MaxSuccessChance),
+                    ExtraSuccessChance: job.ExtraItemSuccessChance,
                     Mastery: new JobMasteryState(
                         Completions: completions,
                         Rank: rank,
@@ -135,17 +138,21 @@ public static class JobEndpoints
         .WithName("GetJobs")
         .WithTags("Jobs");
 
-        // POST /jobs/{id}/do — perform a job. Every figure in the response is decided server-side;
-        // the request carries no body at all, so there is nothing for a client to tamper with.
+        // POST /jobs/{id}/do — perform a job. Every figure in the response is decided server-side.
+        // The one thing a request may carry is how many EXTRA items the player is willing to spend for
+        // better odds; the server validates it against the job's content and the player's stock, and
+        // works out the resulting odds itself, so there is still nothing a client can tamper with.
         app.MapPost("/jobs/{id}/do", [Authorize] async (
             string id,
             HttpContext ctx,
             JobActionService jobActions,
-            IContentPackProvider content) =>
+            IContentPackProvider content,
+            [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] DoJobRequest? request) =>
         {
             var playerId = ctx.User.GetPlayerId();
 
-            var result = await jobActions.PerformAsync(playerId, id, DateTimeOffset.UtcNow);
+            var result = await jobActions.PerformAsync(
+                playerId, id, DateTimeOffset.UtcNow, extraItems: request?.Extras);
 
             switch (result.Error)
             {
@@ -177,8 +184,17 @@ public static class JobEndpoints
                     JobFailure.StatsTooLow => ("stats", "Your attack or defense is too low for this job."),
                     JobFailure.InsufficientItems => ("items", "You do not hold enough of a required item for this job."),
                     JobFailure.InsufficientEnergy => ("energy", "You do not have enough energy for this job."),
+                    JobFailure.InvalidExtras => ("extras", "That job does not accept those extra items."),
                     _ => ("unknown", "The job could not be performed.")
                 };
+
+                // A malformed request is the caller's error, not a game state that might change: 400,
+                // not the 409 the gates use.
+                if (result.Failure == JobFailure.InvalidExtras)
+                    return Results.Problem(
+                        detail: detail,
+                        statusCode: StatusCodes.Status400BadRequest,
+                        extensions: new Dictionary<string, object?> { ["reason"] = reason });
 
                 return Results.Problem(
                     detail: detail,

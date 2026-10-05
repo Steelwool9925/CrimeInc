@@ -40,14 +40,15 @@ jobs[]   the catalog, in display order — the engine does not sort
   requirements      minimum EFFECTIVE stats to attempt — base plus equipped gear
     attack          minimum effective attack (>= 0; 0 means ungated)
     defense         minimum effective defense (>= 0)
-  itemRequirements[]  optional item-quantity gates, alongside requirements — absent means ungated
+  itemRequirements[]  optional item gates, alongside requirements — absent means ungated
     itemId          a weapon or armor id from items.json (not vehicle; must exist)
-    minQuantity     minimum copies held to attempt the job (>= 1)
-    quantityConsumed  copies spent per attempt, win or lose (optional, default 1; 1..minQuantity)
+    minQuantity     copies the job needs; every attempt uses ALL of them up, win or lose (>= 1)
+    maxExtras       most EXTRA copies a player may add for better odds, each spent too (optional, default 0)
   risk              per-job risk tuning — required, not optional
     baseSuccessChance             chance for a player exactly at the requirements (0..1)
     successChancePerSurplusPoint  added per point of surplus stat (>= 0)
-    itemSuccessChancePerSurplusPoint  added per point of surplus held-item quantity (>= 0)
+    extraItemSuccessChance        added per EXTRA item the player commits (>= 0; must be > 0 if any
+                                  requirement has maxExtras > 0)
     healthLossMin/healthLossMax   inclusive health lost on a failure, rolled per attempt
 ```
 
@@ -59,26 +60,28 @@ into the failure path by accident.
 
 **`itemRequirements` is the opposite: absent is the ordinary case.** Every job written before this
 field existed has none, and must keep working unchanged — so unlike `risk`/`requirements`, omitting
-it is not an error. It is one time use: each attempt spends `quantityConsumed` units of every
-listed item (1 unless the entry says otherwise), win or lose, and the same holding also answers the
-equip question independently — a player can wear
-a weapon (satisfying `requirements`) and separately need spare stock of it (satisfying
-`itemRequirements`); those are different questions about the same rows.
+it is not an error.
 
-**Holding and spending are two numbers.** `minQuantity` is what the player must have on hand;
-`quantityConsumed` is what the attempt burns. The spend can never exceed the hold, because the gate
-only guarantees `minQuantity` copies and a larger spend would overdraw the stack on the very attempt
-it admitted — the loader rejects it by name. Omitting the field means 1, so every existing entry is
-unchanged. A job that burns its whole requirement says `"quantityConsumed": <minQuantity>`.
-The payout rule below prices the *spend*, not the hold.
+**Two kinds of item, and the player chooses only one of them.** `minQuantity` is not a choice: the job
+cannot be done without that many, and every attempt uses all of them up, win or lose. Extras are a
+choice: before an attempt the player may commit up to `maxExtras` more, each is spent as well, and
+each adds `extraItemSuccessChance` to the odds. Nothing is ever spent that the player did not commit
+or the job did not require, so a stack that merely sits in the inventory changes nothing. The payout
+rule below prices the *required* spend: extras are an opt-in premium and are deliberately not
+guaranteed to pay for themselves.
 
 **Items a job uses are consumed, but they are never the worn copy.** A player can wear a switchblade to
-meet a stat gate and separately hold one to spend. `minQuantity` and `quantityConsumed` count only
-*spare* copies: the stack minus the one being worn. So a job asking for one switchblade needs the player
-to hold two if they are wearing one, and spending the spare leaves the worn copy and its stats alone.
-The API reports this as `held` (spare copies) and the card says "Needs 1 spare switchblade" and "Uses
-up 1 switchblade each attempt (never the one you are wearing)". As a backstop, spending the last copy
-of anything worn takes it off, and a worn row with no copies never scores.
+meet a stat gate and separately hold one to spend. Requirements and extras count only *spare* copies:
+the stack minus the one being worn. So a job asking for one switchblade needs the player to hold two
+if they are wearing one, and spending the spare leaves the worn copy and its stats alone. The API
+reports this as `held` (spare copies), and the card says "Needs 1 spare switchblade" and "Uses up 1
+switchblade each attempt (never the one you are wearing)". As a backstop, spending the last copy of
+anything worn takes it off, and a worn row with no copies never scores.
+
+**The request.** `POST /jobs/{id}/do` takes an optional body `{ "extras": { "<itemId>": <n> } }`.
+The server refuses an item the job does not use, a negative count, or more than `maxExtras` with a
+`400` (reason `extras`); it refuses a count the player cannot cover with a `409` (reason `items`).
+It works out the resulting odds itself — the client only says how many it is willing to spend.
 
 **`itemId` is validated against `items.json` at startup**, the one place these two otherwise
 independent catalogs cross. An id that does not exist, or names a vehicle rather than a weapon or
@@ -90,18 +93,20 @@ The success chance for a given player is:
 statSurplus = max(0, effectiveAttack  - requirements.attack)
             + max(0, effectiveDefense - requirements.defense)
 
-itemSurplus = sum over itemRequirements of max(0, quantityHeld - minQuantity)
+extras      = sum over itemRequirements of (extra copies the player committed, at most maxExtras)
 
 chance  = baseSuccessChance
           + successChancePerSurplusPoint * statSurplus
-          + itemSuccessChancePerSurplusPoint * itemSurplus
+          + extraItemSuccessChance * extras
           clamped to [baseSuccessChance, min(1, risk.maxSuccessChance)]
 ```
 
 Each stat's surplus floors at **zero independently**. Summed algebraically, a large attack overshoot
-would cancel a defense shortfall and the defense requirement would stop meaning anything. Item
-surplus floors at zero the same way, and is a wholly separate term from stat surplus — a big pile of
-spare stock must not paper over a stats shortfall, or the reverse.
+would cancel a defense shortfall and the defense requirement would stop meaning anything. Extras are
+a wholly separate term from stat surplus — items must not paper over a stats shortfall, or the reverse.
+`GET /jobs` reports the odds of an attempt with **no** extras, since the player has not chosen yet; the
+job's `extraSuccessChance` and each requirement's `maxExtras` are sent alongside so the card can say
+what an extra is worth.
 
 Validation reports **every** problem at once rather than stopping at the first, so a content edit
 needs one fix pass rather than one restart per error. Unknown fields are ignored, so a newer pack
@@ -151,7 +156,7 @@ first sitting.
 | shake-down-corner-store | 1 | 1 / 1 | 0.65 | 0.010 | 0–1 | — |
 | boost-a-parked-car | 1 | 5 / 1 | 0.75 | 0.010 | 0–3 | — |
 | run-numbers-for-the-bookie | 2 | 6 / 5 | 0.72 | 0.010 | 0–4 | — |
-| hijack-a-delivery-truck | 3 | 9 / 7 | 0.65 | 0.008 | 2–8 | 1× switchblade, +0.01/surplus |
+| hijack-a-delivery-truck | 3 | 9 / 7 | 0.65 | 0.008 | 2–8 | 1× switchblade, up to 3 extra at +0.10 each |
 | torch-a-rival-warehouse | 5 | 14 / 10 | 0.60 | 0.006 | 4–14 | — |
 | rob-an-armored-transport | 8 | 22 / 16 | 0.55 | 0.005 | 8–25 | — |
 
@@ -183,20 +188,28 @@ never be handed a raw roll.
 Job ids are compared **ordinally**. They are content keys, not display text, so casing is
 significant and `Boost-A-Parked-Car` is a different id from `boost-a-parked-car`.
 
-**`hijack-a-delivery-truck`'s item gate is a first-pass balance choice, explicitly tunable — not a
-frozen decision.** It sits on a mid-tier job with headroom before *Torch*/*Rob*'s harder stat gates,
-and asks for 1 switchblade, which each attempt then spends. The gate used to ask for 2 while still
-spending 1, so the stated requirement quietly disagreed with what an attempt consumed; "hold one,
-spend one" says what actually happens, and keeps the Market a recurring cost rather than a one-time
-purchase.
+**`hijack-a-delivery-truck`'s item gate and payout are a first-pass balance choice, explicitly tunable
+— not a frozen decision.** It sits on a mid-tier job with headroom before *Torch*/*Rob*'s harder stat
+gates, asks for one switchblade (which each attempt spends), and lets a player add up to three more for
++10% success each. At 0.65 plus three extras that is exactly the pack's 0.95 ceiling, so no allowed
+extra is ever wasted (`Extras_never_buy_chance_the_ceiling_would_discard`). Extras are a premium, not a
+bargain: an extra costs a 180 blade and buys about 10% of a ~510 payout, so a player takes them for
+certainty, XP and mastery rather than for cash.
 
 **A job that consumes an item must pay for it.** Expected cash — success chance times the mean
 payout, plus the consolation fraction on a failure — must exceed the price of every item the attempt
-spends. This is the rule the original *Hijack* broke: 140–260 against a 180 blade was −49 per
+*requires*. This is the rule the original *Hijack* broke: 140–260 against a 180 blade was −49 per
 attempt, a job that cost the player money every time they did it and said nothing about it. It is
 pinned by `JobEconomyInvariantTests` over the whole pack, so the next edit that breaks it fails the
 build instead of shipping. A deliberate loss-leader needs an explicit content flag, never a deleted
 test.
+
+**A higher-level job must be worth unlocking.** Net cash per energy — after the price of what an
+attempt requires — must be strictly higher for every job than for every job at a lower level
+(`A_job_that_asks_for_a_higher_level_pays_more_per_energy_net_of_what_it_consumes`). Hijack's payout
+(400–620, mean ~510) was chosen to land between *Run Numbers* (about 30.7 net per energy) and *Torch*
+(about 45.3) at about 38; at the 260–480 it first shipped with it was the *lowest* job in the pack at
+15.5, below the level-1 opener. Same-level jobs are not compared.
 
 ## `items.json`
 
@@ -259,10 +272,26 @@ properties[] the catalog, in display order — the engine does not sort
   description       player-facing flavour text
   levelRequirement  minimum player level to buy (>= 1)
   price             cash cost of one unit (>= 0), fixed — never rolled
+  maxUnits          most units one player can hold (>= 1; optional in the schema, REQUIRED by tests)
   income
     perHour         cash one unit earns per hour of elapsed time (1 .. 1,000,000)
     capMinutes      minutes of income one unit holds before accrual stops (1 .. 43,200 = 30 days)
 ```
+
+**Every property declares a `maxUnits`, because without one income compounds without bound.** Each
+property pays for itself in 0.26 to 1.6 nights and a unit's price is flat, so a player who put every
+coin back grew about 4.8× a night: measured, a once-a-night player reached 4.36 million a night by the
+fifth and 1.2 billion by the tenth. The shipped ceilings are 3, 3, 2, 2, 1, 1 (street corner to
+casino). Replayed against the pack by `A_player_who_reinvests_everything_stops_growing`, income stops
+growing at 189,120 a night, reached by about night 9, and the whole ladder fills in roughly nine
+nights of play. A tier that is full stops being a place to put money, so the only way to earn more is
+the next tier up. The test does not pin the plateau's value, only that income stops growing. The
+limit is enforced by `PropertyService.CheckPurchase`, which reports it as `"limit"` *after* level and
+*before* cash: a player at the limit is told so rather than invited to save up. This bounds
+compounding; it does not retune absolute income, which a separate balance pass would own.
+
+A holding already above a newly introduced ceiling is left alone — nothing is taken away — it simply
+cannot be added to.
 
 Income is **accrued lazily**, exactly as the resource meters regenerate: nothing runs on a timer, and
 what a property has earned is derived from elapsed time whenever somebody asks. Buying another unit

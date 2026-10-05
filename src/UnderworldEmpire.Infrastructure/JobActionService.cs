@@ -101,10 +101,16 @@ public class JobActionService
     }
 
     /// <summary>Performs <paramref name="jobId"/> on behalf of <paramref name="playerId"/>.</summary>
+    /// <param name="extraItems">
+    ///     Extra copies of each required item the player chose to commit for better odds, keyed by item
+    ///     id. Omitted means none. Validated by the domain, which refuses an item the job does not use or
+    ///     a count outside what its content allows.
+    /// </param>
     public async Task<JobActionResult> PerformAsync(
         Guid playerId,
         string jobId,
         DateTimeOffset nowUtc,
+        IReadOnlyDictionary<string, int>? extraItems = null,
         CancellationToken cancellationToken = default)
     {
         var catalog = _content.JobCatalog;
@@ -167,7 +173,8 @@ public class JobActionService
                 catalog.ConsolationCashFraction,
                 catalog.ConsolationXpFraction),
             nowUtc,
-            heldItemQuantities);
+            heldItemQuantities,
+            extraItems);
 
         if (!result.WasApplied)
         {

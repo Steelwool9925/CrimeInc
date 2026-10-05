@@ -198,17 +198,19 @@ class JobItemRequirement {
   const JobItemRequirement({
     required this.itemId,
     required this.minQuantity,
-    this.quantityConsumed = 1,
+    this.maxExtras = 0,
     required this.held,
     required this.met,
   });
 
   final String itemId;
+
+  /// Copies the job needs. Every attempt uses all of them up, win or lose.
   final int minQuantity;
 
-  /// Copies each attempt uses up, win or lose. Defaults to 1 so a server that predates the field
-  /// still reads correctly.
-  final int quantityConsumed;
+  /// The most extra copies the player may add on top of [minQuantity] to improve the odds; zero
+  /// when this item cannot be committed beyond the requirement. Each extra is spent as well.
+  final int maxExtras;
 
   /// How many **spare** copies this player has: the stack minus the one they are wearing, because a
   /// job never spends the worn copy. Zero when they own none, or only the one they are wearing —
@@ -219,10 +221,19 @@ class JobItemRequirement {
   /// re-implements the server's `>=` comparison.
   final bool met;
 
+  /// How many extras the player could add right now: what the content allows, capped by the spare
+  /// copies left after the requirement. A bound for the stepper only — the server validates the
+  /// request and works out the odds, so nothing here decides anything.
+  int get availableExtras {
+    final spare = held - minQuantity;
+    if (spare <= 0) return 0;
+    return spare < maxExtras ? spare : maxExtras;
+  }
+
   factory JobItemRequirement.fromJson(Map<String, dynamic> json) => JobItemRequirement(
         itemId: json['itemId'] as String,
         minQuantity: json['minQuantity'] as int,
-        quantityConsumed: (json['quantityConsumed'] as int?) ?? 1,
+        maxExtras: (json['maxExtras'] as int?) ?? 0,
         held: json['held'] as int,
         met: json['met'] as bool,
       );
@@ -244,6 +255,7 @@ class Job {
     required this.defenseRequirement,
     this.itemRequirements = const [],
     required this.successChance,
+    this.extraSuccessChance = 0,
     required this.mastery,
     required this.canAttempt,
     this.unavailableReason,
@@ -276,6 +288,10 @@ class Job {
   /// card can show what clearing the gate would buy.
   final double successChance;
 
+  /// What each extra item a player commits adds to [successChance], as a fraction. Zero for a job
+  /// with no item gate. The server works out the resulting odds; this is only for saying so.
+  final double extraSuccessChance;
+
   final JobMastery mastery;
   final bool canAttempt;
 
@@ -301,6 +317,7 @@ class Job {
         // `as num` then toDouble: System.Text.Json writes a whole-number chance as `1`, not `1.0`,
         // and `as double` on an int is a runtime type error in Dart rather than a widening.
         successChance: (json['successChance'] as num).toDouble(),
+        extraSuccessChance: (json['extraSuccessChance'] as num?)?.toDouble() ?? 0,
         mastery: JobMastery.fromJson(json['mastery'] as Map<String, dynamic>),
         canAttempt: json['canAttempt'] as bool,
         unavailableReason: json['unavailableReason'] as String?,
@@ -644,6 +661,7 @@ class Property {
     required this.incomePerHour,
     required this.accrualCapMinutes,
     required this.quantity,
+    this.maxUnits,
     required this.pending,
     required this.cap,
     required this.canBuy,
@@ -667,6 +685,10 @@ class Property {
 
   /// Units owned; zero when the player holds none.
   final int quantity;
+
+  /// The most units one player can hold, or null when there is no limit. Sent by the server so the
+  /// card can say "2 of 3" without knowing the rule — whether a purchase is allowed stays [canBuy].
+  final int? maxUnits;
 
   /// Cash collectable at the instant the listing was served, across every unit owned.
   final int pending;
@@ -719,6 +741,7 @@ class Property {
         incomePerHour: json['incomePerHour'] as int,
         accrualCapMinutes: json['accrualCapMinutes'] as int,
         quantity: json['quantity'] as int,
+        maxUnits: json['maxUnits'] as int?,
         pending: json['pending'] as int,
         cap: json['cap'] as int,
         canBuy: json['canBuy'] as bool,

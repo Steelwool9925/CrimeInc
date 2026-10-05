@@ -20,6 +20,9 @@ public enum PropertyFailure
     /// <summary>The player cannot afford the price. Temporary — they can earn more.</summary>
     InsufficientCash,
 
+    /// <summary>The player already holds the most units of this property that is allowed.</summary>
+    AtUnitLimit,
+
     /// <summary>The player owns no unit of the property, so there is nothing to collect from.</summary>
     NotOwned,
 

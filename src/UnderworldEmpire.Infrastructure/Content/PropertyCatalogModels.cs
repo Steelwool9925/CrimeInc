@@ -42,6 +42,13 @@ public sealed record PropertyJson
     public long Price { get; init; }
 
     /// <summary>
+    /// Most units one player may hold. Absent means no limit; the shipped pack always declares one
+    /// (see <c>Property.MaxUnits</c> for why).
+    /// </summary>
+    [JsonPropertyName("maxUnits")]
+    public int? MaxUnits { get; init; }
+
+    /// <summary>
     /// The income block. Defaulted rather than nullable so an entry that omits it reports "perHour must
     /// be >= 1" alongside every other problem in the file, instead of a null dereference on the first
     /// entry that happens to be missing it.

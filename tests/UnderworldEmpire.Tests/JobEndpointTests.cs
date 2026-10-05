@@ -461,16 +461,37 @@ public class JobEndpointTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task The_reported_chance_includes_the_item_surplus_term()
+    public async Task The_reported_chance_is_the_chance_with_no_extras_however_much_the_caller_holds()
     {
-        // Exactly at the stat requirement (no stat surplus), holding 3 above the item minimum of 1:
-        // 0.65 base + 3 * 0.01 item-surplus rate = 0.68. Computed by the same Job.SuccessChanceFor
-        // the attempt would roll against, so this figure cannot drift from what an attempt gets.
-        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 4);
+        // GET /jobs cannot know how many extras the player will choose, so it reports the odds of an
+        // attempt with none. Owning a large stack must not move them: odds follow what is spent.
+        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 20);
 
         using var doc = await GetJobsAsync(token);
 
-        Assert.Equal(0.68, Job(doc, ItemGatedJob).GetProperty("successChance").GetDouble(), precision: 10);
+        Assert.Equal(0.65, Job(doc, ItemGatedJob).GetProperty("successChance").GetDouble(), precision: 10);
+    }
+
+    [Fact]
+    public async Task An_item_job_reports_what_each_extra_is_worth_and_how_many_are_allowed()
+    {
+        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 4);
+
+        using var doc = await GetJobsAsync(token);
+        var job = Job(doc, ItemGatedJob);
+
+        Assert.Equal(0.10, job.GetProperty("extraSuccessChance").GetDouble(), precision: 10);
+        Assert.Equal(3, job.GetProperty("itemRequirements")[0].GetProperty("maxExtras").GetInt32());
+    }
+
+    [Fact]
+    public async Task A_job_with_no_item_requirements_allows_no_extras()
+    {
+        var token = await NewGuestTokenAsync();
+
+        using var doc = await GetJobsAsync(token);
+
+        Assert.Empty(Job(doc, "shake-down-corner-store").GetProperty("itemRequirements").EnumerateArray());
     }
 
     [Fact]

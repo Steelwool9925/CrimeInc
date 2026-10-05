@@ -529,7 +529,8 @@ void main() {
 
       final uses = tester.widget<Text>(find.byKey(const Key('job-uses-hijack-a-delivery-truck')));
 
-      expect(uses.data, contains('Uses up 1 switchblade each attempt'));
+      // The fixture's gate needs two, and the whole requirement is what an attempt uses up.
+      expect(uses.data, contains('Uses up 2 switchblade each attempt'));
       expect(uses.data, contains('never the one you are wearing'));
     });
 
@@ -558,6 +559,138 @@ void main() {
       final tile = find.byKey(const Key('job-result-item-switchblade'));
       expect(find.descendant(of: tile, matching: find.text('Used up')), findsOneWidget);
       expect(find.descendant(of: tile, matching: find.textContaining('switchblade')), findsOneWidget);
+    });
+  });
+
+  group('JobsScreen — extra items for better odds', () {
+    FakeApiClient withExtrasJob({DoJobResult? doJobResult}) => FakeApiClient(
+          jobsResult: const JobList(jobs: [kExtrasJob], currentEnergy: 20, level: 3),
+          doJobResult: doJobResult,
+        );
+
+    Finder more() => find.byKey(const Key('job-extras-more-hijack-a-delivery-truck-switchblade'));
+    Finder less() => find.byKey(const Key('job-extras-less-hijack-a-delivery-truck-switchblade'));
+    String count(WidgetTester tester) => tester
+        .widget<Text>(find.byKey(const Key('job-extras-count-hijack-a-delivery-truck-switchblade')))
+        .data!;
+
+    testWidgets('an available item job offers a stepper that says what each extra is worth', (tester) async {
+      await pumpJobs(tester, withExtrasJob());
+
+      final label = tester.widget<Text>(
+          find.byKey(const Key('job-extras-label-hijack-a-delivery-truck-switchblade')));
+      expect(label.data, contains('Add extra switchblade'));
+      expect(label.data, contains('+10% success each'));
+      expect(label.data, contains('spent win or lose'));
+      expect(count(tester), '0');
+    });
+
+    testWidgets('a locked job offers none', (tester) async {
+      // A stepper on a card that cannot be attempted would invite choosing a cost for nothing.
+      await pumpJobs(tester, FakeApiClient(
+        jobsResult: const JobList(jobs: [kItemGatedJob], currentEnergy: 20, level: 3),
+      ));
+
+      expect(more(), findsNothing);
+    });
+
+    testWidgets('no spare beyond the requirement means nothing to add', (tester) async {
+      await pumpJobs(tester, FakeApiClient(
+        jobsResult: const JobList(jobs: [kItemReadyJob], currentEnergy: 20, level: 3),
+      ));
+
+      // kItemReadyJob holds exactly its requirement and allows no extras.
+      expect(more(), findsNothing);
+    });
+
+    testWidgets('a job with no item gate has no stepper', (tester) async {
+      await pumpJobs(tester, FakeApiClient());
+
+      expect(
+        find.byWidgetPredicate((w) =>
+            w.key is ValueKey<String> && (w.key as ValueKey<String>).value.startsWith('job-extras-')),
+        findsNothing,
+      );
+    });
+
+    testWidgets('the stepper counts up to what is affordable and no further', (tester) async {
+      await pumpJobs(tester, withExtrasJob());
+
+      for (var i = 0; i < 5; i++) {
+        await tester.tap(more(), warnIfMissed: false);
+        await tester.pump();
+      }
+
+      expect(count(tester), '3', reason: 'held 4, needs 1: three spare, and the content allows three');
+      expect(tester.widget<IconButton>(more()).onPressed, isNull);
+    });
+
+    testWidgets('the stepper cannot go below none', (tester) async {
+      await pumpJobs(tester, withExtrasJob());
+
+      expect(tester.widget<IconButton>(less()).onPressed, isNull);
+      await tester.tap(more());
+      await tester.pump();
+      await tester.tap(less());
+      await tester.pump();
+
+      expect(count(tester), '0');
+    });
+
+    testWidgets('the attempt is made with the extras that were dialled in', (tester) async {
+      final api = withExtrasJob();
+      await pumpJobs(tester, api);
+
+      await tester.tap(more());
+      await tester.pump();
+      await tester.tap(more());
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('do-job-hijack-a-delivery-truck')));
+      await tester.pumpAndSettle();
+
+      expect(api.doJobExtras, [
+        {'switchblade': 2},
+      ]);
+    });
+
+    testWidgets('an attempt with nothing dialled in sends no extras', (tester) async {
+      final api = withExtrasJob();
+      await pumpJobs(tester, api);
+
+      await tester.tap(find.byKey(const Key('do-job-hijack-a-delivery-truck')));
+      await tester.pumpAndSettle();
+
+      expect(api.doJobExtras, [<String, int>{}]);
+    });
+
+    testWidgets('the selection does not carry over to the next attempt', (tester) async {
+      // Extras are spent, so a leftover selection would quietly pad an attempt the player did not mean to.
+      final api = withExtrasJob();
+      await pumpJobs(tester, api);
+
+      await tester.tap(more());
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('do-job-hijack-a-delivery-truck')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('do-job-hijack-a-delivery-truck')));
+      await tester.pumpAndSettle();
+
+      expect(api.doJobExtras, [
+        {'switchblade': 1},
+        <String, int>{},
+      ]);
+      expect(count(tester), '0');
+    });
+
+    testWidgets('the stepper buttons carry names a screen reader can use', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pumpJobs(tester, withExtrasJob());
+
+      expect(find.byTooltip('One more extra switchblade'), findsOneWidget);
+      expect(find.byTooltip('One fewer extra switchblade'), findsOneWidget);
+      // Unanchored: the widget-test tree folds the whole card into one node.
+      expect(find.bySemanticsLabel(RegExp(r'0 extra switchblade, up to 3')), findsWidgets);
+      semantics.dispose();
     });
   });
 

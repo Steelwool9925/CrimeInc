@@ -847,7 +847,7 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
 
         Assert.True(job.GetProperty("canAttempt").GetBoolean());
         Assert.Equal(1, requirement.GetProperty("held").GetInt32());
-        Assert.Equal(1, requirement.GetProperty("quantityConsumed").GetInt32());
+        Assert.Equal(3, requirement.GetProperty("maxExtras").GetInt32());
         Assert.True(requirement.GetProperty("met").GetBoolean());
     }
 
@@ -873,15 +873,142 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
     }
 
     [Fact]
-    public async Task The_reported_odds_count_spare_copies_not_the_worn_one()
+    public async Task The_reported_odds_do_not_count_the_stack_the_player_holds()
     {
-        // Item surplus is spare copies above the minimum. Holding three, wearing one, minimum one: two
-        // spare, one above the minimum, +0.01 on the 0.65 base.
+        // Three held, one worn: two spare. Odds follow what the player chooses to spend, so with nothing
+        // committed they are the base 0.65 however much sits in the inventory.
         var (token, _) = await WearingTheGearForTheItemGatedJobAsync(spareBlades: 2);
 
         var job = await GetJobAsync(token, ItemGatedJob);
 
-        Assert.Equal(0.66, job.GetProperty("successChance").GetDouble(), precision: 10);
+        Assert.Equal(0.65, job.GetProperty("successChance").GetDouble(), precision: 10);
+    }
+
+    // -------------------------------------------------------------------------
+    // Extra items the player chooses to spend for better odds
+    // -------------------------------------------------------------------------
+
+    private async Task<HttpResponseMessage> DoJobWithExtrasAsync(
+        string token, string jobId, Dictionary<string, int> extras)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/jobs/{jobId}/do")
+        {
+            Content = JsonContent.Create(new { extras })
+        };
+        request.Headers.Add("Authorization", $"Bearer {token}");
+        return await _client.SendAsync(request);
+    }
+
+    private static string? ReasonOf(JsonDocument problem) =>
+        problem.RootElement.TryGetProperty("reason", out var reason) ? reason.GetString() : null;
+
+    [Fact]
+    public async Task Committed_extras_are_spent_on_top_of_the_requirement_and_reported()
+    {
+        var (token, playerId) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 5);
+
+        var response = await DoJobWithExtrasAsync(token, ItemGatedJob, new() { [GateItemId] = 2 });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = await BodyAsync(response);
+        var consumed = body.RootElement.GetProperty("result").GetProperty("itemsConsumed")[0];
+        Assert.Equal(3, consumed.GetProperty("quantityConsumed").GetInt32());
+        Assert.Equal(2, consumed.GetProperty("quantityRemaining").GetInt32());
+        Assert.Equal(2, await HeldQuantityAsync(playerId, GateItemId));
+    }
+
+    [Fact]
+    public async Task Extras_change_the_outcome_of_the_same_roll()
+    {
+        // 0.65 base, so a roll of 9000 (90%) misses. Three extras at 10% make it 0.95 and the very same
+        // roll hits. The only thing that differs between the two attempts is the extras.
+        var (withExtras, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 5);
+        var (without, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 5);
+
+        using (_factory.Random.Scripted(9_000, 500))
+        {
+            using var hit = await BodyAsync(
+                await DoJobWithExtrasAsync(withExtras, ItemGatedJob, new() { [GateItemId] = 3 }));
+            Assert.True(hit.RootElement.GetProperty("result").GetProperty("succeeded").GetBoolean());
+        }
+
+        using (_factory.Random.Scripted(9_000, 500, 3))
+        {
+            using var miss = await BodyAsync(await DoJobAsync(without, ItemGatedJob));
+            Assert.False(miss.RootElement.GetProperty("result").GetProperty("succeeded").GetBoolean());
+        }
+    }
+
+    [Fact]
+    public async Task Extras_are_spent_when_the_attempt_fails_too()
+    {
+        var (token, playerId) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 5);
+
+        using (_factory.Random.Scripted(10_000, 500, 3))
+        {
+            using var body = await BodyAsync(
+                await DoJobWithExtrasAsync(token, ItemGatedJob, new() { [GateItemId] = 2 }));
+            Assert.False(body.RootElement.GetProperty("result").GetProperty("succeeded").GetBoolean());
+        }
+
+        Assert.Equal(2, await HeldQuantityAsync(playerId, GateItemId));
+    }
+
+    [Theory]
+    [InlineData("switchblade", 4)]      // above the three the content allows
+    [InlineData("switchblade", -1)]     // negative
+    [InlineData("brass-knuckles", 1)]   // an item the job does not use
+    public async Task Extras_the_job_does_not_accept_are_a_bad_request_and_spend_nothing(string itemId, int count)
+    {
+        var (token, playerId) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 10);
+
+        var response = await DoJobWithExtrasAsync(token, ItemGatedJob, new() { [itemId] = count });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var problem = await BodyAsync(response);
+        Assert.Equal("extras", ReasonOf(problem));
+        Assert.Equal(10, await HeldQuantityAsync(playerId, GateItemId));
+    }
+
+    [Fact]
+    public async Task Extras_the_player_cannot_cover_are_a_conflict_on_items_and_spend_nothing()
+    {
+        // Two held: enough for the requirement alone, not for the requirement plus two extras.
+        var (token, playerId) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 2);
+
+        var response = await DoJobWithExtrasAsync(token, ItemGatedJob, new() { [GateItemId] = 2 });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        using var problem = await BodyAsync(response);
+        Assert.Equal("items", ReasonOf(problem));
+        Assert.Equal(2, await HeldQuantityAsync(playerId, GateItemId));
+    }
+
+    [Fact]
+    public async Task An_explicit_empty_extras_object_is_the_same_as_no_body()
+    {
+        var (token, playerId) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 3);
+
+        var response = await DoJobWithExtrasAsync(token, ItemGatedJob, new());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(2, await HeldQuantityAsync(playerId, GateItemId));
+    }
+
+    [Fact]
+    public async Task Extras_never_spend_the_worn_copy()
+    {
+        // Wearing one of three: two spare, enough for the requirement plus one extra but not two. The
+        // worn copy is not on offer however many extras are asked for.
+        var (token, playerId) = await WearingTheGearForTheItemGatedJobAsync(spareBlades: 2);
+
+        var tooMany = await DoJobWithExtrasAsync(token, ItemGatedJob, new() { [GateItemId] = 2 });
+        Assert.Equal(HttpStatusCode.Conflict, tooMany.StatusCode);
+
+        var fits = await DoJobWithExtrasAsync(token, ItemGatedJob, new() { [GateItemId] = 1 });
+        Assert.Equal(HttpStatusCode.OK, fits.StatusCode);
+        Assert.Equal(1, await HeldQuantityAsync(playerId, GateItemId));
+        Assert.True(await IsWornAsync(playerId, GateItemId));
     }
 
     [Fact]

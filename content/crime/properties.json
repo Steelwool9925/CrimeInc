@@ -8,6 +8,7 @@
       "description": "A patch of pavement nobody works without your say-so.",
       "levelRequirement": 1,
       "price": 500,
+      "maxUnits": 3,
       "income": { "perHour": 240, "capMinutes": 480 }
     },
     {
@@ -16,6 +17,7 @@
       "description": "Buys low, asks nothing, and keeps no paperwork worth subpoenaing.",
       "levelRequirement": 2,
       "price": 1800,
+      "maxUnits": 3,
       "income": { "perHour": 300, "capMinutes": 480 }
     },
     {
@@ -24,6 +26,7 @@
       "description": "Twelve dollars a wash and a great deal more than twelve dollars a day.",
       "levelRequirement": 4,
       "price": 6000,
+      "maxUnits": 2,
       "income": { "perHour": 640, "capMinutes": 720 }
     },
     {
@@ -32,6 +35,7 @@
       "description": "Loud enough that nobody upstairs hears the counting room.",
       "levelRequirement": 6,
       "price": 18000,
+      "maxUnits": 2,
       "income": { "perHour": 1100, "capMinutes": 720 }
     },
     {
@@ -40,6 +44,7 @@
       "description": "Half the crates are honest. The manifest says all of them are.",
       "levelRequirement": 9,
       "price": 52000,
+      "maxUnits": 1,
       "income": { "perHour": 2000, "capMinutes": 1440 }
     },
     {
@@ -48,6 +53,7 @@
       "description": "The house always wins, and these days the house is you.",
       "levelRequirement": 12,
       "price": 140000,
+      "maxUnits": 1,
       "income": { "perHour": 3600, "capMinutes": 1440 }
     }
   ]

@@ -39,6 +39,21 @@ class _JobsScreenState extends State<JobsScreen> {
   /// Whether a level-up dialog is already on screen. See [_maybeShowLevelUp].
   bool _levelUpShowing = false;
 
+  /// How many extra copies of each item the player has dialled in, per job: `jobId -> itemId -> n`.
+  /// Held here rather than in each card so it survives the list rebuilding on every refresh, and
+  /// cleared when the attempt is made so the next one starts from none — extras are spent, so a
+  /// leftover selection would quietly spend items on an attempt the player did not mean to pad.
+  final Map<String, Map<String, int>> _extras = {};
+
+  /// The extras for [job] that are still affordable right now. Re-clamped on every read because
+  /// stock changes under a stored selection (a refresh, an equip, another attempt).
+  Map<String, int> _chosenExtras(Job job) => {
+        for (final r in job.itemRequirements)
+          if (r.maxExtras > 0)
+            if ((_extras[job.id]?[r.itemId] ?? 0).clamp(0, r.availableExtras) case final n when n > 0)
+              r.itemId: n,
+      };
+
   @override
   void initState() {
     super.initState();
@@ -199,7 +214,14 @@ class _JobsScreenState extends State<JobsScreen> {
                   cashLabel: cashLabel,
                   busy: state.jobInFlight == job.id,
                   anyBusy: state.jobInFlight != null,
-                  onDo: () => state.doJob(job.id),
+                  chosenExtras: _chosenExtras(job),
+                  onExtrasChanged: (itemId, count) =>
+                      setState(() => (_extras[job.id] ??= {})[itemId] = count),
+                  onDo: () {
+                    final extras = _chosenExtras(job);
+                    setState(() => _extras.remove(job.id));
+                    state.doJob(job.id, extras: extras);
+                  },
                 ),
               );
             },
@@ -216,6 +238,8 @@ class _JobCard extends StatelessWidget {
     required this.cashLabel,
     required this.busy,
     required this.anyBusy,
+    required this.chosenExtras,
+    required this.onExtrasChanged,
     required this.onDo,
   });
 
@@ -223,6 +247,11 @@ class _JobCard extends StatelessWidget {
   final String cashLabel;
   final bool busy;
   final bool anyBusy;
+
+  /// Extras dialled in for this job right now, `itemId -> n`, already clamped to what is affordable.
+  final Map<String, int> chosenExtras;
+
+  final void Function(String itemId, int count) onExtrasChanged;
   final VoidCallback onDo;
 
   /// Wording for the server's refusal token. The server sends a stable token, not display text, so
@@ -249,8 +278,11 @@ class _JobCard extends StatelessWidget {
   /// What an attempt uses up, stated before the player commits to it — shown on the card whether or
   /// not the job is currently available, so the cost is known before the button is ever enabled.
   String get _usesLabel =>
-      'Uses up ${job.itemRequirements.map((r) => '${r.quantityConsumed} ${r.itemId}').join(', ')} '
+      'Uses up ${job.itemRequirements.map((r) => '${r.minQuantity} ${r.itemId}').join(', ')} '
       'each attempt (never the one you are wearing)';
+
+  /// Each extra's worth as a whole percentage, e.g. "10%". Rounded for display only.
+  String get _extraChanceLabel => '${(job.extraSuccessChance * 100).round()}%';
 
   /// The success chance as a whole percentage.
   ///
@@ -302,6 +334,20 @@ class _JobCard extends StatelessWidget {
                 style: theme.textTheme.bodySmall,
               ),
             ],
+            // Extras are only offered when the job can actually be done and there is something to add:
+            // a stepper on a locked card would invite choosing a cost for an attempt that cannot happen.
+            if (job.canAttempt)
+              for (final r in job.itemRequirements.where((r) => r.availableExtras > 0)) ...[
+                const SizedBox(height: 4),
+                _ExtrasStepper(
+                  jobId: job.id,
+                  requirement: r,
+                  count: chosenExtras[r.itemId] ?? 0,
+                  eachLabel: _extraChanceLabel,
+                  enabled: !anyBusy,
+                  onChanged: (n) => onExtrasChanged(r.itemId, n),
+                ),
+              ],
             if (job.mastery.maxRank > 0) ...[
               const SizedBox(height: 8),
               // The bar and its "Rank x/y" caption are one fact, announced as one.
@@ -374,6 +420,75 @@ class _JobCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// "Add extra switchblade  - 1 +  (+10% success each)" — how many items beyond the requirement the
+/// player is willing to spend for better odds.
+///
+/// Every extra is spent whether the attempt wins or loses, which the line says before the player
+/// commits rather than after. The count is bounded by what the content allows and by the spare copies
+/// the player holds; the server checks both again and works out the resulting odds, so this only ever
+/// proposes a number.
+class _ExtrasStepper extends StatelessWidget {
+  const _ExtrasStepper({
+    required this.jobId,
+    required this.requirement,
+    required this.count,
+    required this.eachLabel,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final String jobId;
+  final JobItemRequirement requirement;
+  final int count;
+  final String eachLabel;
+  final bool enabled;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final id = requirement.itemId;
+    final max = requirement.availableExtras;
+
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            'Add extra $id  (+$eachLabel success each, spent win or lose)',
+            key: Key('job-extras-label-$jobId-$id'),
+            style: theme.textTheme.bodySmall,
+          ),
+        ),
+        IconButton(
+          key: Key('job-extras-less-$jobId-$id'),
+          icon: const Icon(Icons.remove),
+          tooltip: 'One fewer extra $id',
+          onPressed: enabled && count > 0 ? () => onChanged(count - 1) : null,
+        ),
+        Semantics(
+          label: '$count extra $id, up to $max',
+          excludeSemantics: true,
+          child: SizedBox(
+            width: 24,
+            child: Text(
+              '$count',
+              key: Key('job-extras-count-$jobId-$id'),
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleMedium,
+            ),
+          ),
+        ),
+        IconButton(
+          key: Key('job-extras-more-$jobId-$id'),
+          icon: const Icon(Icons.add),
+          tooltip: 'One more extra $id',
+          onPressed: enabled && count < max ? () => onChanged(count + 1) : null,
+        ),
+      ],
     );
   }
 }

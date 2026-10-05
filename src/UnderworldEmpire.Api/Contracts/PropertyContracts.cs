@@ -21,6 +21,10 @@ namespace UnderworldEmpire.Api.Contracts;
 /// </param>
 /// <param name="AccrualCapMinutes">How long one unit takes to fill, in minutes.</param>
 /// <param name="Quantity">Units the player owns; zero when they own none.</param>
+/// <param name="MaxUnits">
+///     The most units one player can hold, or <see langword="null"/> when there is no limit. Sent so
+///     the card can say "2 of 3" without the client knowing the rule.
+/// </param>
 /// <param name="Pending">Cash collectable at this instant, across every unit owned.</param>
 /// <param name="Cap">
 ///     The ceiling <paramref name="Pending"/> is filling, scaled by units owned. Zero when none are
@@ -45,6 +49,7 @@ public record PropertyDto(
     long IncomePerHour,
     int AccrualCapMinutes,
     int Quantity,
+    int? MaxUnits,
     long Pending,
     long Cap,
     bool CanBuy,

@@ -11,6 +11,7 @@ Map<String, dynamic> propertyJson({
   String? buyReason,
   bool canCollect = true,
   String? collectReason,
+  int? maxUnits,
 }) =>
     {
       'id': 'street-corner',
@@ -21,6 +22,7 @@ Map<String, dynamic> propertyJson({
       'incomePerHour': 240,
       'accrualCapMinutes': 15,
       'quantity': quantity,
+      'maxUnits': maxUnits,
       'pending': pending,
       'cap': cap,
       'canBuy': canBuy,
@@ -87,6 +89,37 @@ void main() {
 
       expect(property.buyUnavailableReason, isNull);
       expect(property.collectUnavailableReason, isNull);
+    });
+  });
+
+  group('the unit ceiling', () {
+    test('reads the ceiling the server sends', () {
+      expect(Property.fromJson(propertyJson(maxUnits: 3)).maxUnits, 3);
+    });
+
+    test('a property with no ceiling reads as null, not zero', () {
+      expect(Property.fromJson(propertyJson()).maxUnits, isNull);
+    });
+
+    test('says how many are held against how many may be', () {
+      final owned = Property.fromJson(propertyJson(quantity: 2, maxUnits: 3));
+      expect(propertyUnitsLabel(owned), 'Owned: 2 of 3');
+    });
+
+    test('says what a player who owns none may hold', () {
+      final none = Property.fromJson(propertyJson(quantity: 0, maxUnits: 3));
+      expect(propertyUnitsLabel(none), 'You can hold up to 3');
+    });
+
+    test('with no ceiling it says only what is owned, and nothing when none are', () {
+      expect(propertyUnitsLabel(Property.fromJson(propertyJson(quantity: 2))), 'Owned: 2');
+      expect(propertyUnitsLabel(Property.fromJson(propertyJson(quantity: 0))), isNull);
+    });
+
+    test('a buy refused at the limit says so', () {
+      final atLimit = Property.fromJson(propertyJson(
+          quantity: 3, maxUnits: 3, canBuy: false, buyReason: 'limit'));
+      expect(propertyBuyLockLabel(atLimit), 'You hold the most you can');
     });
   });
 

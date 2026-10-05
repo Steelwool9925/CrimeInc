@@ -46,6 +46,11 @@ public sealed class JobService
     /// <param name="maxRank">Content-supplied mastery rank ceiling.</param>
     /// <param name="risk">Content-supplied pack-wide risk rules.</param>
     /// <param name="nowUtc">The instant to evaluate meter regeneration against.</param>
+    /// <param name="extraItems">
+    ///     Extra copies of each required item the player chose to commit on top of the requirement,
+    ///     keyed by item id. Each is spent and adds <see cref="Job.ExtraItemSuccessChance"/> to the
+    ///     odds. Omitted or empty means none.
+    /// </param>
     /// <param name="heldItemQuantities">
     ///     The player's current item quantities, keyed by item id — read independently of
     ///     <paramref name="loadout"/>'s equipped-only view, since a job's item gate asks "how many do
@@ -62,7 +67,8 @@ public sealed class JobService
         int maxRank,
         JobRiskRules risk,
         DateTimeOffset nowUtc,
-        IReadOnlyDictionary<string, int>? heldItemQuantities = null)
+        IReadOnlyDictionary<string, int>? heldItemQuantities = null,
+        IReadOnlyDictionary<string, int>? extraItems = null)
     {
         ArgumentNullException.ThrowIfNull(player);
         ArgumentNullException.ThrowIfNull(job);
@@ -72,6 +78,11 @@ public sealed class JobService
         var held = heldItemQuantities ?? Job.EmptyHeldItems;
 
         // ---- Validate before mutating anything ----
+
+        // A malformed request is refused ahead of every game-state gate: it is wrong whatever the
+        // player's level, stats or stock, so telling them about a shortage first would mislead.
+        if (!job.AcceptsExtras(extraItems))
+            return JobAttemptResult.Refused(JobFailure.InvalidExtras);
 
         // Precedence is level -> stats -> items -> energy: most permanent reason first, so a player
         // failing several gates is told the one that will take longest to fix. Items sits with
@@ -83,7 +94,8 @@ public sealed class JobService
         if (!job.MeetsStatRequirements(loadout.TotalAttack, loadout.TotalDefense))
             return JobAttemptResult.Refused(JobFailure.StatsTooLow);
 
-        if (!job.MeetsItemRequirements(held))
+        // The requirement plus whatever extras the player committed: they must hold all of it.
+        if (!job.MeetsItemRequirements(held, extraItems))
             return JobAttemptResult.Refused(JobFailure.InsufficientItems);
 
         int currentEnergy = player.Energy.CurrentAt(nowUtc, MeterRates.Energy);
@@ -99,7 +111,7 @@ public sealed class JobService
 
         // Roll order is part of the contract, because FakeRandomSource.Sequence scripts against it:
         // (1) success, (2) cash, (3) health loss on the failure branch only.
-        bool succeeded = RollSucceeded(job, loadout, risk, held);
+        bool succeeded = RollSucceeded(job, loadout, risk, extraItems);
 
         // The cash range is rolled on both branches — the consolation is a fraction of what the
         // attempt *would* have earned, and skipping the roll on a failure would also shift every
@@ -136,16 +148,22 @@ public sealed class JobService
         // Mastery measures completions, not attempts. A failure advances nothing.
         bool rankedUp = succeeded && mastery.RecordCompletion(completionsPerRank, maxRank);
 
-        // Consumption is deterministic, not rolled: every requirement spends its declared quantity
-        // whether the attempt succeeds or fails, so it is computed here rather than needing its own
-        // place in the roll order. Empty for the jobs that opt into no item gate.
+        // Consumption is deterministic, not rolled: every requirement spends its required count plus
+        // whatever extras the player committed, whether the attempt succeeds or fails, so it is computed
+        // here rather than needing its own place in the roll order. Empty for the jobs that opt into no
+        // item gate.
         IReadOnlyList<ItemConsumption> itemsConsumed = job.ItemRequirements.Count == 0
             ? Array.Empty<ItemConsumption>()
             : job.ItemRequirements
-                .Select(requirement => new ItemConsumption(
-                    ItemId: requirement.ItemId,
-                    QuantityConsumed: requirement.QuantityConsumed,
-                    QuantityRemaining: held.GetValueOrDefault(requirement.ItemId) - requirement.QuantityConsumed))
+                .Select(requirement =>
+                {
+                    int consumed = requirement.MinQuantity
+                                   + (extraItems?.GetValueOrDefault(requirement.ItemId) ?? 0);
+                    return new ItemConsumption(
+                        ItemId: requirement.ItemId,
+                        QuantityConsumed: consumed,
+                        QuantityRemaining: held.GetValueOrDefault(requirement.ItemId) - consumed);
+                })
                 .ToList();
 
         return JobAttemptResult.Applied(new JobOutcome(
@@ -172,10 +190,11 @@ public sealed class JobService
     /// exactly assertable. The comparison is <c>&lt;=</c>, so a chance of 0.95 wins on a roll of
     /// 9500 and loses on 9501.
     /// </remarks>
-    private bool RollSucceeded(Job job, Loadout loadout, JobRiskRules risk, IReadOnlyDictionary<string, int> held)
+    private bool RollSucceeded(
+        Job job, Loadout loadout, JobRiskRules risk, IReadOnlyDictionary<string, int>? extraItems)
     {
         double chance = job.SuccessChanceFor(
-            loadout.TotalAttack, loadout.TotalDefense, risk.MaxSuccessChance, held);
+            loadout.TotalAttack, loadout.TotalDefense, risk.MaxSuccessChance, extraItems);
 
         long chanceBasisPoints = (long)Math.Round(chance * BasisPoints, MidpointRounding.AwayFromZero);
 

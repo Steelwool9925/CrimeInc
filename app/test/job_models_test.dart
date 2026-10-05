@@ -112,29 +112,37 @@ void main() {
       expect(job.unavailableReason, 'items');
     });
 
-    test('reads how many copies an attempt uses up', () {
+    test('reads how many extras the player may add', () {
       final job = Job.fromJson(jobJson()
         ..['itemRequirements'] = [
-          {
-            'itemId': 'switchblade',
-            'minQuantity': 3,
-            'quantityConsumed': 2,
-            'held': 3,
-            'met': true,
-          },
-        ]);
+          {'itemId': 'switchblade', 'minQuantity': 1, 'maxExtras': 3, 'held': 4, 'met': true},
+        ]
+        ..['extraSuccessChance'] = 0.1);
 
-      expect(job.itemRequirements.single.quantityConsumed, 2);
+      expect(job.itemRequirements.single.maxExtras, 3);
+      expect(job.extraSuccessChance, 0.1);
     });
 
-    test('a requirement with no quantityConsumed uses up one', () {
+    test('a requirement with no maxExtras allows none', () {
       // A server that predates the field must still read correctly.
       final job = Job.fromJson(jobJson()
         ..['itemRequirements'] = [
           {'itemId': 'switchblade', 'minQuantity': 2, 'held': 2, 'met': true},
         ]);
 
-      expect(job.itemRequirements.single.quantityConsumed, 1);
+      expect(job.itemRequirements.single.maxExtras, 0);
+      expect(job.extraSuccessChance, 0);
+    });
+
+    test('how many extras could be added is capped by the content and by the spare stock', () {
+      JobItemRequirement r(int min, int maxExtras, int held) => JobItemRequirement(
+          itemId: 'switchblade', minQuantity: min, maxExtras: maxExtras, held: held, met: held >= min);
+
+      expect(r(1, 3, 4).availableExtras, 3, reason: 'plenty of stock: the content allowance');
+      expect(r(1, 3, 2).availableExtras, 1, reason: 'stock is the limit: one spare after the requirement');
+      expect(r(1, 3, 1).availableExtras, 0, reason: 'exactly the requirement: nothing to add');
+      expect(r(2, 3, 1).availableExtras, 0, reason: 'short of the requirement: never negative');
+      expect(r(1, 0, 10).availableExtras, 0, reason: 'the content allows none');
     });
 
     test('reads a met item requirement', () {

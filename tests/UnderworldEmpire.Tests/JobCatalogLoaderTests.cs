@@ -84,14 +84,14 @@ public class JobCatalogLoaderTests : IDisposable
     private static object ValidJobRisk(
         double baseSuccessChance = 0.85,
         double successChancePerSurplusPoint = 0.01,
-        double itemSuccessChancePerSurplusPoint = 0.0,
+        double extraItemSuccessChance = 0.0,
         int healthLossMin = 0,
         int healthLossMax = 1) =>
         new
         {
             baseSuccessChance,
             successChancePerSurplusPoint,
-            itemSuccessChancePerSurplusPoint,
+            extraItemSuccessChance,
             healthLossMin,
             healthLossMax
         };
@@ -620,7 +620,7 @@ public class JobCatalogLoaderTests : IDisposable
         var job = Loader().LoadJobs("crime", TestItemCatalog()).Jobs.Single();
 
         Assert.Empty(job.ItemRequirements);
-        Assert.Equal(0.0, job.ItemSuccessChancePerSurplusPoint, precision: 10);
+        Assert.Equal(0.0, job.ExtraItemSuccessChance, precision: 10);
     }
 
     [Fact]
@@ -628,14 +628,14 @@ public class JobCatalogLoaderTests : IDisposable
     {
         WriteJobs("crime", ValidCatalog(ValidJob(
             itemRequirements: [ValidItemRequirement(itemId: "switchblade", minQuantity: 3)],
-            risk: ValidJobRisk(itemSuccessChancePerSurplusPoint: 0.02))));
+            risk: ValidJobRisk(extraItemSuccessChance: 0.02))));
 
         var job = Loader().LoadJobs("crime", TestItemCatalog()).Jobs.Single();
 
         var requirement = Assert.Single(job.ItemRequirements);
         Assert.Equal("switchblade", requirement.ItemId);
         Assert.Equal(3, requirement.MinQuantity);
-        Assert.Equal(0.02, job.ItemSuccessChancePerSurplusPoint, precision: 10);
+        Assert.Equal(0.02, job.ExtraItemSuccessChance, precision: 10);
     }
 
     [Fact]
@@ -688,40 +688,55 @@ public class JobCatalogLoaderTests : IDisposable
     }
 
     [Fact]
-    public void A_requirement_that_omits_quantity_consumed_spends_one()
+    public void A_requirement_that_omits_max_extras_allows_none()
     {
-        // The field is additive: every pack written before it existed must load unchanged.
+        // The field is additive: every pack written before it existed must load unchanged, and an item
+        // that says nothing about extras cannot be committed beyond what the job needs.
         WriteJobs("crime", ValidCatalog(ValidJob(
             itemRequirements: [ValidItemRequirement(minQuantity: 3)])));
 
         var requirement = Assert.Single(Loader().LoadJobs("crime", TestItemCatalog()).Jobs.Single().ItemRequirements);
 
-        Assert.Equal(1, requirement.QuantityConsumed);
+        Assert.Equal(3, requirement.MinQuantity);
+        Assert.Equal(0, requirement.MaxExtras);
     }
 
     [Fact]
-    public void A_declared_quantity_consumed_is_carried_through()
+    public void A_declared_max_extras_is_carried_through()
     {
         WriteJobs("crime", ValidCatalog(ValidJob(
-            itemRequirements: [new { itemId = "switchblade", minQuantity = 3, quantityConsumed = 2 }])));
+            itemRequirements: [new { itemId = "switchblade", minQuantity = 1, maxExtras = 3 }],
+            risk: ValidJobRisk(extraItemSuccessChance: 0.1))));
 
-        var requirement = Assert.Single(Loader().LoadJobs("crime", TestItemCatalog()).Jobs.Single().ItemRequirements);
+        var job = Loader().LoadJobs("crime", TestItemCatalog()).Jobs.Single();
+        var requirement = Assert.Single(job.ItemRequirements);
 
-        Assert.Equal(3, requirement.MinQuantity);
-        Assert.Equal(2, requirement.QuantityConsumed);
+        Assert.Equal(3, requirement.MaxExtras);
+        Assert.Equal(0.1, job.ExtraItemSuccessChance, precision: 10);
     }
 
-    [Theory]
-    [InlineData(0)]
-    [InlineData(3)]
-    public void A_quantity_consumed_outside_one_to_the_minimum_throws(int consumed)
+    [Fact]
+    public void A_negative_max_extras_is_a_named_load_error()
     {
         WriteJobs("crime", ValidCatalog(ValidJob(
-            itemRequirements: [new { itemId = "switchblade", minQuantity = 2, quantityConsumed = consumed }])));
+            itemRequirements: [new { itemId = "switchblade", minQuantity = 1, maxExtras = -1 }])));
 
         var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
 
-        Assert.Contains($"'quantityConsumed' {consumed}, must be between 1 and 'minQuantity' (2)", ex.Message);
+        Assert.Contains("'maxExtras' -1, must be >= 0", ex.Message);
+    }
+
+    [Fact]
+    public void Extras_that_are_worth_nothing_are_a_named_load_error()
+    {
+        // Allowing a player to spend items for no effect is a content mistake, not a design choice.
+        WriteJobs("crime", ValidCatalog(ValidJob(
+            itemRequirements: [new { itemId = "switchblade", minQuantity = 1, maxExtras = 2 }],
+            risk: ValidJobRisk(extraItemSuccessChance: 0.0))));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+
+        Assert.Contains("'risk.extraItemSuccessChance' is 0", ex.Message);
     }
 
     [Fact]
@@ -750,11 +765,11 @@ public class JobCatalogLoaderTests : IDisposable
     public void A_negative_item_success_chance_per_surplus_point_throws()
     {
         WriteJobs("crime", ValidCatalog(ValidJob(
-            risk: ValidJobRisk(itemSuccessChancePerSurplusPoint: -0.01))));
+            risk: ValidJobRisk(extraItemSuccessChance: -0.01))));
 
         var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
 
-        Assert.Contains("'risk.itemSuccessChancePerSurplusPoint' must be >= 0", ex.Message);
+        Assert.Contains("'risk.extraItemSuccessChance' must be >= 0", ex.Message);
     }
 
     [Fact]
@@ -772,7 +787,7 @@ public class JobCatalogLoaderTests : IDisposable
         Assert.Equal("switchblade", requirement.ItemId);
         // Hold one, spend one: the requirement matches what an attempt actually consumes.
         Assert.Equal(1, requirement.MinQuantity);
-        Assert.True(job.ItemSuccessChancePerSurplusPoint > 0.0);
+        Assert.True(job.ExtraItemSuccessChance > 0.0);
     }
 
     [Fact]

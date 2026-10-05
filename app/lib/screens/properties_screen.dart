@@ -239,10 +239,13 @@ class _PropertyCard extends StatelessWidget {
               key: Key('property-income-${property.id}'),
               style: theme.textTheme.bodySmall,
             ),
-            if (property.isOwned) ...[
-              const SizedBox(height: 8),
-              Text('Owned: ${property.quantity}',
+            if (propertyUnitsLabel(property) case final units?) ...[
+              const SizedBox(height: 4),
+              Text(units,
+                  key: Key('property-units-${property.id}'),
                   style: theme.textTheme.bodySmall),
+            ],
+            if (property.isOwned) ...[
               const SizedBox(height: 4),
               // The bar and its "n / cap" caption are one fact, announced as one.
               //
