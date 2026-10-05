@@ -101,10 +101,16 @@ public class JobActionService
     }
 
     /// <summary>Performs <paramref name="jobId"/> on behalf of <paramref name="playerId"/>.</summary>
+    /// <param name="extraItems">
+    ///     Extra copies of each required item the player chose to commit for better odds, keyed by item
+    ///     id. Omitted means none. Validated by the domain, which refuses an item the job does not use or
+    ///     a count outside what its content allows.
+    /// </param>
     public async Task<JobActionResult> PerformAsync(
         Guid playerId,
         string jobId,
         DateTimeOffset nowUtc,
+        IReadOnlyDictionary<string, int>? extraItems = null,
         CancellationToken cancellationToken = default)
     {
         var catalog = _content.JobCatalog;
@@ -151,7 +157,8 @@ public class JobActionService
             trackedHoldings = await _db.PlayerItems
                 .Where(h => h.PlayerId == playerId && itemIds.Contains(h.ItemId))
                 .ToListAsync(cancellationToken);
-            heldItemQuantities = trackedHoldings.ToDictionary(h => h.ItemId, h => h.Quantity);
+            // Spare copies, not the whole stack: the worn one is never spent (see PlayerItem.SpareQuantity).
+            heldItemQuantities = trackedHoldings.ToDictionary(h => h.ItemId, h => h.SpareQuantity);
         }
 
         var result = _jobs.Attempt(
@@ -166,7 +173,8 @@ public class JobActionService
                 catalog.ConsolationCashFraction,
                 catalog.ConsolationXpFraction),
             nowUtc,
-            heldItemQuantities);
+            heldItemQuantities,
+            extraItems);
 
         if (!result.WasApplied)
         {

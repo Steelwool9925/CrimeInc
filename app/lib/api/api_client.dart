@@ -57,7 +57,10 @@ abstract class ApiClient {
   Future<JobList> jobs(String deviceToken);
 
   /// Performs a job. Throws [JobRefusedException] when the server refuses it (409).
-  Future<DoJobResult> doJob(String deviceToken, String jobId);
+  /// Performs [jobId]. [extras] is how many extra copies of each required item the player chose
+  /// to spend for better odds, keyed by item id; empty means only what the job requires.
+  Future<DoJobResult> doJob(String deviceToken, String jobId,
+      {Map<String, int> extras = const {}});
 
   /// Spends one skill point. Throws [JobRefusedException] with reason `noSkillPoints` when none remain.
   Future<Me> allocateSkill(String deviceToken, String target);
@@ -207,10 +210,15 @@ class HttpApiClient implements ApiClient {
   }
 
   @override
-  Future<DoJobResult> doJob(String deviceToken, String jobId) async {
+  Future<DoJobResult> doJob(String deviceToken, String jobId,
+      {Map<String, int> extras = const {}}) async {
     final response = await _client.post(
       Uri.parse('$_baseUrl/jobs/$jobId/do'),
-      headers: {'Authorization': 'Bearer $deviceToken'},
+      headers: {
+        'Authorization': 'Bearer $deviceToken',
+        if (extras.isNotEmpty) 'Content-Type': 'application/json',
+      },
+      body: extras.isEmpty ? null : jsonEncode({'extras': extras}),
     );
     _throwIfRefused(response);
     _checkStatus(response);

@@ -198,24 +198,42 @@ class JobItemRequirement {
   const JobItemRequirement({
     required this.itemId,
     required this.minQuantity,
+    this.maxExtras = 0,
     required this.held,
     required this.met,
   });
 
   final String itemId;
+
+  /// Copies the job needs. Every attempt uses all of them up, win or lose.
   final int minQuantity;
 
-  /// How many copies this player currently holds. Zero when they own none at all, the same as a
-  /// holding with too few — the server does not distinguish "never bought one" on the wire.
+  /// The most extra copies the player may add on top of [minQuantity] to improve the odds; zero
+  /// when this item cannot be committed beyond the requirement. Each extra is spent as well.
+  final int maxExtras;
+
+  /// How many **spare** copies this player has: the stack minus the one they are wearing, because a
+  /// job never spends the worn copy. Zero when they own none, or only the one they are wearing —
+  /// the server does not distinguish the two on the wire.
   final int held;
 
   /// Whether [held] meets [minQuantity]. Derivable client-side, but sent anyway so the card never
   /// re-implements the server's `>=` comparison.
   final bool met;
 
+  /// How many extras the player could add right now: what the content allows, capped by the spare
+  /// copies left after the requirement. A bound for the stepper only — the server validates the
+  /// request and works out the odds, so nothing here decides anything.
+  int get availableExtras {
+    final spare = held - minQuantity;
+    if (spare <= 0) return 0;
+    return spare < maxExtras ? spare : maxExtras;
+  }
+
   factory JobItemRequirement.fromJson(Map<String, dynamic> json) => JobItemRequirement(
         itemId: json['itemId'] as String,
         minQuantity: json['minQuantity'] as int,
+        maxExtras: (json['maxExtras'] as int?) ?? 0,
         held: json['held'] as int,
         met: json['met'] as bool,
       );
@@ -237,6 +255,8 @@ class Job {
     required this.defenseRequirement,
     this.itemRequirements = const [],
     required this.successChance,
+    this.extraSuccessChance = 0,
+    this.maxSuccessChance = 1,
     required this.mastery,
     required this.canAttempt,
     this.unavailableReason,
@@ -269,6 +289,23 @@ class Job {
   /// card can show what clearing the gate would buy.
   final double successChance;
 
+  /// What each extra item a player commits adds to [successChance], as a fraction. Zero for a job
+  /// with no item gate. The server works out the resulting odds; this is only for saying so.
+  final double extraSuccessChance;
+
+  /// The ceiling the server caps any attempt's odds at. Lets the card preview the odds of the extras
+  /// the player has dialled in without ever showing a figure above what will actually be rolled.
+  final double maxSuccessChance;
+
+  /// The odds of an attempt that commits [extras] extra copies in total. A preview only — the
+  /// server works out the odds it rolls against — using the same shape as its formula: the extras
+  /// add on, the ceiling caps, and the result never drops below the odds with none.
+  double chanceWithExtras(int extras) {
+    final raw = successChance + extraSuccessChance * extras;
+    final capped = raw < maxSuccessChance ? raw : maxSuccessChance;
+    return capped > successChance ? capped : successChance;
+  }
+
   final JobMastery mastery;
   final bool canAttempt;
 
@@ -294,6 +331,8 @@ class Job {
         // `as num` then toDouble: System.Text.Json writes a whole-number chance as `1`, not `1.0`,
         // and `as double` on an int is a runtime type error in Dart rather than a widening.
         successChance: (json['successChance'] as num).toDouble(),
+        extraSuccessChance: (json['extraSuccessChance'] as num?)?.toDouble() ?? 0,
+        maxSuccessChance: (json['maxSuccessChance'] as num?)?.toDouble() ?? 1,
         mastery: JobMastery.fromJson(json['mastery'] as Map<String, dynamic>),
         canAttempt: json['canAttempt'] as bool,
         unavailableReason: json['unavailableReason'] as String?,
@@ -342,6 +381,11 @@ class LevelUp {
         metersRefilled: json['metersRefilled'] as bool,
       );
 }
+
+/// "1 switchblade", "4 switchblades". Item ids are the only name the client has, so the plural is a
+/// plain trailing "s" — enough for the one-word ids content uses, and left alone when it already ends in one.
+String countedItem(int count, String itemId) =>
+    count == 1 || itemId.endsWith('s') ? '$count $itemId' : '$count ${itemId}s';
 
 /// One item requirement's consumption from one applied job attempt — win or lose.
 @immutable
@@ -637,6 +681,7 @@ class Property {
     required this.incomePerHour,
     required this.accrualCapMinutes,
     required this.quantity,
+    this.maxUnits,
     required this.pending,
     required this.cap,
     required this.canBuy,
@@ -660,6 +705,10 @@ class Property {
 
   /// Units owned; zero when the player holds none.
   final int quantity;
+
+  /// The most units one player can hold, or null when there is no limit. Sent by the server so the
+  /// card can say "2 of 3" without knowing the rule — whether a purchase is allowed stays [canBuy].
+  final int? maxUnits;
 
   /// Cash collectable at the instant the listing was served, across every unit owned.
   final int pending;
@@ -712,6 +761,7 @@ class Property {
         incomePerHour: json['incomePerHour'] as int,
         accrualCapMinutes: json['accrualCapMinutes'] as int,
         quantity: json['quantity'] as int,
+        maxUnits: json['maxUnits'] as int?,
         pending: json['pending'] as int,
         cap: json['cap'] as int,
         canBuy: json['canBuy'] as bool,

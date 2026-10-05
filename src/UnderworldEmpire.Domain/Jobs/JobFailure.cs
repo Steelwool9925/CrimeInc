@@ -39,5 +39,12 @@ public enum JobFailure
     InsufficientItems,
 
     /// <summary>The player has less energy than the job costs. A temporary refusal — energy regenerates.</summary>
-    InsufficientEnergy
+    InsufficientEnergy,
+
+    /// <summary>
+    /// The extras asked for are not ones this job accepts: an item it does not use, a negative number,
+    /// or more than its content allows. A malformed request, not a shortage: nothing the player can
+    /// acquire would make it valid.
+    /// </summary>
+    InvalidExtras
 }

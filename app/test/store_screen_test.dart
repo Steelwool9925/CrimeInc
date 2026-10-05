@@ -17,6 +17,39 @@ Future<AppState> pumpStore(WidgetTester tester, FakeApiClient api) async {
 }
 
 void main() {
+  group('StoreScreen — owned but not worn', () {
+    // Buying does not equip, and gear that is not worn changes nothing: not the player's attack,
+    // not which jobs unlock. The only way to equip used to be an unlabelled app-bar icon two
+    // screens away, so the common outcome was a player spending their first cash and seeing no
+    // effect whatsoever. The Market card has to say so, and offer the fix in place.
+
+    testWidgets('an owned, unworn item says it is not worn and offers Equip', (tester) async {
+      await pumpStore(tester, FakeApiClient());
+
+      final owned = tester.widget<Text>(find.byKey(const Key('store-owned-brass-knuckles')));
+      expect(owned.data, contains('not worn'));
+      expect(find.byKey(const Key('equip-item-brass-knuckles')), findsOneWidget);
+    });
+
+    testWidgets('equipping from the Market card equips that item', (tester) async {
+      final api = FakeApiClient();
+      await pumpStore(tester, api);
+
+      await tester.tap(find.byKey(const Key('equip-item-brass-knuckles')));
+      await tester.pumpAndSettle();
+
+      expect(api.equipCalls, ['brass-knuckles']);
+    });
+
+    testWidgets('an item the player does not own offers no Equip', (tester) async {
+      await pumpStore(tester, FakeApiClient());
+
+      // Switchblade is in the catalogue but unowned, so there is nothing to equip.
+      expect(find.byKey(const Key('equip-item-switchblade')), findsNothing);
+      expect(find.byKey(const Key('store-owned-switchblade')), findsNothing);
+    });
+  });
+
   group('StoreScreen — catalog', () {
     testWidgets('renders a card per catalog item, owned or not', (tester) async {
       await pumpStore(tester, FakeApiClient());

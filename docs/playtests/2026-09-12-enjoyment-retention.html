@@ -1,0 +1,520 @@
+<title>First Session, First Impression</title>
+<style>
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #100c0b;
+      --bg-raised: #1a1513;
+      --ink: #ece5da;
+      --ink-dim: #a89a8c;
+      --ink-faint: #6f6459;
+      --rule: #2c2320;
+      --accent: #d64545;
+      --accent-dim: #7a2f2f;
+      --accent-wash: rgba(214, 69, 69, 0.1);
+      --good: #7fae6f;
+      --good-wash: rgba(127, 174, 111, 0.08);
+      --warn: #c99a3a;
+      --warn-wash: rgba(201, 154, 58, 0.08);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #100c0b;
+    --bg-raised: #1a1513;
+    --ink: #ece5da;
+    --ink-dim: #a89a8c;
+    --ink-faint: #6f6459;
+    --rule: #2c2320;
+    --accent: #d64545;
+    --accent-dim: #7a2f2f;
+    --accent-wash: rgba(214, 69, 69, 0.1);
+    --good: #7fae6f;
+    --good-wash: rgba(127, 174, 111, 0.08);
+    --warn: #c99a3a;
+    --warn-wash: rgba(201, 154, 58, 0.08);
+  }
+  :root {
+    --bg: #f2ede3;
+    --bg-raised: #ffffff;
+    --ink: #201a16;
+    --ink-dim: #6b5f54;
+    --ink-faint: #a89a8c;
+    --rule: #ddd2c2;
+    --accent: #a3282a;
+    --accent-dim: #d9b9ab;
+    --accent-wash: rgba(163, 40, 42, 0.07);
+    --good: #3d6b34;
+    --good-wash: rgba(61, 107, 52, 0.07);
+    --warn: #8a6110;
+    --warn-wash: rgba(138, 97, 16, 0.08);
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+  }
+  body {
+    font-family: Charter, "Iowan Old Style", "Georgia", serif;
+    font-size: 17px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: var(--accent-dim); }
+
+  .page {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 5rem 1.5rem 6rem;
+  }
+
+  a { color: inherit; }
+  a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+
+  /* ---------- Masthead ---------- */
+  .masthead {
+    margin-bottom: 3.5rem;
+  }
+  .kicker {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: flex;
+    gap: 0.6em;
+    align-items: baseline;
+    margin-bottom: 1.1rem;
+  }
+  .kicker::before {
+    content: "";
+    display: inline-block;
+    width: 1.6em;
+    height: 2px;
+    background: var(--accent);
+    transform: translateY(-0.35em);
+  }
+  h1 {
+    font-family: Georgia, "Iowan Old Style", serif;
+    font-weight: 700;
+    font-size: clamp(2.1rem, 5vw, 2.9rem);
+    line-height: 1.08;
+    letter-spacing: -0.01em;
+    margin: 0 0 0.9rem;
+    text-wrap: balance;
+  }
+  .dek {
+    font-size: 1.08rem;
+    color: var(--ink-dim);
+    max-width: 60ch;
+    margin: 0 0 1.6rem;
+    text-wrap: balance;
+  }
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.76rem;
+  }
+  .chip {
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 0.28em 0.7em;
+    color: var(--ink-dim);
+    white-space: nowrap;
+  }
+
+  hr.div {
+    border: none;
+    border-top: 1px solid var(--rule);
+    margin: 3.2rem 0;
+  }
+
+  h2 {
+    font-family: Georgia, "Iowan Old Style", serif;
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -0.005em;
+    margin: 0 0 1.3rem;
+    text-wrap: balance;
+  }
+  h3 {
+    font-size: 1.12rem;
+    font-weight: 700;
+    margin: 2.1rem 0 0.7rem;
+  }
+  p { margin: 0 0 1.05rem; }
+  .lede-note {
+    color: var(--ink-dim);
+    font-size: 0.97rem;
+  }
+
+  /* ---------- Verdict table ---------- */
+  .verdict-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.93rem;
+    margin: 0 0 1.4rem;
+  }
+  .verdict-table th {
+    text-align: left;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 500;
+    padding: 0 0.9rem 0.6rem 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .verdict-table td {
+    padding: 0.9rem 0.9rem 0.9rem 0;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  .verdict-table tr:last-child td { border-bottom: none; }
+  .persona-name {
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .session-len {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.82rem;
+    white-space: nowrap;
+    color: var(--ink-dim);
+  }
+  .verdict-tag {
+    display: inline-block;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.03em;
+    padding: 0.22em 0.6em;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  .tag-likely { background: var(--good-wash); color: var(--good); }
+  .tag-unlikely { background: var(--accent-wash); color: var(--accent); }
+  .tag-uncertain { background: var(--warn-wash); color: var(--warn); }
+
+  /* ---------- Callout: the one finding ---------- */
+  .headline-finding {
+    background: var(--accent-wash);
+    border: 1px solid var(--accent-dim);
+    border-left: 4px solid var(--accent);
+    border-radius: 2px;
+    padding: 1.7rem 1.8rem;
+    margin: 0.5rem 0 0;
+  }
+  .headline-finding .label {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 0.7rem;
+    display: block;
+  }
+  .headline-finding p:last-child { margin-bottom: 0; }
+  .headline-finding strong { color: var(--ink); }
+
+  /* ---------- Finding cards ---------- */
+  .finding {
+    border-left: 3px solid var(--rule);
+    padding: 0.15rem 0 0.15rem 1.1rem;
+    margin: 1.2rem 0;
+  }
+  .finding.sev-critical { border-left-color: var(--accent); }
+  .finding.sev-moderate { border-left-color: var(--warn); }
+  .finding.sev-good { border-left-color: var(--good); }
+  .finding-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    margin-bottom: 0.35rem;
+    flex-wrap: wrap;
+  }
+  .sev-label {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .sev-critical .sev-label { color: var(--accent); }
+  .sev-moderate .sev-label { color: var(--warn); }
+  .sev-good .sev-label { color: var(--good); }
+  .finding-title {
+    font-weight: 700;
+    font-size: 1rem;
+  }
+  .finding p { margin-bottom: 0.6rem; font-size: 0.98rem; }
+  .finding p:last-child { margin-bottom: 0; }
+
+  .persona-block {
+    margin-bottom: 2.6rem;
+  }
+  .persona-tag {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    display: block;
+    margin-bottom: 0.3rem;
+  }
+
+  .platform-note {
+    color: var(--ink-dim);
+    font-size: 0.97rem;
+    background: var(--bg-raised);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 1.1rem 1.3rem;
+    margin-bottom: 1.8rem;
+  }
+  .platform-note p:last-child { margin-bottom: 0; }
+
+  footer {
+    margin-top: 4rem;
+    padding-top: 1.6rem;
+    border-top: 1px solid var(--rule);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.74rem;
+    color: var(--ink-faint);
+    letter-spacing: 0.02em;
+  }
+
+  @media (max-width: 520px) {
+    .page { padding: 3rem 1.1rem 4rem; }
+    .verdict-table { font-size: 0.85rem; }
+    .verdict-table th:nth-child(2), .verdict-table td:nth-child(2) { display: none; }
+  }
+</style>
+
+<div class="page">
+
+  <div class="masthead">
+    <div class="kicker">Playtest batch · enjoyment &amp; retention</div>
+    <h1>First Session, First Impression</h1>
+    <p class="dek">Three player temperaments, two platforms, one question: does the first ten
+    minutes of <em>Underworld Empire</em> earn a second visit?</p>
+    <div class="meta-row">
+      <span class="chip">2026&#8209;09&#8209;12</span>
+      <span class="chip">3 temperaments</span>
+      <span class="chip">web + Android</span>
+      <span class="chip">6 sessions</span>
+      <span class="chip">findings logged, not fixed</span>
+    </div>
+  </div>
+
+  <p><strong>Method:</strong> each of three temperaments played a fresh guest account, with no
+  prior knowledge, until the starting energy bar first ran dry — the natural stopping point a real
+  first-time player would hit — extended in-session if a level-up refilled the bar, since that's a
+  real thing the game does. Run once per platform, six sessions total.</p>
+  <p class="lede-note">Patient explorer — reads everything, checks every screen before acting.
+  Impatient tapper — skips all text, taps the fastest path, never reads a toast. Skeptical
+  min-maxer — works the numbers, looks for the efficient play, judges whether the pacing is fair.</p>
+
+  <hr class="div">
+
+  <h2>What actually drives day-one return</h2>
+
+  <table class="verdict-table">
+    <tr>
+      <th>Persona</th>
+      <th>Session</th>
+      <th>Read</th>
+      <th>Open it again?</th>
+    </tr>
+    <tr>
+      <td class="persona-name">Patient&nbsp;explorer</td>
+      <td class="session-len">~10 min</td>
+      <td>Good writing, a real shop worth finding — undercut by a purchase that visibly did
+      nothing until a hidden screen turned up.</td>
+      <td><span class="verdict-tag tag-uncertain">uncertain</span></td>
+    </tr>
+    <tr>
+      <td class="persona-name">Impatient&nbsp;tapper</td>
+      <td class="session-len">&lt;15 sec</td>
+      <td>Snappy and responsive, but the whole first session evaporated before anything could
+      hook them.</td>
+      <td><span class="verdict-tag tag-unlikely">unlikely</span></td>
+    </tr>
+    <tr>
+      <td class="persona-name">Skeptical&nbsp;min-maxer</td>
+      <td class="session-len">~8 min</td>
+      <td>Found a genuine optimization — gear up, unlock a better job, level, refill, repeat —
+      that rewarded analytical play.</td>
+      <td><span class="verdict-tag tag-likely">likely*</span></td>
+    </tr>
+  </table>
+  <p class="lede-note">* on web. On Android, this exact persona's reward job went dead in their
+  hands — see below.</p>
+
+  <p>The throughline: the moment-to-moment loop — tap job, resolve, toast, occasional level-up —
+  is solid and never broke for anyone. Every problem sits in the layer around it: what the game
+  shows, or doesn't, when a purchase happens, when a session ends, and whether what's on screen
+  can be trusted at face value.</p>
+
+  <hr class="div">
+
+  <h2>The one finding that matters most</h2>
+  <div class="headline-finding">
+    <span class="label">Android · min-maxer session</span>
+    <p>The min-maxer did everything right: worked out the odds, saved for a weapon, bought it,
+    equipped it, unlocked a better-paying job exactly as the numbers said they should — and then
+    <strong>that job's own "Do job" button stopped responding to touch, permanently, for the rest
+    of the session.</strong> Confirmed across more than five taps, different coordinates, different
+    toast states, and a full navigation away and back. The job right next to it kept working the
+    entire time.</p>
+    <p>Everything else in this batch is polish, feedback, or discoverability — friction that makes
+    a first session feel worse but doesn't stop it. This one does. It takes the exact player most
+    likely to stick around and lets the game go dead in their hands at the moment they're rewarded
+    for playing well.</p>
+  </div>
+
+  <hr class="div">
+
+  <h2>Web</h2>
+
+  <div class="persona-block">
+    <span class="persona-tag">Persona 1 — Patient explorer</span>
+    <p>Checked every screen before touching a job. Landed on a rocky start: the only legal job at
+    level 1 failed three times running (a ~4% event on a stated 65% success rate — rare, but real)
+    before the first payout landed. From there the session was smooth, and even turned up real
+    depth.</p>
+
+    <div class="finding sev-good">
+      <div class="finding-head"><span class="sev-label">Works well</span><span class="finding-title">The Market is a genuine hidden gem</span></div>
+      <p>Every item has real, considered flavor text — <em>"Second-hand from a police auction.
+      Nobody asked why."</em> But it isn't one of the five main nav tabs; it's a dashboard tile
+      reachable only by scrolling past Crew, several screens down. A player who doesn't scroll
+      that far never finds it.</p>
+    </div>
+
+    <div class="finding sev-critical">
+      <div class="finding-head"><span class="sev-label">Friction</span><span class="finding-title">Buying gear gives zero feedback</span></div>
+      <p>No auto-equip, no stat change, no "go equip this" nudge. The actual Equip control is a
+      small, unlabeled icon button in the Market's own app bar that opens an "Inventory" overlay —
+      genuinely easy to miss. Until found, a purchase looks exactly like money vanishing for
+      nothing. Once found, the equip flow itself is clean — a clear "1 + 4" attack breakdown.</p>
+    </div>
+
+    <div class="finding sev-moderate">
+      <div class="finding-head"><span class="sev-label">Retention</span><span class="finding-title">Session end is silent</span></div>
+      <p>At 0 energy, Home shows only a passive "+1 in 1m 00s" timer — no notification prompt, no
+      "come back later," no suggested downtime activity. A player has to already know to go spend
+      their cash at the Market; nothing points them there.</p>
+    </div>
+
+    <div class="finding sev-good">
+      <div class="finding-head"><span class="sev-label">Works well</span><span class="finding-title">A real guest&#8209;to&#8209;account safety net</span></div>
+      <p>The Rap Sheet (profile) screen surfaces a "Create Account" upsell for converting the
+      guest session — protects progress from a cleared browser, if a player happens to visit.</p>
+    </div>
+  </div>
+
+  <div class="persona-block">
+    <span class="persona-tag">Persona 2 — Impatient tapper</span>
+    <p>Skipped the welcome text, skipped Home, went straight to the job button and mashed it.</p>
+
+    <div class="finding sev-good">
+      <div class="finding-head"><span class="sev-label">Works well</span><span class="finding-title">Rapid mashing does not drop inputs</span></div>
+      <p>Firing the same click three to four times faster than the toast could render still
+      resolved every attempt correctly — energy and cash both landed exactly right when checked
+      afterward. Snappy and trustworthy under abuse.</p>
+    </div>
+
+    <div class="finding sev-critical">
+      <div class="finding-head"><span class="sev-label">Retention</span><span class="finding-title">The whole session is over in seconds</span></div>
+      <p>Ten energy, spent in two rapid bursts, zero exploration — well under fifteen seconds of
+      input. Combined with the same silent session-end as persona 1, the net impression is
+      "that was it?" rather than "I want more" — the opposite of what a first session should
+      leave behind for someone who plays exactly this way.</p>
+    </div>
+  </div>
+
+  <div class="persona-block">
+    <span class="persona-tag">Persona 3 — Skeptical min-maxer</span>
+    <p>Went in doing the math: at level 1 there's exactly one legal job — no real decision yet, a
+    fair critique of the opening minutes. Computed cash and XP per energy, then made a deliberate
+    play: save for Brass Knuckles (75 cash, +4 attack), since base 1 + 4 is exactly the 5 attack
+    "Boost a Parked Car" needs — turning a locked, better-paying job legal before waiting on a
+    level.</p>
+
+    <div class="finding sev-good">
+      <div class="finding-head"><span class="sev-label">Works well</span><span class="finding-title">The optimization pays off immediately</span></div>
+      <p>Confirmed: buying and equipping the weapon unlocked the job on the spot, at nearly 50%
+      better cash-per-energy than the starter job. A satisfying, correct read of the system.</p>
+    </div>
+
+    <div class="finding sev-good">
+      <div class="finding-head"><span class="sev-label">Works well</span><span class="finding-title">Leveling up fully refills energy</span></div>
+      <p>Confirmed directly: a level-up mid-grind took energy from 0 back to 10/10. A real,
+      well-designed lever — efficient play is rewarded with more session, not capped by a hard
+      wall.</p>
+    </div>
+
+    <div class="finding sev-moderate">
+      <div class="finding-head"><span class="sev-label">Friction</span><span class="finding-title">A gating inconsistency</span></div>
+      <p>Once a job's level requirement is met, its "Do job" button renders enabled even if its
+      separate stat requirement isn't. Tapping it wastes a round trip and returns a rejection
+      banner — correctly refused before spending energy, so nothing is lost, but the button should
+      grey out the same way it already does for unmet level or energy requirements.</p>
+    </div>
+  </div>
+
+  <hr class="div">
+
+  <h2>Android</h2>
+  <div class="platform-note">
+    <p>Same three personas, same method, on a local emulator with the server address baked in —
+    matching how a real install would ship, no dev-only address screen at all. Automation here is
+    direct touch input rather than browser tools, which incidentally clarified something: <strong>
+    most of the web session's "did my click even register?" moments were a rendering lag, not
+    dropped input.</strong> Tap, then wait a beat before judging the result, and Android was
+    completely reliable for ordinary navigation. That reframes several web observations as one
+    root cause — delayed repaint after a state change — rather than two.</p>
+  </div>
+
+  <div class="finding sev-moderate">
+    <div class="finding-head"><span class="sev-label">First impression</span><span class="finding-title">Home can render fully blank right after account creation</span></div>
+    <p>Same underlying class as the web Properties bug: the account exists and the data is there,
+    but the very first screen a new player ever sees can look frozen for a moment. Higher stakes
+    than the web instance purely because of when it happens — first thing, first launch. Not
+    reproduced on every run, so likely timing-dependent.</p>
+  </div>
+
+  <div class="finding sev-good">
+    <div class="finding-head"><span class="sev-label">Works well</span><span class="finding-title">The native layout is a step up</span></div>
+    <p>Six Home tiles — Jobs, Properties, Crew, Market, Territory, Rap Sheet — render as a tidy
+    two-column grid instead of web's stretched, mostly-empty full-width cards. The job toasts and
+    the level-up modal both look cleaner here too. If this game's current polish belongs to one
+    platform, it's Android's.</p>
+  </div>
+
+  <div class="finding sev-critical">
+    <div class="finding-head"><span class="sev-label">Blocker</span><span class="finding-title">The reward job goes dead on touch</span></div>
+    <p>Detailed above — after unlocking "Boost a Parked Car" the correct way, its own button
+    stopped responding for the rest of the session, while the job above it kept working. No error,
+    no visual change, just silence at the exact moment of reward.</p>
+  </div>
+
+  <div class="finding sev-moderate">
+    <div class="finding-head"><span class="sev-label">Lower confidence</span><span class="finding-title">Rapid taps land less reliably than on web</span></div>
+    <p>Only around one in three rapid same-spot taps landed in a single burst, versus all of them
+    on web. Flagged with less certainty — this may be an artifact of how the touch input was
+    injected rather than a real difference from a human finger.</p>
+  </div>
+
+  <footer>
+    Underworld Empire — playtest batch 2 of 2 · findings logged, no fixes applied this round ·
+    full session log: <code>docs/playtests/2026-09-12-enjoyment-retention.md</code>
+  </footer>
+
+</div>

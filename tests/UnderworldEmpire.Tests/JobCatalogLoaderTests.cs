@@ -84,14 +84,14 @@ public class JobCatalogLoaderTests : IDisposable
     private static object ValidJobRisk(
         double baseSuccessChance = 0.85,
         double successChancePerSurplusPoint = 0.01,
-        double itemSuccessChancePerSurplusPoint = 0.0,
+        double extraItemSuccessChance = 0.0,
         int healthLossMin = 0,
         int healthLossMax = 1) =>
         new
         {
             baseSuccessChance,
             successChancePerSurplusPoint,
-            itemSuccessChancePerSurplusPoint,
+            extraItemSuccessChance,
             healthLossMin,
             healthLossMax
         };
@@ -393,7 +393,7 @@ public class JobCatalogLoaderTests : IDisposable
     [Fact]
     public void Real_crime_catalog_loads_and_is_reachable_for_a_new_player()
     {
-        var catalog = new ContentPackLoader(FindRepoContentRoot()).LoadJobs("crime");
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadJobs("crime");
 
         Assert.NotEmpty(catalog.Jobs);
 
@@ -620,7 +620,7 @@ public class JobCatalogLoaderTests : IDisposable
         var job = Loader().LoadJobs("crime", TestItemCatalog()).Jobs.Single();
 
         Assert.Empty(job.ItemRequirements);
-        Assert.Equal(0.0, job.ItemSuccessChancePerSurplusPoint, precision: 10);
+        Assert.Equal(0.0, job.ExtraItemSuccessChance, precision: 10);
     }
 
     [Fact]
@@ -628,14 +628,14 @@ public class JobCatalogLoaderTests : IDisposable
     {
         WriteJobs("crime", ValidCatalog(ValidJob(
             itemRequirements: [ValidItemRequirement(itemId: "switchblade", minQuantity: 3)],
-            risk: ValidJobRisk(itemSuccessChancePerSurplusPoint: 0.02))));
+            risk: ValidJobRisk(extraItemSuccessChance: 0.02))));
 
         var job = Loader().LoadJobs("crime", TestItemCatalog()).Jobs.Single();
 
         var requirement = Assert.Single(job.ItemRequirements);
         Assert.Equal("switchblade", requirement.ItemId);
         Assert.Equal(3, requirement.MinQuantity);
-        Assert.Equal(0.02, job.ItemSuccessChancePerSurplusPoint, precision: 10);
+        Assert.Equal(0.02, job.ExtraItemSuccessChance, precision: 10);
     }
 
     [Fact]
@@ -688,6 +688,58 @@ public class JobCatalogLoaderTests : IDisposable
     }
 
     [Fact]
+    public void A_requirement_that_omits_max_extras_allows_none()
+    {
+        // The field is additive: every pack written before it existed must load unchanged, and an item
+        // that says nothing about extras cannot be committed beyond what the job needs.
+        WriteJobs("crime", ValidCatalog(ValidJob(
+            itemRequirements: [ValidItemRequirement(minQuantity: 3)])));
+
+        var requirement = Assert.Single(Loader().LoadJobs("crime", TestItemCatalog()).Jobs.Single().ItemRequirements);
+
+        Assert.Equal(3, requirement.MinQuantity);
+        Assert.Equal(0, requirement.MaxExtras);
+    }
+
+    [Fact]
+    public void A_declared_max_extras_is_carried_through()
+    {
+        WriteJobs("crime", ValidCatalog(ValidJob(
+            itemRequirements: [new { itemId = "switchblade", minQuantity = 1, maxExtras = 3 }],
+            risk: ValidJobRisk(extraItemSuccessChance: 0.1))));
+
+        var job = Loader().LoadJobs("crime", TestItemCatalog()).Jobs.Single();
+        var requirement = Assert.Single(job.ItemRequirements);
+
+        Assert.Equal(3, requirement.MaxExtras);
+        Assert.Equal(0.1, job.ExtraItemSuccessChance, precision: 10);
+    }
+
+    [Fact]
+    public void A_negative_max_extras_is_a_named_load_error()
+    {
+        WriteJobs("crime", ValidCatalog(ValidJob(
+            itemRequirements: [new { itemId = "switchblade", minQuantity = 1, maxExtras = -1 }])));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+
+        Assert.Contains("'maxExtras' -1, must be >= 0", ex.Message);
+    }
+
+    [Fact]
+    public void Extras_that_are_worth_nothing_are_a_named_load_error()
+    {
+        // Allowing a player to spend items for no effect is a content mistake, not a design choice.
+        WriteJobs("crime", ValidCatalog(ValidJob(
+            itemRequirements: [new { itemId = "switchblade", minQuantity = 1, maxExtras = 2 }],
+            risk: ValidJobRisk(extraItemSuccessChance: 0.0))));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+
+        Assert.Contains("'risk.extraItemSuccessChance' is 0", ex.Message);
+    }
+
+    [Fact]
     public void An_item_requirement_with_a_minimum_quantity_below_one_throws()
     {
         WriteJobs("crime", ValidCatalog(ValidJob(
@@ -713,11 +765,11 @@ public class JobCatalogLoaderTests : IDisposable
     public void A_negative_item_success_chance_per_surplus_point_throws()
     {
         WriteJobs("crime", ValidCatalog(ValidJob(
-            risk: ValidJobRisk(itemSuccessChancePerSurplusPoint: -0.01))));
+            risk: ValidJobRisk(extraItemSuccessChance: -0.01))));
 
         var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
 
-        Assert.Contains("'risk.itemSuccessChancePerSurplusPoint' must be >= 0", ex.Message);
+        Assert.Contains("'risk.extraItemSuccessChance' must be >= 0", ex.Message);
     }
 
     [Fact]
@@ -725,7 +777,7 @@ public class JobCatalogLoaderTests : IDisposable
     {
         // Integration proof: the real jobs.json + items.json pairing loads and cross-validates
         // cleanly, and the demo content is wired the way the README documents it.
-        var realLoader = new ContentPackLoader(FindRepoContentRoot());
+        var realLoader = new ContentPackLoader(RepoContent.FindRoot());
         var itemCatalog = realLoader.LoadItems("crime");
 
         var job = realLoader.LoadJobs("crime", itemCatalog).Jobs
@@ -733,8 +785,9 @@ public class JobCatalogLoaderTests : IDisposable
 
         var requirement = Assert.Single(job.ItemRequirements);
         Assert.Equal("switchblade", requirement.ItemId);
-        Assert.Equal(2, requirement.MinQuantity);
-        Assert.True(job.ItemSuccessChancePerSurplusPoint > 0.0);
+        // Hold one, spend one: the requirement matches what an attempt actually consumes.
+        Assert.Equal(1, requirement.MinQuantity);
+        Assert.True(job.ExtraItemSuccessChance > 0.0);
     }
 
     [Fact]
@@ -750,7 +803,7 @@ public class JobCatalogLoaderTests : IDisposable
         // would leave this test green while the property it names quietly became false. It counts
         // expected completions instead, against the job's base chance: the floor a player sitting
         // exactly on the requirements gets, not the better odds a geared one enjoys.
-        var catalog = new ContentPackLoader(FindRepoContentRoot()).LoadJobs("crime");
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadJobs("crime");
 
         var cheapest = catalog.Jobs
             .Where(j => j.LevelRequirement == 1)
@@ -765,26 +818,5 @@ public class JobCatalogLoaderTests : IDisposable
             $"energy bar, expected to yield {expectedCompletions:0.##} completions at its base " +
             $"chance of {cheapest.BaseSuccessChance}, but {catalog.CompletionsPerRank} completions " +
             $"are needed for a mastery rank.");
-    }
-
-    /// <summary>
-    /// Walks up from the test assembly to the repo root's <c>content</c> folder, the same approach
-    /// <see cref="ContentPackLoaderTests"/> uses — the test project does not copy content to output.
-    /// </summary>
-    private static string FindRepoContentRoot()
-    {
-        var dir = AppContext.BaseDirectory;
-        for (int i = 0; i < 10; i++)
-        {
-            var candidate = Path.Combine(dir, "content");
-            if (Directory.Exists(candidate))
-                return candidate;
-
-            var parent = Path.GetDirectoryName(dir);
-            if (parent is null) break;
-            dir = parent;
-        }
-
-        throw new DirectoryNotFoundException("Could not locate the repo 'content' folder from the test assembly.");
     }
 }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../api/models.dart';
 import '../state/app_state.dart';
+import '../widgets/accessible_name.dart';
 import '../widgets/property_gating.dart';
 
 /// Properties — the whole catalog, with what each holding has banked drawn filling toward its cap.
@@ -133,7 +134,7 @@ class _PropertiesScreenState extends State<PropertiesScreen> {
               state.propertiesError!,
               key: const Key('properties-error'),
               textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.red),
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
             const SizedBox(height: 16),
             ElevatedButton(
@@ -238,24 +239,43 @@ class _PropertyCard extends StatelessWidget {
               key: Key('property-income-${property.id}'),
               style: theme.textTheme.bodySmall,
             ),
-            if (property.isOwned) ...[
-              const SizedBox(height: 8),
-              Text('Owned: ${property.quantity}',
+            if (propertyUnitsLabel(property) case final units?) ...[
+              const SizedBox(height: 4),
+              Text(units,
+                  key: Key('property-units-${property.id}'),
                   style: theme.textTheme.bodySmall),
+            ],
+            if (property.isOwned) ...[
               const SizedBox(height: 4),
-              LinearProgressIndicator(
-                key: Key('property-bar-${property.id}'),
-                value: property.cap > 0 ? pending / property.cap : 0,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '$pending / ${property.cap}',
-                key: Key('property-pending-${property.id}'),
-                style: theme.textTheme.bodySmall,
+              // The bar and its "n / cap" caption are one fact, announced as one.
+              //
+              // An unlabelled LinearProgressIndicator has no accessible name of its own, so the
+              // engine reaches outward and absorbs the surrounding text: on this card it made the
+              // *whole card* — title, description, price, state — the name of a `progressbar`, and
+              // took the Buy and Collect buttons with it. Naming it and excluding what it
+              // duplicates leaves the card an ordinary group and the figure one short phrase.
+              Semantics(
+                label: 'Banked $pending of ${property.cap} $cashLabel',
+                excludeSemantics: true,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    LinearProgressIndicator(
+                      key: Key('property-bar-${property.id}'),
+                      value: property.cap > 0 ? pending / property.cap : 0,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '$pending / ${property.cap}',
+                      key: Key('property-pending-${property.id}'),
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                ),
               ),
             ],
             const SizedBox(height: 8),
-            _locks(theme),
+            _locks(context, theme),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
@@ -263,16 +283,27 @@ class _PropertyCard extends StatelessWidget {
                   FilledButton(
                     key: Key('collect-property-${property.id}'),
                     onPressed: property.canCollect && !anyBusy ? onCollect : null,
-                    child: busy
-                        ? const _ButtonSpinner()
-                        : const Text('Collect'),
+                    // The accessible names carry the property, and the reason when the button is
+                    // refused — see AccessibleName for why a bare "Collect"/"Buy" is not enough.
+                    child: AccessibleName(
+                      name: property.canCollect
+                          ? 'Collect from ${property.name}'
+                          : 'Collect from ${property.name}. Unavailable: '
+                              '${propertyCollectLockLabel(property)}',
+                      visible: busy ? const _ButtonSpinner() : const Text('Collect'),
+                    ),
                   ),
                   const SizedBox(width: 8),
                 ],
                 ElevatedButton(
                   key: Key('buy-property-${property.id}'),
                   onPressed: property.canBuy && !anyBusy ? onBuy : null,
-                  child: busy ? const _ButtonSpinner() : const Text('Buy'),
+                  child: AccessibleName(
+                    name: property.canBuy
+                        ? 'Buy ${property.name}'
+                        : 'Buy ${property.name}. Unavailable: ${propertyBuyLockLabel(property)}',
+                    visible: busy ? const _ButtonSpinner() : const Text('Buy'),
+                  ),
                 ),
               ],
             ),
@@ -282,30 +313,59 @@ class _PropertyCard extends StatelessWidget {
     );
   }
 
+  /// Type metrics for the reason lines, pinned so the space reserved for them below is exactly
+  /// the height they occupy. See [_locks].
+  static const double _lockFontSize = 12;
+  static const double _lockLineHeight = 1.35;
+
   /// The reasons the two buttons are dead, when they are.
   ///
   /// A collect lock is only worth showing on a property the player actually holds — "Not owned"
   /// under a property being offered for sale states the obvious.
-  Widget _locks(ThemeData theme) {
-    final style =
-        theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error);
+  ///
+  /// **Each line is named for the button it explains.** The two lines used to sit side by side,
+  /// unlabelled, to the left of two buttons, so "Costs more than you have" and "Nothing on the
+  /// counter yet" could each have been about either one. Prefixing them is the smallest change
+  /// that makes the pairing unambiguous without restructuring the card.
+  ///
+  /// **The space they occupy is reserved whether or not they are showing.** Which lines appear
+  /// changes as cash rises and as the meter fills, and every change used to move every card below
+  /// by a line — the same defect, in miniature, as the Do job button shifting between taps. An
+  /// owned card reserves two lines (Buy and Collect can each be refused), an unowned one reserves
+  /// one. It is a minimum, not a fixed height: a line that wraps on a narrow screen still gets the
+  /// room it needs rather than being truncated.
+  Widget _locks(BuildContext context, ThemeData theme) {
+    final style = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.error,
+      fontSize: _lockFontSize,
+      height: _lockLineHeight,
+    );
+    final reservedLines = property.isOwned ? 2 : 1;
+    final reservedHeight =
+        MediaQuery.textScalerOf(context).scale(_lockFontSize) * _lockLineHeight * reservedLines;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (!property.canBuy)
-          Text(
-            propertyBuyLockLabel(property),
-            key: Key('property-buy-lock-${property.id}'),
-            style: style,
-          ),
-        if (property.isOwned && !property.canCollect)
-          Text(
-            propertyCollectLockLabel(property),
-            key: Key('property-collect-lock-${property.id}'),
-            style: style,
-          ),
-      ],
+    return ConstrainedBox(
+      constraints: BoxConstraints(minHeight: reservedHeight),
+      child: SizedBox(
+        width: double.infinity,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (!property.canBuy)
+              Text(
+                'Buy: ${propertyBuyLockLabel(property)}',
+                key: Key('property-buy-lock-${property.id}'),
+                style: style,
+              ),
+            if (property.isOwned && !property.canCollect)
+              Text(
+                'Collect: ${propertyCollectLockLabel(property)}',
+                key: Key('property-collect-lock-${property.id}'),
+                style: style,
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

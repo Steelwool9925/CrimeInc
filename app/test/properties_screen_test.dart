@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:underworld_empire/api/models.dart';
 import 'package:underworld_empire/screens/properties_screen.dart';
 import 'package:underworld_empire/state/app_state.dart';
 
@@ -353,6 +354,154 @@ void main() {
       await settle(tester);
 
       expect(api.propertiesCalls, 2);
+    });
+  });
+
+  group('PropertiesScreen — the unit ceiling', () {
+    Future<void> pumpOne(WidgetTester tester, Property p) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await pumpProperties(
+        tester,
+        FakeApiClient(propertiesResult: PropertyList(properties: [p], cash: 100000, level: 12)),
+      );
+    }
+
+    Property street({required int quantity, required bool canBuy, String? reason}) => Property(
+          id: 'street-corner',
+          name: 'Street Corner',
+          description: 'A patch of pavement nobody works without your say-so.',
+          levelRequirement: 1,
+          price: 500,
+          incomePerHour: 240,
+          accrualCapMinutes: 480,
+          quantity: quantity,
+          maxUnits: 3,
+          pending: 0,
+          cap: quantity * 1920,
+          canBuy: canBuy,
+          buyUnavailableReason: reason,
+          canCollect: false,
+          collectUnavailableReason: quantity > 0 ? 'nothingToCollect' : 'notOwned',
+        );
+
+    testWidgets('an owned card says how many of how many', (tester) async {
+      await pumpOne(tester, street(quantity: 2, canBuy: true));
+
+      final units = tester.widget<Text>(find.byKey(const Key('property-units-street-corner')));
+      expect(units.data, 'Owned: 2 of 3');
+    });
+
+    testWidgets('a card nobody owns yet says what may be held', (tester) async {
+      await pumpOne(tester, street(quantity: 0, canBuy: true));
+
+      final units = tester.widget<Text>(find.byKey(const Key('property-units-street-corner')));
+      expect(units.data, 'You can hold up to 3');
+    });
+
+    testWidgets('at the ceiling the buy is disabled and the card says why', (tester) async {
+      await pumpOne(tester, street(quantity: 3, canBuy: false, reason: 'limit'));
+
+      final button = tester.widget<ElevatedButton>(find.byKey(const Key('buy-property-street-corner')));
+      expect(button.onPressed, isNull);
+      expect(find.text('Buy: You hold the most you can'), findsOneWidget);
+    });
+  });
+
+  group('PropertiesScreen — what the card says before and after buying', () {
+    void tallSurface(WidgetTester tester) {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+    }
+
+    testWidgets('says what a full window holds, before the player has bought one',
+        (tester) async {
+      // "240 an hour, fills in 8 hours" made the player multiply to learn what a night is worth,
+      // and the answer only appeared after buying, as the right-hand figure of the owned meter.
+      // The decision to buy is made before that, so the payoff has to be on the card.
+      tallSurface(tester);
+      await pumpProperties(tester, FakeApiClient());
+
+      final owned = tester
+          .widget<Text>(find.byKey(const Key('property-income-street-corner')))
+          .data!;
+      // 240 an hour over a 15-minute window, floored: 60.
+      expect(owned, contains('holds up to 60'));
+
+      // The Car Wash is unowned, so the server sends cap: 0 for it. The figure must come from the
+      // rate and the window, not from that zero: 640 an hour over 240 minutes is 2560.
+      final unowned =
+          tester.widget<Text>(find.byKey(const Key('property-income-car-wash'))).data!;
+      expect(unowned, contains('holds up to 2560'));
+    });
+
+    testWidgets('each refusal names the button it explains', (tester) async {
+      // Two lines used to sit side by side, unlabelled, to the left of two buttons, so either
+      // could have been about either button.
+      tallSurface(tester);
+      await pumpProperties(tester, FakeApiClient());
+
+      // The owned Pawn Shop is refused on both counts at once.
+      expect(find.text('Buy: Costs more than you have'), findsOneWidget);
+      expect(find.text('Collect: Nothing on the counter yet'), findsOneWidget);
+    });
+
+    testWidgets('the card keeps its height whether or not a refusal is showing', (tester) async {
+      // Which reason lines appear changes as cash rises and as the meter fills, and each change
+      // used to move every card below it by a line - the Do job shift, in miniature.
+      Future<double> heightOf(Property p) async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await pumpProperties(
+          tester,
+          FakeApiClient(
+            propertiesResult: PropertyList(properties: [p], cash: 600, level: 2),
+          ),
+        );
+        return tester.getSize(find.byKey(Key('property-card-${p.id}'))).height;
+      }
+
+      // Owned: nothing refused, versus both buttons refused.
+      final unrefused = await heightOf(kCollectableProperty);
+      final refused = await heightOf(const Property(
+        id: 'street-corner',
+        name: 'Street Corner',
+        description: 'A patch of pavement nobody works without your say-so.',
+        levelRequirement: 1,
+        price: 500,
+        incomePerHour: 240,
+        accrualCapMinutes: 15,
+        quantity: 1,
+        pending: 0,
+        cap: 60,
+        canBuy: false,
+        buyUnavailableReason: 'cash',
+        canCollect: false,
+        collectUnavailableReason: 'nothingToCollect',
+      ));
+      expect(refused, unrefused,
+          reason: 'an owned card moved when its refusals appeared or went');
+
+      // Unowned: affordable, versus not.
+      final affordable = await heightOf(const Property(
+        id: 'car-wash',
+        name: 'Car Wash',
+        description: 'Twelve dollars a wash and a great deal more than twelve dollars a day.',
+        levelRequirement: 4,
+        price: 6000,
+        incomePerHour: 640,
+        accrualCapMinutes: 240,
+        quantity: 0,
+        pending: 0,
+        cap: 0,
+        canBuy: true,
+        canCollect: false,
+        collectUnavailableReason: 'notOwned',
+      ));
+      final unaffordable = await heightOf(kLockedProperty);
+      expect(unaffordable, affordable,
+          reason: 'an unowned card moved when its Buy refusal appeared or went');
     });
   });
 }

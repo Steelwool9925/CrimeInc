@@ -166,6 +166,33 @@ public class PropertyIncomeTests
     }
 
     [Fact]
+    public void A_unit_bought_part_way_through_a_window_fills_the_larger_cap_before_that_window_elapses()
+    {
+        // The overnight-sized window (8h at 240/h = 1,920 per unit) with a second unit bought at the
+        // four-hour mark, 960 already banked. The bigger holding earns 480/h against a 3,840 cap, so
+        // the remaining 2,880 arrives in six hours: inside the 8h window, which means the cap is reached
+        // by the earned-reaches-room branch and not the elapsed-exceeds-window short-circuit.
+        var overnight = TestProperty(incomePerHour: 240, accrualCapMinutes: 480);
+
+        var justShort = PropertyIncome.Accrue(
+            overnight, quantity: 2, uncollected: 960, accruedAtUtc: T0, nowUtc: T0.AddMinutes(359));
+        Assert.Equal(960 + 359 * 8, justShort.Uncollected);
+        Assert.Equal(T0.AddMinutes(359), justShort.AccruedAtUtc);
+
+        var exactly = PropertyIncome.Accrue(
+            overnight, quantity: 2, uncollected: 960, accruedAtUtc: T0, nowUtc: T0.AddHours(6));
+        Assert.Equal(3_840, exactly.Uncollected);
+        Assert.Equal(T0.AddHours(6), exactly.AccruedAtUtc);
+
+        // Seven hours is still short of the 8h window, so only this branch can have capped it, and the
+        // hour spent full is discarded as usual.
+        var pastIt = PropertyIncome.Accrue(
+            overnight, quantity: 2, uncollected: 960, accruedAtUtc: T0, nowUtc: T0.AddHours(7));
+        Assert.Equal(3_840, pastIt.Uncollected);
+        Assert.Equal(T0.AddHours(7), pastIt.AccruedAtUtc);
+    }
+
+    [Fact]
     public void A_holding_already_at_its_cap_earns_nothing_more()
     {
         var accrual = PropertyIncome.Accrue(

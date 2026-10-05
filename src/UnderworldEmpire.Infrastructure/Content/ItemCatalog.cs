@@ -50,6 +50,12 @@ public sealed class ItemCatalog
     /// history, but an item that no longer exists scores nothing. Throwing instead would lock the player
     /// out of their own inventory screen over a content edit they had no part in.
     /// </para>
+    /// <para>
+    /// A holding with no copies left is skipped even if it is still flagged as worn. <c>Consume</c>
+    /// clears the flag when the last copy goes, but rows written before it did that exist, and an
+    /// item the player no longer has must never score. Checked here, at the one place every loadout
+    /// reader goes through, rather than at each of the four call sites.
+    /// </para>
     /// </remarks>
     public IReadOnlyList<Item> ResolveEquipped(IEnumerable<PlayerItem> holdings)
     {
@@ -58,7 +64,7 @@ public sealed class ItemCatalog
         var equipped = new List<Item>();
         foreach (var holding in holdings)
         {
-            if (!holding.Equipped)
+            if (!holding.Equipped || !holding.IsOwned)
                 continue;
 
             if (Find(holding.ItemId) is { } definition)

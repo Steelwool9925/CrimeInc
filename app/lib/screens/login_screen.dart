@@ -29,11 +29,30 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  /// Set when the form is incomplete, so an incomplete submit never reaches the server.
+  String? _localError;
+
   Future<void> _submit() async {
-    final ok = await widget.appState.login(
-      _usernameController.text.trim(),
-      _passwordController.text,
-    );
+    final username = _usernameController.text.trim();
+    final password = _passwordController.text;
+
+    // Check completeness here, before the request. Submitting an empty form used to go all the way
+    // to the server and come back "Incorrect username or password." — which is untrue (nothing was
+    // typed, so nothing could be incorrect) and expensive: the login endpoint is rate limited to
+    // five attempts per five minutes per IP, so a player prodding the button could lock themselves
+    // out without ever having entered a credential.
+    final missing = username.isEmpty
+        ? (password.isEmpty
+            ? 'Enter your username and password.'
+            : 'Enter your username.')
+        : (password.isEmpty ? 'Enter your password.' : null);
+    if (missing != null) {
+      setState(() => _localError = missing);
+      return;
+    }
+    setState(() => _localError = null);
+
+    final ok = await widget.appState.login(username, password);
     if (ok) widget.onLoggedIn();
     // On failure, appState.loginError is set and ListenableBuilder below re-renders it — nothing
     // further to do here.
@@ -75,10 +94,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   enabled: !state.loggingIn,
                   onSubmitted: (_) => state.loggingIn ? null : _submit(),
                 ),
-                if (state.loginError != null) ...[
+                // A local completeness message takes precedence: it describes the submit the
+                // player just made, whereas `loginError` may be left over from an earlier attempt.
+                if ((_localError ?? state.loginError) != null) ...[
                   const SizedBox(height: 8),
                   Text(
-                    state.loginError!,
+                    _localError ?? state.loginError!,
                     key: const Key('login-error'),
                     style: TextStyle(color: Theme.of(context).colorScheme.error),
                   ),

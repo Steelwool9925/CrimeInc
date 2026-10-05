@@ -62,3 +62,7 @@ __pycache__/
 # ---- Cloudflare Tunnel binary (docs/hosting-a-friend.md) -- each dev downloads their own; not
 # committed like scripts/ngrok.exe, since it wasn't in active use here and adds 50+MB to history.
 scripts/cloudflared.exe
+.claude/roadmap.md
+
+# ---- Local run/debug logs written to the repo root by scripts and ad-hoc runs.
+_*.log

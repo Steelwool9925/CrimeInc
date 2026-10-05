@@ -105,6 +105,35 @@ const kMetItemRequirement = JobItemRequirement(
   met: true,
 );
 
+/// A job that needs one switchblade, lets the player add up to three more, and holds four spare:
+/// so up to three extras can actually be added.
+const kExtrasRequirement = JobItemRequirement(
+  itemId: 'switchblade',
+  minQuantity: 1,
+  maxExtras: 3,
+  held: 4,
+  met: true,
+);
+
+const kExtrasJob = Job(
+  id: 'hijack-a-delivery-truck',
+  name: 'Hijack a Delivery Truck',
+  description: 'Wait at the light.',
+  area: 'docks',
+  energyCost: 4,
+  levelRequirement: 1,
+  cashMin: 400,
+  cashMax: 620,
+  xp: 55,
+  attackRequirement: 9,
+  defenseRequirement: 7,
+  itemRequirements: [kExtrasRequirement],
+  successChance: 0.65,
+  extraSuccessChance: 0.10,
+  mastery: kFakeMastery,
+  canAttempt: true,
+);
+
 /// A job locked behind an item-quantity gate — level and stats already cleared, so 'items' is the
 /// only reason left.
 const kItemGatedJob = Job(
@@ -145,6 +174,71 @@ const kItemReadyJob = Job(
   canAttempt: true,
 );
 
+/// One switchblade held and one needed: the player is wearing it or has nothing to spare, yet the
+/// content still allows extras. Nothing can be added, but the stepper row is still drawn.
+const kExtrasRequirementNoSpare = JobItemRequirement(
+  itemId: 'switchblade',
+  minQuantity: 1,
+  maxExtras: 3,
+  held: 1,
+  met: true,
+);
+
+const kExtrasJobNoSpare = Job(
+  id: 'hijack-a-delivery-truck',
+  name: 'Hijack a Delivery Truck',
+  description: 'Wait at the light.',
+  area: 'docks',
+  energyCost: 4,
+  levelRequirement: 1,
+  cashMin: 400,
+  cashMax: 620,
+  xp: 55,
+  attackRequirement: 9,
+  defenseRequirement: 7,
+  itemRequirements: [kExtrasRequirementNoSpare],
+  successChance: 0.65,
+  extraSuccessChance: 0.10,
+  mastery: kFakeMastery,
+  canAttempt: true,
+);
+
+/// [kExtrasJob] with a ceiling of 80%, so three extras (95% uncapped) must preview as 80%.
+const kExtrasJobCapped = Job(
+  id: 'hijack-a-delivery-truck',
+  name: 'Hijack a Delivery Truck',
+  description: 'Wait at the light.',
+  area: 'docks',
+  energyCost: 4,
+  levelRequirement: 1,
+  cashMin: 400,
+  cashMax: 620,
+  xp: 55,
+  attackRequirement: 9,
+  defenseRequirement: 7,
+  itemRequirements: [kExtrasRequirement],
+  successChance: 0.65,
+  extraSuccessChance: 0.10,
+  maxSuccessChance: 0.80,
+  mastery: kFakeMastery,
+  canAttempt: true,
+);
+
+/// A win that used up four of the item at once (one required plus three extras), leaving none spare.
+const kExtrasConsumingJobResult = JobResult(
+  jobId: 'hijack-a-delivery-truck',
+  succeeded: true,
+  energySpent: 4,
+  cashEarned: 544,
+  xpEarned: 55,
+  healthLost: 0,
+  mastery: kFakeMastery,
+  masteryRankedUp: false,
+  itemsConsumed: [
+    ItemConsumption(itemId: 'switchblade', quantityConsumed: 4, quantityRemaining: 0),
+  ],
+);
+
 /// A successful attempt at [kItemReadyJob] that consumed one unit of its item requirement, leaving
 /// stock one below what it started with.
 const kItemConsumingJobResult = JobResult(
@@ -171,6 +265,30 @@ const kFailedJobResult = JobResult(
   healthLost: 3,
   mastery: kFakeMastery,
   masteryRankedUp: false,
+);
+
+/// A clean win on the same job: no health lost, mastery unmoved.
+const kSucceededJobResult = JobResult(
+  jobId: 'shake-down-corner-store',
+  succeeded: true,
+  energySpent: 1,
+  cashEarned: 25,
+  xpEarned: 10,
+  healthLost: 0,
+  mastery: kFakeMastery,
+  masteryRankedUp: false,
+);
+
+/// The same win, but it also crossed a mastery rank — the outcome that adds the celebratory line.
+const kSucceededJobResultWithRankUp = JobResult(
+  jobId: 'shake-down-corner-store',
+  succeeded: true,
+  energySpent: 1,
+  cashEarned: 25,
+  xpEarned: 10,
+  healthLost: 0,
+  mastery: kFakeMastery,
+  masteryRankedUp: true,
 );
 
 const kFakeMe = Me(
@@ -564,6 +682,17 @@ class FakeApiClient implements ApiClient {
   final Me _meResult;
   final ContentPack _contentPackResult;
   final JobList _jobsResult;
+
+  /// When set, the next GET /jobs (and every one after, until changed again) serves this instead
+  /// of [_jobsResult].
+  ///
+  /// Lets a test simulate the periodic re-read picking up a since-changed server state (energy
+  /// regenerated, a level-up landed, gear was equipped) between polls, the same way
+  /// [_inventoryResult]/[_propertiesResult] are advanced for their own actions — except nothing
+  /// about the jobs catalog changes as a side effect of an action in this fake, so the test sets it
+  /// directly rather than the fake deriving it.
+  JobList? jobsOverride;
+
   final DoJobResult _doJobResult;
   final Me? _allocateResult;
   final bool _throwOnSession;
@@ -632,6 +761,9 @@ class FakeApiClient implements ApiClient {
   final List<String> buyPropertyCalls = [];
   final List<String> collectPropertyCalls = [];
   final List<String> doJobCalls = [];
+
+  /// The extras each [doJobCalls] entry was made with, in the same order.
+  final List<Map<String, int>> doJobExtras = [];
   final List<String> allocateCalls = [];
   final List<String> buyCalls = [];
   final List<String> equipCalls = [];
@@ -684,12 +816,22 @@ class FakeApiClient implements ApiClient {
   Future<JobList> jobs(String deviceToken) async {
     jobsCalls++;
     if (_throwOnJobs) throw const ApiException(500, 'jobs error');
-    return _jobsResult;
+    return jobsOverride ?? _jobsResult;
   }
 
+  /// When set, doJob waits on this before returning.
+  ///
+  /// Lets a test hold an attempt open and observe what the client does while it is still in
+  /// flight — same purpose as [inventoryGate]/[propertiesGate], for the job-gating equivalent:
+  /// confirming the screen's periodic re-read skips a tick that lands mid-action.
+  Completer<void>? doJobGate;
+
   @override
-  Future<DoJobResult> doJob(String deviceToken, String jobId) async {
+  Future<DoJobResult> doJob(String deviceToken, String jobId,
+      {Map<String, int> extras = const {}}) async {
     doJobCalls.add(jobId);
+    doJobExtras.add(extras);
+    if (doJobGate != null) await doJobGate!.future;
     if (refuseDoJobWith != null) {
       throw JobRefusedException(refuseDoJobWith!, 'refused: $refuseDoJobWith');
     }

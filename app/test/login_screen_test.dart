@@ -35,6 +35,47 @@ void main() {
     expect(find.byKey(const Key('login-error')), findsNothing);
   });
 
+  testWidgets('an incomplete form is refused locally and never reaches the server',
+      (tester) async {
+    // The server used to answer an empty submit with "Incorrect username or password.", which is
+    // untrue — nothing was typed — and spends one of the five attempts per five minutes the login
+    // endpoint allows per IP, so a confused player could lock themselves out having never entered
+    // a credential. Each missing-field case must be caught here and name the field that is missing.
+    final api = FakeApiClient(
+      loginResult: const SessionResult(deviceToken: 'tok', playerId: 'id'),
+    );
+    final state = AppState(apiClient: api, tokenStore: InMemoryTokenStore());
+    var loggedIn = false;
+
+    await tester.pumpWidget(MaterialApp(
+      home: LoginScreen(appState: state, onLoggedIn: () => loggedIn = true),
+    ));
+
+    Future<String> submitAndReadError() async {
+      await tester.tap(find.byKey(const Key('login-submit')));
+      await tester.pump();
+      return tester.widget<Text>(find.byKey(const Key('login-error'))).data!;
+    }
+
+    // Both blank.
+    expect(await submitAndReadError(), 'Enter your username and password.');
+
+    // Password only.
+    await tester.enterText(find.byKey(const Key('login-password-field')), 'hunter2');
+    expect(await submitAndReadError(), 'Enter your username.');
+
+    // Username only. Whitespace does not count as a username.
+    await tester.enterText(find.byKey(const Key('login-password-field')), '');
+    await tester.enterText(find.byKey(const Key('login-username-field')), '   ');
+    expect(await submitAndReadError(), 'Enter your username and password.');
+    await tester.enterText(find.byKey(const Key('login-username-field')), 'alice');
+    expect(await submitAndReadError(), 'Enter your password.');
+
+    // Not one of those four submits was allowed to reach the server.
+    expect(api.loginCalls, isEmpty);
+    expect(loggedIn, isFalse);
+  });
+
   testWidgets('a refused login shows an error and does not call onLoggedIn', (tester) async {
     final api = FakeApiClient(refuseLoginWith: 'invalidCredentials');
     final state = AppState(apiClient: api, tokenStore: InMemoryTokenStore());

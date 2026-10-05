@@ -112,6 +112,64 @@ void main() {
       expect(job.unavailableReason, 'items');
     });
 
+    test('reads how many extras the player may add', () {
+      final job = Job.fromJson(jobJson()
+        ..['itemRequirements'] = [
+          {'itemId': 'switchblade', 'minQuantity': 1, 'maxExtras': 3, 'held': 4, 'met': true},
+        ]
+        ..['extraSuccessChance'] = 0.1);
+
+      expect(job.itemRequirements.single.maxExtras, 3);
+      expect(job.extraSuccessChance, 0.1);
+    });
+
+    test('reads the ceiling and previews the odds of a number of extras', () {
+      final job = Job.fromJson(jobJson(successChance: 0.65)
+        ..['extraSuccessChance'] = 0.1
+        ..['maxSuccessChance'] = 0.8);
+
+      expect(job.maxSuccessChance, 0.8);
+      expect(job.chanceWithExtras(0), 0.65);
+      expect(job.chanceWithExtras(1), closeTo(0.75, 1e-9));
+      expect(job.chanceWithExtras(3), 0.8, reason: 'capped at the ceiling, not 0.95');
+    });
+
+    test('a server that sends no ceiling previews as uncapped, and never below the listed odds', () {
+      final job = Job.fromJson(jobJson(successChance: 0.9)..['extraSuccessChance'] = 0.2);
+
+      expect(job.maxSuccessChance, 1);
+      expect(job.chanceWithExtras(5), 1);
+      expect(Job.fromJson(jobJson(successChance: 0.9)).chanceWithExtras(3), 0.9);
+    });
+
+    test('counts an item in the singular and the plural', () {
+      expect(countedItem(1, 'switchblade'), '1 switchblade');
+      expect(countedItem(4, 'switchblade'), '4 switchblades');
+      expect(countedItem(2, 'brass-knuckles'), '2 brass-knuckles');
+    });
+
+    test('a requirement with no maxExtras allows none', () {
+      // A server that predates the field must still read correctly.
+      final job = Job.fromJson(jobJson()
+        ..['itemRequirements'] = [
+          {'itemId': 'switchblade', 'minQuantity': 2, 'held': 2, 'met': true},
+        ]);
+
+      expect(job.itemRequirements.single.maxExtras, 0);
+      expect(job.extraSuccessChance, 0);
+    });
+
+    test('how many extras could be added is capped by the content and by the spare stock', () {
+      JobItemRequirement r(int min, int maxExtras, int held) => JobItemRequirement(
+          itemId: 'switchblade', minQuantity: min, maxExtras: maxExtras, held: held, met: held >= min);
+
+      expect(r(1, 3, 4).availableExtras, 3, reason: 'plenty of stock: the content allowance');
+      expect(r(1, 3, 2).availableExtras, 1, reason: 'stock is the limit: one spare after the requirement');
+      expect(r(1, 3, 1).availableExtras, 0, reason: 'exactly the requirement: nothing to add');
+      expect(r(2, 3, 1).availableExtras, 0, reason: 'short of the requirement: never negative');
+      expect(r(1, 0, 10).availableExtras, 0, reason: 'the content allows none');
+    });
+
     test('reads a met item requirement', () {
       final job = Job.fromJson(jobJson()
         ..['itemRequirements'] = [

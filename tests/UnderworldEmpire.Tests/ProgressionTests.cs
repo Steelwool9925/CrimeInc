@@ -32,9 +32,14 @@ public class ProgressionTests
     [Fact]
     public void Level_2_requires_exactly_100_xp()
     {
-        // Load-bearing for CP2: the crime pack is tuned so one full starting energy bar of the
-        // cheapest job awards exactly 100 XP. If this threshold moves, the checkpoint stops being
-        // demonstrable in a single sitting.
+        // Load-bearing: level 2 must be reachable in a new player's first sitting, because a
+        // first session with no level-up fires none of the game's reward vocabulary.
+        //
+        // The threshold is NOT "one bar of the cheapest job awards exactly 100 XP" — that was true
+        // only before jobs could fail, and this comment asserted it long after it stopped being
+        // so. The pack now clears it with headroom instead: a 20-energy bar of the starter job at
+        // 0.80 success expects 164 XP. See LevelCurve's remarks and FirstSessionTests, which pins
+        // the reachability property itself rather than this one number.
         Assert.Equal(100, LevelCurve.XpToReach(2));
     }
 

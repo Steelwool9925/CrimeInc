@@ -40,13 +40,15 @@ jobs[]   the catalog, in display order — the engine does not sort
   requirements      minimum EFFECTIVE stats to attempt — base plus equipped gear
     attack          minimum effective attack (>= 0; 0 means ungated)
     defense         minimum effective defense (>= 0)
-  itemRequirements[]  optional item-quantity gates, alongside requirements — absent means ungated
+  itemRequirements[]  optional item gates, alongside requirements — absent means ungated
     itemId          a weapon or armor id from items.json (not vehicle; must exist)
-    minQuantity     minimum copies held to attempt the job (>= 1)
+    minQuantity     copies the job needs; every attempt uses ALL of them up, win or lose (>= 1)
+    maxExtras       most EXTRA copies a player may add for better odds, each spent too (optional, default 0)
   risk              per-job risk tuning — required, not optional
     baseSuccessChance             chance for a player exactly at the requirements (0..1)
     successChancePerSurplusPoint  added per point of surplus stat (>= 0)
-    itemSuccessChancePerSurplusPoint  added per point of surplus held-item quantity (>= 0)
+    extraItemSuccessChance        added per EXTRA item the player commits (>= 0; must be > 0 if any
+                                  requirement has maxExtras > 0)
     healthLossMin/healthLossMax   inclusive health lost on a failure, rolled per attempt
 ```
 
@@ -58,10 +60,30 @@ into the failure path by accident.
 
 **`itemRequirements` is the opposite: absent is the ordinary case.** Every job written before this
 field existed has none, and must keep working unchanged — so unlike `risk`/`requirements`, omitting
-it is not an error. It is one time use: each attempt spends exactly 1 unit of every listed item,
-win or lose, and the same holding also answers the equip question independently — a player can wear
-a weapon (satisfying `requirements`) and separately need spare stock of it (satisfying
-`itemRequirements`); those are different questions about the same rows.
+it is not an error.
+
+**Two kinds of item, and the player chooses only one of them.** `minQuantity` is not a choice: the job
+cannot be done without that many, and every attempt uses all of them up, win or lose. Extras are a
+choice: before an attempt the player may commit up to `maxExtras` more, each is spent as well, and
+each adds `extraItemSuccessChance` to the odds. Nothing is ever spent that the player did not commit
+or the job did not require, so a stack that merely sits in the inventory changes nothing. The payout
+rule below prices the *required* spend: extras are an opt-in premium and are deliberately not
+guaranteed to pay for themselves.
+
+**Items a job uses are consumed, but they are never the worn copy.** A player can wear a switchblade to
+meet a stat gate and separately hold one to spend. Requirements and extras count only *spare* copies:
+the stack minus the one being worn. So a job asking for one switchblade needs the player to hold two
+if they are wearing one, and spending the spare leaves the worn copy and its stats alone. The API
+reports this as `held` (spare copies), and the card says "Needs 1 spare switchblade" and "Uses up 1
+switchblade each attempt (never the one you are wearing)". As a backstop, spending the last copy of
+anything worn takes it off, and a worn row with no copies never scores.
+
+**The request.** `POST /jobs/{id}/do` takes an optional body `{ "extras": { "<itemId>": <n> } }`.
+The server refuses an item the job does not use, a negative count, or more than `maxExtras` with a
+`400` (reason `extras`); it refuses a count the player cannot cover with a `409` (reason `items`).
+It works out the resulting odds itself — the client only says how many it is willing to spend.
+In the result, `itemsConsumed[].quantityRemaining` counts *spare* copies, like `held`: it reads 0 after
+the last spare is spent even though the player is still wearing one.
 
 **`itemId` is validated against `items.json` at startup**, the one place these two otherwise
 independent catalogs cross. An id that does not exist, or names a vehicle rather than a weapon or
@@ -73,18 +95,21 @@ The success chance for a given player is:
 statSurplus = max(0, effectiveAttack  - requirements.attack)
             + max(0, effectiveDefense - requirements.defense)
 
-itemSurplus = sum over itemRequirements of max(0, quantityHeld - minQuantity)
+extras      = sum over itemRequirements of (extra copies the player committed, at most maxExtras)
 
 chance  = baseSuccessChance
           + successChancePerSurplusPoint * statSurplus
-          + itemSuccessChancePerSurplusPoint * itemSurplus
+          + extraItemSuccessChance * extras
           clamped to [baseSuccessChance, min(1, risk.maxSuccessChance)]
 ```
 
 Each stat's surplus floors at **zero independently**. Summed algebraically, a large attack overshoot
-would cancel a defense shortfall and the defense requirement would stop meaning anything. Item
-surplus floors at zero the same way, and is a wholly separate term from stat surplus — a big pile of
-spare stock must not paper over a stats shortfall, or the reverse.
+would cancel a defense shortfall and the defense requirement would stop meaning anything. Extras are
+a wholly separate term from stat surplus — items must not paper over a stats shortfall, or the reverse.
+`GET /jobs` reports the odds of an attempt with **no** extras, since the player has not chosen yet; the
+job's `extraSuccessChance`, the pack's `maxSuccessChance` ceiling and each requirement's `maxExtras`
+are sent alongside so the card can preview the odds of however many extras the player has dialled in
+(the server still decides the real odds).
 
 Validation reports **every** problem at once rather than stopping at the first, so a content edit
 needs one fix pass rather than one restart per error. Unknown fields are ignored, so a newer pack
@@ -134,7 +159,7 @@ first sitting.
 | shake-down-corner-store | 1 | 1 / 1 | 0.65 | 0.010 | 0–1 | — |
 | boost-a-parked-car | 1 | 5 / 1 | 0.75 | 0.010 | 0–3 | — |
 | run-numbers-for-the-bookie | 2 | 6 / 5 | 0.72 | 0.010 | 0–4 | — |
-| hijack-a-delivery-truck | 3 | 9 / 7 | 0.65 | 0.008 | 2–8 | 2× switchblade, +0.01/surplus |
+| hijack-a-delivery-truck | 3 | 9 / 7 | 0.65 | 0.008 | 2–8 | 1× switchblade, up to 3 extra at +0.10 each |
 | torch-a-rival-warehouse | 5 | 14 / 10 | 0.60 | 0.006 | 4–14 | — |
 | rob-an-armored-transport | 8 | 22 / 16 | 0.55 | 0.005 | 8–25 | — |
 
@@ -166,10 +191,28 @@ never be handed a raw roll.
 Job ids are compared **ordinally**. They are content keys, not display text, so casing is
 significant and `Boost-A-Parked-Car` is a different id from `boost-a-parked-car`.
 
-**`hijack-a-delivery-truck`'s item gate is a first-pass balance choice, explicitly tunable — not a
-frozen decision.** It sits on a mid-tier job with headroom before *Torch*/*Rob*'s harder stat gates,
-and asks for 2 switchblades: a level-2 unlock, so a level-3 player attempting *Hijack* has plausibly
-already bought one for *Boost a Parked Car* and needs one more.
+**`hijack-a-delivery-truck`'s item gate and payout are a first-pass balance choice, explicitly tunable
+— not a frozen decision.** It sits on a mid-tier job with headroom before *Torch*/*Rob*'s harder stat
+gates, asks for one switchblade (which each attempt spends), and lets a player add up to three more for
++10% success each. At 0.65 plus three extras that is exactly the pack's 0.95 ceiling, so no allowed
+extra is ever wasted (`Extras_never_buy_chance_the_ceiling_would_discard`). Extras are a premium, not a
+bargain: an extra costs a 180 blade and buys about 10% of a ~510 payout, so a player takes them for
+certainty, XP and mastery rather than for cash.
+
+**A job that consumes an item must pay for it.** Expected cash — success chance times the mean
+payout, plus the consolation fraction on a failure — must exceed the price of every item the attempt
+*requires*. This is the rule the original *Hijack* broke: 140–260 against a 180 blade was −49 per
+attempt, a job that cost the player money every time they did it and said nothing about it. It is
+pinned by `JobEconomyInvariantTests` over the whole pack, so the next edit that breaks it fails the
+build instead of shipping. A deliberate loss-leader needs an explicit content flag, never a deleted
+test.
+
+**A higher-level job must be worth unlocking.** Net cash per energy — after the price of what an
+attempt requires — must be strictly higher for every job than for every job at a lower level
+(`A_job_that_asks_for_a_higher_level_pays_more_per_energy_net_of_what_it_consumes`). Hijack's payout
+(400–620, mean ~510) was chosen to land between *Run Numbers* (about 30.7 net per energy) and *Torch*
+(about 45.3) at about 38; at the 260–480 it first shipped with it was the *lowest* job in the pack at
+15.5, below the level-1 opener. Same-level jobs are not compared.
 
 ## `items.json`
 
@@ -232,18 +275,56 @@ properties[] the catalog, in display order — the engine does not sort
   description       player-facing flavour text
   levelRequirement  minimum player level to buy (>= 1)
   price             cash cost of one unit (>= 0), fixed — never rolled
+  maxUnits          most units one player can hold (>= 1; optional in the schema, REQUIRED by tests)
   income
     perHour         cash one unit earns per hour of elapsed time (1 .. 1,000,000)
     capMinutes      minutes of income one unit holds before accrual stops (1 .. 43,200 = 30 days)
 ```
 
+**Every property declares a `maxUnits`, because without one income compounds without bound.** Each
+property pays for itself in 0.26 to 1.6 nights and a unit's price is flat, so a player who put every
+coin back grew about 4.8× a night: measured, a once-a-night player reached 4.36 million a night by the
+fifth and 1.2 billion by the tenth. The shipped ceilings are 3, 3, 2, 2, 1, 1 (street corner to
+casino). Replayed against the pack by `A_player_who_reinvests_everything_stops_growing`, income stops
+growing at 189,120 a night, reached by about night 9, and the whole ladder fills in roughly nine
+nights of play. A tier that is full stops being a place to put money, so the only way to earn more is
+the next tier up. The test does not pin the plateau's value, only that income stops growing. The
+limit is enforced by `PropertyService.CheckPurchase`, which reports it as `"limit"` *after* level and
+*before* cash: a player at the limit is told so rather than invited to save up. This bounds
+compounding; it does not retune absolute income, which a separate balance pass would own.
+
+A holding already above a newly introduced ceiling is left alone — nothing is taken away — it simply
+cannot be added to.
+
 Income is **accrued lazily**, exactly as the resource meters regenerate: nothing runs on a timer, and
 what a property has earned is derived from elapsed time whenever somebody asks. Buying another unit
 raises both the rate and the ceiling, so owning more never shortens how long you may stay away.
 
-`capMinutes` is the reason to come back. Past that window a property stops earning, so one left alone
-for a week pays exactly what one left alone for its window pays. It is expressed in **minutes** rather
-than hours so an early-game property can have a window short enough to watch fill.
+`capMinutes` is the reason to come back, and it is a **return cadence, not a difficulty tier.** Past
+that window a property stops earning, so one left alone for a week pays exactly what one left alone
+for its window pays. It is expressed in **minutes** rather than hours because the windows are not
+round numbers of hours.
+
+**Every property banks at least a night — eight hours — and the entry property is no exception.**
+This is the rule, and it is pinned by `PropertyCatalogLoaderTests`. The caps used to run the other
+way: the cheapest property capped at fifteen minutes and only the level-12 casino banked a full day.
+That inverted the mechanic against the player who needed it most. Property accrual is the only thing
+in this game shaped like a daily habit, and a once-daily player owning a street corner collected the
+same 60 cash whether they had been away an hour or a week — forfeiting 99.65% of what it generated
+over three days. The first property that banked a whole day arrived on day 40, by which point there
+was nothing left to spend it on.
+
+A later property earns more because `perHour` is higher, which is where that advantage belongs. It
+should out-earn an early one by earning faster, never by the early one forgetting sooner.
+
+**Release note: raising a cap pays out retroactively.** A holding never copies the window, so the
+window a player is judged by is always the one in the catalogue *now*. Deploying this change (or any
+later one that lengthens a `capMinutes`) means every owner's already-waiting time counts against the
+longer window on their next read: a Street Corner left for two hours under the old 15-minute cap pays
+two hours of income, once. That is a one-off windfall of at most one new window per unit, not a
+recurring effect, and it cannot be avoided without storing the window on the holding, which would
+break the retune-moves-everyone rule above. Expect cash-per-player to bump on the day it ships; it is
+not an exploit.
 
 `perHour` and `capMinutes` are each validated on their own **and as a product**: cap cash is
 `perHour × capMinutes ÷ 60` floored to whole cash, so `30/hour` over `1 minute` is half a coin and is
@@ -270,9 +351,12 @@ Two properties are load-bearing for the **CP3** checkpoint and are pinned by tes
 - The cheapest `levelRequirement: 1` property costs no more than roughly two full energy bars of the
   starting job, so "buy a property" is a short grind rather than a project. The current tuning makes
   that *Street Corner* at 500.
-- That same starter earns at least a coin a minute and fills its window in no more than 30 minutes,
-  so "watch income accrue to the cap, then collect" is observable inside one test session rather than
-  overnight. *Street Corner* earns 4 a minute and fills in 15.
+- That same starter earns at least a coin a minute, so "watch income accrue, then collect" is
+  observable inside one test session rather than overnight. *Street Corner* earns 4 a minute.
+  Note this is pinned on the **rate** and deliberately not on the cap: the cap was once held at 15
+  minutes for the same watchability reason, which optimised the property for being demonstrated
+  instead of for being played. Watchability is a property of `perHour`; the cap is a return cadence
+  (see above).
 
 Every property is also pinned to repay its own price within 200 full collections, so none of them is
 a trap rather than a choice.

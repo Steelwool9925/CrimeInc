@@ -1,19 +1,29 @@
 namespace UnderworldEmpire.Domain.Jobs;
 
 /// <summary>
-/// One item-quantity gate on a job: the player must hold at least <see cref="MinQuantity"/> copies
-/// of <see cref="ItemId"/> to attempt it, and every attempt spends exactly one — win or lose (see
-/// <see cref="JobOutcome.ItemsConsumed"/>).
+/// One item gate on a job: the attempt needs <see cref="MinQuantity"/> copies of <see cref="ItemId"/>,
+/// uses every one of them up, win or lose (see <see cref="JobOutcome.ItemsConsumed"/>), and lets the
+/// player add up to <see cref="MaxExtras"/> more to improve the odds.
 /// </summary>
 /// <remarks>
 /// Sits alongside <see cref="Job.MeetsStatRequirements"/>, not instead of it: a job can gate on
-/// stats, items, both, or neither, and the two gates are answered independently. Fixed at "consume 1
-/// per requirement per attempt" for this first pass — a variable rate is a later refinement, not a
-/// Tier-1 requirement.
+/// stats, items, both, or neither, and the two gates are answered independently.
+/// <para>
+/// <b>Two kinds of item, and the player chooses only one of them.</b> The required count is not a
+/// choice: the job cannot be done without it. Extras are: each one the player commits is spent as
+/// well and adds <see cref="Job.ExtraItemSuccessChance"/> to the chance of success. Nothing is
+/// spent that the player did not commit or the job did not require, so a stack that merely sits in
+/// the inventory never changes the odds. Counts are of <i>spare</i> copies: the one a player is
+/// wearing is never spent (see <c>PlayerItem.SpareQuantity</c>).
+/// </para>
 /// </remarks>
 /// <param name="ItemId">Content id of the required weapon/armor item.</param>
-/// <param name="MinQuantity">Minimum copies held to attempt the job. Always &gt;= 1.</param>
-public readonly record struct ItemRequirement(string ItemId, int MinQuantity);
+/// <param name="MinQuantity">Copies the job needs and uses up. Always &gt;= 1.</param>
+/// <param name="MaxExtras">
+/// The most extra copies a player may add. Zero (the default) means this item cannot be committed
+/// beyond the requirement.
+/// </param>
+public readonly record struct ItemRequirement(string ItemId, int MinQuantity, int MaxExtras = 0);
 
 /// <summary>
 /// A single job definition as the domain sees it, projected from the content pack's
@@ -90,12 +100,15 @@ public sealed record Job
     public IReadOnlyList<ItemRequirement> ItemRequirements { get; init; } = [];
 
     /// <summary>
-    /// How much one point of surplus held-item quantity (above a requirement's minimum) adds to the
-    /// success chance. Mirrors <see cref="SuccessChancePerSurplusPoint"/> as its own rate rather than
-    /// being blended into it, so a large item surplus cannot paper over a stats shortfall or vice
-    /// versa.
+    /// How much each extra item a player commits adds to the success chance. Its own rate, not blended
+    /// into <see cref="SuccessChancePerSurplusPoint"/>, so committing items cannot paper over a stats
+    /// shortfall or vice versa.
     /// </summary>
-    public double ItemSuccessChancePerSurplusPoint { get; init; }
+    /// <remarks>
+    /// Applies per extra copy, up to each requirement's <see cref="ItemRequirement.MaxExtras"/>. The
+    /// required copies themselves add nothing: they are the price of admission, not a boost.
+    /// </remarks>
+    public double ExtraItemSuccessChance { get; init; }
 
     /// <summary>Lowest health lost on a failed attempt, inclusive.</summary>
     public int HealthLossMin { get; init; }
@@ -125,10 +138,40 @@ public sealed record Job
     /// anyone — <c>null</c> is treated the same as an empty holding, so a caller with nothing to
     /// report need not construct a dictionary just to ask.
     /// </remarks>
-    public bool MeetsItemRequirements(IReadOnlyDictionary<string, int>? held)
+    public bool MeetsItemRequirements(
+        IReadOnlyDictionary<string, int>? held,
+        IReadOnlyDictionary<string, int>? extraItems = null)
     {
         held ??= EmptyHeldItems;
-        return ItemRequirements.All(r => held.GetValueOrDefault(r.ItemId) >= r.MinQuantity);
+        extraItems ??= EmptyHeldItems;
+        return ItemRequirements.All(
+            r => held.GetValueOrDefault(r.ItemId) >= r.MinQuantity + extraItems.GetValueOrDefault(r.ItemId));
+    }
+
+    /// <summary>
+    /// Whether the extras a player asked to commit are ones this job accepts: each named item is one of
+    /// its requirements, and each count is between zero and that requirement's
+    /// <see cref="ItemRequirement.MaxExtras"/>. <see langword="null"/> or empty means none, which is
+    /// always acceptable.
+    /// </summary>
+    /// <remarks>
+    /// A malformed request rather than a game state: a player who simply lacks the items is refused by
+    /// <see cref="MeetsItemRequirements"/>, but asking for an item the job does not use, a negative
+    /// number, or more than the content allows cannot be satisfied by getting more of anything.
+    /// </remarks>
+    public bool AcceptsExtras(IReadOnlyDictionary<string, int>? extraItems)
+    {
+        if (extraItems is null)
+            return true;
+
+        foreach (var (itemId, count) in extraItems)
+        {
+            var requirement = ItemRequirements.FirstOrDefault(r => r.ItemId == itemId);
+            if (requirement.ItemId is null || count < 0 || count > requirement.MaxExtras)
+                return false;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -166,32 +209,34 @@ public sealed record Job
     /// job.
     /// </para>
     /// <para>
-    /// The optional <paramref name="heldItemQuantities"/> feeds a second, independent surplus term
-    /// at <see cref="ItemSuccessChancePerSurplusPoint"/> per point — added alongside the stat term,
-    /// not blended into it, for the same reason stat surplus floors per stat rather than summing
-    /// algebraically: a large item surplus must not paper over a stats shortfall or vice versa.
-    /// Omitted (or a job with no <see cref="ItemRequirements"/>), the term is simply zero, so every
-    /// existing call site and every job that does not opt in computes exactly what it always has.
+    /// The optional <paramref name="extraItems"/> — how many extra copies of each required item the
+    /// player has committed — feeds a second, independent term at
+    /// <see cref="ExtraItemSuccessChance"/> per extra, up to each requirement's
+    /// <see cref="ItemRequirement.MaxExtras"/>. It is added alongside the stat term, not blended into
+    /// it, for the same reason stat surplus floors per stat rather than summing algebraically: items
+    /// must not paper over a stats shortfall or vice versa. Omitted (which is what <c>GET /jobs</c>
+    /// passes, since the player has not chosen yet), the term is zero, so the listed odds are the
+    /// odds of an attempt with no extras.
     /// </para>
     /// </remarks>
     public double SuccessChanceFor(
         int effectiveAttack,
         int effectiveDefense,
         double maxSuccessChance,
-        IReadOnlyDictionary<string, int>? heldItemQuantities = null)
+        IReadOnlyDictionary<string, int>? extraItems = null)
     {
         double ceiling = Math.Min(1.0, maxSuccessChance);
 
         int statSurplus = Math.Max(0, effectiveAttack - AttackRequirement)
                         + Math.Max(0, effectiveDefense - DefenseRequirement);
 
-        var held = heldItemQuantities ?? EmptyHeldItems;
-        int itemSurplus = ItemRequirements.Sum(
-            r => Math.Max(0, held.GetValueOrDefault(r.ItemId) - r.MinQuantity));
+        var extras = extraItems ?? EmptyHeldItems;
+        int committedExtras = ItemRequirements.Sum(
+            r => Math.Clamp(extras.GetValueOrDefault(r.ItemId), 0, r.MaxExtras));
 
         double chance = BaseSuccessChance
             + SuccessChancePerSurplusPoint * statSurplus
-            + ItemSuccessChancePerSurplusPoint * itemSurplus;
+            + ExtraItemSuccessChance * committedExtras;
 
         // The floor is the job's base, but never above the ceiling — otherwise Math.Clamp is handed
         // an inverted range and throws.
@@ -256,6 +301,10 @@ public sealed record Job
                 throw new ArgumentOutOfRangeException(nameof(ItemRequirements), requirement.MinQuantity,
                     $"Job '{Id}' has an item requirement for '{requirement.ItemId}' with a minimum " +
                     "quantity below 1.");
+            if (requirement.MaxExtras < 0)
+                throw new ArgumentOutOfRangeException(nameof(ItemRequirements), requirement.MaxExtras,
+                    $"Job '{Id}' has an item requirement for '{requirement.ItemId}' allowing a negative " +
+                    "number of extras.");
             // A duplicate would let MeetsItemRequirements evaluate the same held quantity against
             // the same minimum twice — harmless there, but JobService.Attempt would then build two
             // ItemConsumption entries for the one item, and the second Consume() at the
@@ -265,11 +314,17 @@ public sealed record Job
                     $"Job '{Id}' has a duplicate item requirement for '{requirement.ItemId}'.",
                     nameof(ItemRequirements));
         }
-        if (ItemSuccessChancePerSurplusPoint < 0.0)
-            // Same reasoning as SuccessChancePerSurplusPoint: a negative gain would make surplus
-            // stock actively harmful, which no content should be able to say.
-            throw new ArgumentOutOfRangeException(nameof(ItemSuccessChancePerSurplusPoint),
-                ItemSuccessChancePerSurplusPoint,
-                $"Job '{Id}' cannot lose success chance per item surplus point.");
+        if (ExtraItemSuccessChance < 0.0)
+            // A negative gain would make committing items actively harmful, which no content should be
+            // able to say.
+            throw new ArgumentOutOfRangeException(nameof(ExtraItemSuccessChance),
+                ExtraItemSuccessChance,
+                $"Job '{Id}' cannot lose success chance per extra item.");
+        // Extras that change nothing would cost the player items for no effect: allowing them to be
+        // committed with a rate of zero is a content mistake, not a design choice.
+        if (ExtraItemSuccessChance == 0.0 && ItemRequirements.Any(r => r.MaxExtras > 0))
+            throw new ArgumentOutOfRangeException(nameof(ExtraItemSuccessChance),
+                ExtraItemSuccessChance,
+                $"Job '{Id}' lets extra items be committed but gives each a success chance of zero.");
     }
 }

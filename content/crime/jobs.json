@@ -28,7 +28,7 @@
         "defense": 1
       },
       "risk": {
-        "baseSuccessChance": 0.65,
+        "baseSuccessChance": 0.80,
         "successChancePerSurplusPoint": 0.010,
         "healthLossMin": 0,
         "healthLossMax": 1
@@ -88,8 +88,8 @@
       "energyCost": 4,
       "levelRequirement": 3,
       "payout": {
-        "cashMin": 140,
-        "cashMax": 260,
+        "cashMin": 400,
+        "cashMax": 620,
         "xp": 55
       },
       "requirements": {
@@ -97,12 +97,12 @@
         "defense": 7
       },
       "itemRequirements": [
-        { "itemId": "switchblade", "minQuantity": 2 }
+        { "itemId": "switchblade", "minQuantity": 1, "maxExtras": 3 }
       ],
       "risk": {
         "baseSuccessChance": 0.65,
         "successChancePerSurplusPoint": 0.008,
-        "itemSuccessChancePerSurplusPoint": 0.01,
+        "extraItemSuccessChance": 0.10,
         "healthLossMin": 2,
         "healthLossMax": 8
       }

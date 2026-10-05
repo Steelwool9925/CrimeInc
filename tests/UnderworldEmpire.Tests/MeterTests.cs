@@ -260,9 +260,41 @@ public class MeterTests
     // -------------------------------------------------------------------------
 
     [Fact]
-    public void PlayerDefaults_energy_max_is_10()
+    public void PlayerDefaults_energy_max_is_20()
     {
-        Assert.Equal(10, PlayerDefaults.EnergyMax);
+        // Raised 10 -> 20 so one opening bar of the cheapest job reaches level 2; at 10 only 1% of
+        // new players did. FirstSessionTests pins that property — this is just the value.
+        Assert.Equal(20, PlayerDefaults.EnergyMax);
+    }
+
+    [Fact]
+    public void Energy_max_is_a_buffer_and_does_not_change_the_regen_rate()
+    {
+        // The distinction that matters, and the one an earlier balance analysis got backwards:
+        // CurrentAt is min(Max, stored + elapsed / regenPerPoint), so MeterRates.Energy alone sets
+        // throughput and EnergyMax only bounds what can bank between visits.
+        //
+        // Two meters with the same rate but different ceilings therefore accumulate at an identical
+        // rate while both are below their cap, and diverge only once the smaller one saturates.
+        var start = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var small = new Meter(10, 0, start);
+        var large = new Meter(20, 0, start);
+
+        // 7 points' worth of regeneration: below both ceilings, so the ceiling is irrelevant.
+        var belowBoth = start + 7 * MeterRates.Energy;
+        Assert.Equal(7, small.CurrentAt(belowBoth, MeterRates.Energy));
+        Assert.Equal(7, large.CurrentAt(belowBoth, MeterRates.Energy));
+
+        // 15 points' worth: the smaller meter has saturated, the larger has not. Same rate, and
+        // the only difference is how much each was able to hold.
+        var pastSmall = start + 15 * MeterRates.Energy;
+        Assert.Equal(10, small.CurrentAt(pastSmall, MeterRates.Energy));
+        Assert.Equal(15, large.CurrentAt(pastSmall, MeterRates.Energy));
+
+        // And a grant cannot exceed the ceiling either — the reason a reward "worth a full extra
+        // bar" is not expressible today. See the daily-login-streak plan.
+        Assert.Equal(20, large.GrantAt(999, pastSmall, MeterRates.Energy)
+            .CurrentAt(pastSmall, MeterRates.Energy));
     }
 
     [Fact]

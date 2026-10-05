@@ -21,14 +21,16 @@ public class PropertyServiceTests
         int levelRequirement = 1,
         long price = 250,
         long incomePerHour = 120,
-        int accrualCapMinutes = 30) => new()
+        int accrualCapMinutes = 30,
+        int maxUnits = int.MaxValue) => new()
         {
             Id = id,
             Name = "Street Corner",
             LevelRequirement = levelRequirement,
             Price = price,
             IncomePerHour = incomePerHour,
-            AccrualCapMinutes = accrualCapMinutes
+            AccrualCapMinutes = accrualCapMinutes,
+            MaxUnits = maxUnits
         };
 
     private static Player TestPlayer(int level = 1, long cash = 1000) => new()
@@ -166,7 +168,7 @@ public class PropertyServiceTests
 
         Assert.Equal(
             PropertyFailure.None,
-            service.CheckPurchase(TestPlayer(level: 1, cash: 250), TestProperty(price: 250)));
+            service.CheckPurchase(TestPlayer(level: 1, cash: 250), TestProperty(price: 250), unitsOwned: 0));
     }
 
     [Fact]
@@ -176,7 +178,7 @@ public class PropertyServiceTests
         var player = TestPlayer(level: 1, cash: 0);
         var property = TestProperty(levelRequirement: 5, price: 250);
 
-        Assert.Equal(PropertyFailure.LevelTooLow, service.CheckPurchase(player, property));
+        Assert.Equal(PropertyFailure.LevelTooLow, service.CheckPurchase(player, property, unitsOwned: 0));
         Assert.Equal(
             PropertyFailure.LevelTooLow,
             service.Purchase(player, property, Holding(player.Id), T0).Failure);
@@ -188,9 +190,90 @@ public class PropertyServiceTests
         var service = new PropertyService();
         var player = TestPlayer(cash: 1000);
 
-        service.CheckPurchase(player, TestProperty(price: 250));
+        service.CheckPurchase(player, TestProperty(price: 250), unitsOwned: 0);
 
         Assert.Equal(1000, player.Cash);
+    }
+
+    // -------------------------------------------------------------------------
+    // The unit ceiling
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void A_player_below_the_ceiling_can_buy_another_unit()
+    {
+        var service = new PropertyService();
+
+        Assert.Equal(
+            PropertyFailure.None,
+            service.CheckPurchase(TestPlayer(cash: 1000), TestProperty(maxUnits: 3), unitsOwned: 2));
+    }
+
+    [Fact]
+    public void A_player_at_the_ceiling_is_refused_and_told_why()
+    {
+        var service = new PropertyService();
+
+        Assert.Equal(
+            PropertyFailure.AtUnitLimit,
+            service.CheckPurchase(TestPlayer(cash: 1000), TestProperty(maxUnits: 3), unitsOwned: 3));
+    }
+
+    [Fact]
+    public void The_ceiling_is_reported_ahead_of_cash()
+    {
+        // A player at the limit with no cash should hear "you hold the most you can", not be invited to
+        // save up for a unit they could never buy.
+        var service = new PropertyService();
+
+        Assert.Equal(
+            PropertyFailure.AtUnitLimit,
+            service.CheckPurchase(TestPlayer(cash: 0), TestProperty(maxUnits: 1), unitsOwned: 1));
+    }
+
+    [Fact]
+    public void Level_is_still_reported_ahead_of_the_ceiling()
+    {
+        var service = new PropertyService();
+
+        Assert.Equal(
+            PropertyFailure.LevelTooLow,
+            service.CheckPurchase(TestPlayer(level: 1), TestProperty(levelRequirement: 5, maxUnits: 1), unitsOwned: 1));
+    }
+
+    [Fact]
+    public void Purchasing_at_the_ceiling_charges_nothing_and_adds_nothing()
+    {
+        var service = new PropertyService();
+        var player = TestPlayer(cash: 1000);
+        var property = TestProperty(price: 250, maxUnits: 2);
+        var holding = Holding(player.Id);
+        service.Purchase(player, property, holding, T0);
+        service.Purchase(player, property, holding, T0);
+        long cashAtTheCeiling = player.Cash;
+
+        var refused = service.Purchase(player, property, holding, T0);
+
+        Assert.False(refused.Succeeded);
+        Assert.Equal(PropertyFailure.AtUnitLimit, refused.Failure);
+        Assert.Equal(cashAtTheCeiling, player.Cash);
+        Assert.Equal(2, holding.Quantity);
+    }
+
+    [Fact]
+    public void A_property_that_declares_no_ceiling_has_none()
+    {
+        var service = new PropertyService();
+
+        Assert.Equal(
+            PropertyFailure.None,
+            service.CheckPurchase(TestPlayer(cash: 1000), TestProperty(), unitsOwned: 10_000));
+    }
+
+    [Fact]
+    public void A_ceiling_below_one_is_rejected_because_it_could_never_be_bought()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => TestProperty(maxUnits: 0).EnsureValid());
     }
 
     // -------------------------------------------------------------------------

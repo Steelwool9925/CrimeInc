@@ -61,7 +61,7 @@ class HomeScreen extends StatelessWidget {
               Text(
                 state.errorMessage ?? 'An error occurred',
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.red),
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
               const SizedBox(height: 16),
               ElevatedButton(
@@ -145,6 +145,12 @@ class HomeScreen extends StatelessWidget {
 /// The 6-tile dashboard: every place Home can send the player, one tile each. Two of the six
 /// (Crew, Territory) route to [ComingSoonScreen] because those features don't exist yet — the
 /// tile still gets a subtitle saying so, rather than pretending they're live or hiding them.
+///
+/// **Live destinations come first; the "Coming soon" tiles sort last.** Order is load-bearing on a
+/// tall viewport, where only the first row or two is above the fold: Market used to sit *below*
+/// the dead Crew tile, so a player had to scroll past a feature that does not exist to reach one
+/// that does. That matters more now that a first session earns enough to shop. Keep every live
+/// tile ahead of every placeholder when adding to this list.
 class _DashboardGrid extends StatelessWidget {
   const _DashboardGrid({required this.appState});
 
@@ -178,20 +184,28 @@ class _DashboardGrid extends StatelessWidget {
           ),
         ),
         _DashboardTile(
+          tileKey: const Key('go-to-store'),
+          icon: Icons.storefront_outlined,
+          title: 'Market',
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => StoreScreen(appState: appState)),
+          ),
+        ),
+        _DashboardTile(
+          tileKey: const Key('go-to-profile'),
+          icon: Icons.badge_outlined,
+          title: 'Rap Sheet',
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => ProfileScreen(appState: appState)),
+          ),
+        ),
+        _DashboardTile(
           tileKey: const Key('go-to-crew'),
           icon: Icons.groups_outlined,
           title: 'Crew',
           subtitle: 'Coming soon',
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => crewComingSoonScreen),
-          ),
-        ),
-        _DashboardTile(
-          tileKey: const Key('go-to-store'),
-          icon: Icons.storefront_outlined,
-          title: 'Market',
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => StoreScreen(appState: appState)),
           ),
         ),
         _DashboardTile(
@@ -207,14 +221,6 @@ class _DashboardGrid extends StatelessWidget {
                 message: 'Territory is coming in a future update.',
               ),
             ),
-          ),
-        ),
-        _DashboardTile(
-          tileKey: const Key('go-to-profile'),
-          icon: Icons.badge_outlined,
-          title: 'Rap Sheet',
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => ProfileScreen(appState: appState)),
           ),
         ),
       ],

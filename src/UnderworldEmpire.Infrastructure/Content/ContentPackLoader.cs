@@ -143,9 +143,9 @@ public sealed class ContentPackLoader
                 BaseSuccessChance = entry.Risk!.BaseSuccessChance,
                 SuccessChancePerSurplusPoint = entry.Risk.SuccessChancePerSurplusPoint,
                 ItemRequirements = (entry.ItemRequirements ?? [])
-                    .Select(r => new ItemRequirement(r.ItemId, r.MinQuantity))
+                    .Select(r => new ItemRequirement(r.ItemId, r.MinQuantity, r.MaxExtras))
                     .ToList(),
-                ItemSuccessChancePerSurplusPoint = entry.Risk.ItemSuccessChancePerSurplusPoint,
+                ExtraItemSuccessChance = entry.Risk.ExtraItemSuccessChance,
                 HealthLossMin = entry.Risk.HealthLossMin,
                 HealthLossMax = entry.Risk.HealthLossMax
             };
@@ -267,7 +267,8 @@ public sealed class ContentPackLoader
                 LevelRequirement = entry.LevelRequirement,
                 Price = entry.Price,
                 IncomePerHour = entry.Income.PerHour,
-                AccrualCapMinutes = entry.Income.CapMinutes
+                AccrualCapMinutes = entry.Income.CapMinutes,
+                MaxUnits = entry.MaxUnits ?? int.MaxValue
             };
             property.EnsureValid();
             properties.Add(property);
@@ -436,10 +437,10 @@ public sealed class ContentPackLoader
                         $"{where}: 'risk.healthLossMax' ({job.Risk.HealthLossMax}) is below " +
                         $"'risk.healthLossMin' ({job.Risk.HealthLossMin})");
 
-                if (job.Risk.ItemSuccessChancePerSurplusPoint < 0.0)
+                if (job.Risk.ExtraItemSuccessChance < 0.0)
                     errors.Add(
-                        $"{where}: 'risk.itemSuccessChancePerSurplusPoint' must be >= 0, found " +
-                        $"{job.Risk.ItemSuccessChancePerSurplusPoint}");
+                        $"{where}: 'risk.extraItemSuccessChance' must be >= 0, found " +
+                        $"{job.Risk.ExtraItemSuccessChance}");
             }
 
             // Absent means ungated — unlike 'requirements' and 'risk' above, every job that predates
@@ -462,6 +463,19 @@ public sealed class ContentPackLoader
                         errors.Add(
                             $"{where}: 'itemRequirements' entry for '{requirement.ItemId}' has " +
                             $"'minQuantity' {requirement.MinQuantity}, must be >= 1");
+
+                    if (requirement.MaxExtras < 0)
+                        errors.Add(
+                            $"{where}: 'itemRequirements' entry for '{requirement.ItemId}' has " +
+                            $"'maxExtras' {requirement.MaxExtras}, must be >= 0");
+
+                    // Extras that change nothing would cost the player items for no effect, so a job
+                    // that allows them must say what each is worth.
+                    if (requirement.MaxExtras > 0 && job.Risk is { ExtraItemSuccessChance: <= 0.0 })
+                        errors.Add(
+                            $"{where}: 'itemRequirements' entry for '{requirement.ItemId}' allows " +
+                            $"{requirement.MaxExtras} extra(s) but 'risk.extraItemSuccessChance' is 0, so " +
+                            "an extra would be spent for no benefit");
 
                     // The one place items and jobs cross: jobs.json cannot reference an item.json id
                     // that does not exist, or that exists but is not equippable gear. Skipped when no
@@ -601,6 +615,9 @@ public sealed class ContentPackLoader
 
             if (property.Price < 0)
                 errors.Add($"{where}: 'price' must be >= 0, found {property.Price}");
+
+            if (property.MaxUnits is < 1)
+                errors.Add($"{where}: 'maxUnits' must be >= 1 when present, found {property.MaxUnits}");
 
             if (property.Income.PerHour < 1)
                 errors.Add($"{where}: 'income.perHour' must be >= 1, found {property.Income.PerHour}");

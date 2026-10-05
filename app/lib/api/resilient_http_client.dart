@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 
@@ -26,6 +27,14 @@ import 'package:http/io_client.dart';
 /// fallback works for a tunnel at all: Cloudflare's (and most CDNs') edge routes purely on
 /// SNI/Host, not on which of their IPs you happened to connect to.
 http.Client createResilientHttpClient() {
+  // Everything below is built on dart:io (HttpClient/Socket/SecureSocket), none of which exist on
+  // the web platform — constructing HttpClient() there throws "Unsupported operation:
+  // Platform._version" immediately, uncaught, the instant this function runs. The browser's own
+  // fetch stack already does its own DNS resolution (and typically ships its own DoH), so the
+  // carrier-DNS-filtering problem this file exists for doesn't apply to web in the first place —
+  // it gets the plain client package:http already hands out there.
+  if (kIsWeb) return http.Client();
+
   final client = HttpClient();
   client.connectionFactory = (Uri url, String? proxyHost, int? proxyPort) async {
     try {

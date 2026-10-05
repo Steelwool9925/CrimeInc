@@ -22,7 +22,7 @@ public class JobTests
         double baseSuccessChance = 1.0,
         double successChancePerSurplusPoint = 0.0,
         IReadOnlyList<ItemRequirement>? itemRequirements = null,
-        double itemSuccessChancePerSurplusPoint = 0.0,
+        double extraItemSuccessChance = 0.0,
         int healthLossMin = 0,
         int healthLossMax = 0) => new()
         {
@@ -38,7 +38,7 @@ public class JobTests
             BaseSuccessChance = baseSuccessChance,
             SuccessChancePerSurplusPoint = successChancePerSurplusPoint,
             ItemRequirements = itemRequirements ?? [],
-            ItemSuccessChancePerSurplusPoint = itemSuccessChancePerSurplusPoint,
+            ExtraItemSuccessChance = extraItemSuccessChance,
             HealthLossMin = healthLossMin,
             HealthLossMax = healthLossMax
         };
@@ -52,12 +52,19 @@ public class JobTests
         healthLossMin: 0,
         healthLossMax: 3);
 
-    /// <summary>A job gated on holding at least 2 switchblades, +1% success per surplus item.</summary>
-    private static Job ItemGatedJob(int minQuantity = 2, double itemSuccessChancePerSurplusPoint = 0.01) =>
+    /// <summary>
+    /// A job that needs <paramref name="minQuantity"/> switchblades (all spent), lets a player add up to
+    /// <paramref name="maxExtras"/> more, and gives each extra <paramref name="extraItemSuccessChance"/>.
+    /// </summary>
+    private static Job ItemGatedJob(
+        int minQuantity = 2, int maxExtras = 3, double extraItemSuccessChance = 0.05) =>
         TestJob(
             baseSuccessChance: 0.75,
-            itemRequirements: [new ItemRequirement("switchblade", minQuantity)],
-            itemSuccessChancePerSurplusPoint: itemSuccessChancePerSurplusPoint);
+            itemRequirements: [new ItemRequirement("switchblade", minQuantity, maxExtras)],
+            extraItemSuccessChance: extraItemSuccessChance);
+
+    private static Dictionary<string, int> Extras(int count, string itemId = "switchblade") =>
+        new() { [itemId] = count };
 
     // -------------------------------------------------------------------------
     // Defaults
@@ -75,7 +82,7 @@ public class JobTests
         Assert.Equal(0, job.DefenseRequirement);
         Assert.Equal(0.0, job.SuccessChancePerSurplusPoint);
         Assert.Empty(job.ItemRequirements);
-        Assert.Equal(0.0, job.ItemSuccessChancePerSurplusPoint);
+        Assert.Equal(0.0, job.ExtraItemSuccessChance);
         Assert.Equal(0, job.HealthLossMin);
         Assert.Equal(0, job.HealthLossMax);
     }
@@ -161,6 +168,31 @@ public class JobTests
     }
 
     [Fact]
+    public void An_item_requirement_cannot_allow_a_negative_number_of_extras()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => TestJob(itemRequirements: [new ItemRequirement("switchblade", 1, MaxExtras: -1)]).EnsureValid());
+    }
+
+    [Fact]
+    public void A_job_that_allows_extras_must_say_what_each_is_worth()
+    {
+        // An extra that changes nothing would cost the player an item for no effect.
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => TestJob(
+                itemRequirements: [new ItemRequirement("switchblade", 1, MaxExtras: 2)],
+                extraItemSuccessChance: 0.0).EnsureValid());
+    }
+
+    [Fact]
+    public void A_job_that_allows_no_extras_needs_no_rate()
+    {
+        TestJob(
+            itemRequirements: [new ItemRequirement("switchblade", 2)],
+            extraItemSuccessChance: 0.0).EnsureValid();
+    }
+
+    [Fact]
     public void A_duplicate_item_requirement_for_the_same_item_is_rejected()
     {
         // Mirrors ContentPackLoader.ValidateJobs's duplicate check: a hand-built Job with two
@@ -179,7 +211,7 @@ public class JobTests
     {
         // Same reasoning as the stat gain: a negative rate would make spare stock actively harmful.
         Assert.Throws<ArgumentOutOfRangeException>(
-            () => TestJob(itemSuccessChancePerSurplusPoint: -0.01).EnsureValid());
+            () => TestJob(extraItemSuccessChance: -0.01).EnsureValid());
     }
 
     // -------------------------------------------------------------------------
@@ -379,63 +411,107 @@ public class JobTests
     }
 
     [Fact]
-    public void Item_surplus_raises_the_chance_alongside_the_stat_term()
+    public void Committed_extras_raise_the_chance_alongside_the_stat_term()
     {
-        // Requirement is 2, holding 5: three points of item surplus at 1% each, on top of the 0.75
-        // base with no stat surplus (requirements are 0/0 by default).
-        var job = ItemGatedJob(minQuantity: 2, itemSuccessChancePerSurplusPoint: 0.01);
+        // Two extras at 5% each, on the 0.75 base with no stat surplus (requirements default to 0/0).
+        var chance = ItemGatedJob(maxExtras: 3, extraItemSuccessChance: 0.05).SuccessChanceFor(
+            effectiveAttack: 0, effectiveDefense: 0, maxSuccessChance: 0.95, extraItems: Extras(2));
 
-        var chance = job.SuccessChanceFor(
-            effectiveAttack: 0, effectiveDefense: 0, maxSuccessChance: 0.95,
-            heldItemQuantities: new Dictionary<string, int> { ["switchblade"] = 5 });
-
-        Assert.Equal(0.78, chance, precision: 10);
+        Assert.Equal(0.85, chance, precision: 10);
     }
 
     [Fact]
-    public void Item_surplus_floors_at_zero_and_does_not_paper_over_a_shortfall_elsewhere()
+    public void Owning_more_than_the_job_needs_changes_nothing_until_the_player_commits_it()
     {
-        // Holding fewer than the minimum contributes no *negative* surplus — the shortfall is what
-        // the gate is for, not a penalty layered onto the odds of an attempt that should be refused.
-        var job = ItemGatedJob(minQuantity: 5, itemSuccessChancePerSurplusPoint: 0.01);
-
-        var chance = job.SuccessChanceFor(
-            effectiveAttack: 0, effectiveDefense: 0, maxSuccessChance: 0.95,
-            heldItemQuantities: new Dictionary<string, int> { ["switchblade"] = 1 });
+        // The old rule gave a bonus for stock sitting in the inventory. The odds now move only on what
+        // the player chooses to spend, so with no extras committed the chance is the base.
+        var chance = ItemGatedJob().SuccessChanceFor(
+            effectiveAttack: 0, effectiveDefense: 0, maxSuccessChance: 0.95);
 
         Assert.Equal(0.75, chance, precision: 10);
     }
 
     [Fact]
-    public void Item_surplus_and_stat_surplus_add_independently()
+    public void Extras_beyond_what_the_content_allows_are_not_counted()
     {
-        // 5 points of stat surplus at 1% (from RiskyJob's 5/3 requirement) plus 3 points of item
-        // surplus at 1%: neither term is folded into the other's floor.
+        // The domain never trusts a count it was not validated against: asking for five where two are
+        // allowed counts two. (The request is refused earlier; this is the belt to that braces.)
+        var chance = ItemGatedJob(maxExtras: 2, extraItemSuccessChance: 0.05).SuccessChanceFor(
+            effectiveAttack: 0, effectiveDefense: 0, maxSuccessChance: 0.95, extraItems: Extras(5));
+
+        Assert.Equal(0.85, chance, precision: 10);
+    }
+
+    [Fact]
+    public void Extras_of_an_item_the_job_does_not_use_add_nothing()
+    {
+        var chance = ItemGatedJob().SuccessChanceFor(
+            effectiveAttack: 0, effectiveDefense: 0, maxSuccessChance: 0.95,
+            extraItems: Extras(3, itemId: "brass-knuckles"));
+
+        Assert.Equal(0.75, chance, precision: 10);
+    }
+
+    [Fact]
+    public void Extras_and_stat_surplus_add_independently()
+    {
+        // 5 points of stat surplus at 1% (from the 5/3 requirement) plus 2 extras at 5%: neither term
+        // is folded into the other's floor.
         var job = TestJob(
             attackRequirement: 5,
             defenseRequirement: 3,
             baseSuccessChance: 0.75,
             successChancePerSurplusPoint: 0.01,
-            itemRequirements: [new ItemRequirement("switchblade", 2)],
-            itemSuccessChancePerSurplusPoint: 0.01);
+            itemRequirements: [new ItemRequirement("switchblade", 2, MaxExtras: 3)],
+            extraItemSuccessChance: 0.05);
 
         var chance = job.SuccessChanceFor(
-            effectiveAttack: 8, effectiveDefense: 5, maxSuccessChance: 0.95,
-            heldItemQuantities: new Dictionary<string, int> { ["switchblade"] = 5 });
+            effectiveAttack: 8, effectiveDefense: 5, maxSuccessChance: 0.95, extraItems: Extras(2));
 
-        // Stat surplus: (8-5) + (5-3) = 5. Item surplus: 5-2 = 3. Total 8 points at 1% = 0.08.
-        Assert.Equal(0.83, chance, precision: 10);
+        // Stat surplus (8-5)+(5-3) = 5 -> 0.05. Extras 2 -> 0.10. 0.75 + 0.05 + 0.10 = 0.90.
+        Assert.Equal(0.90, chance, precision: 10);
     }
 
     [Fact]
-    public void The_item_surplus_ceiling_still_wins()
+    public void The_ceiling_still_wins_over_committed_extras()
     {
-        var job = ItemGatedJob(minQuantity: 2, itemSuccessChancePerSurplusPoint: 0.5);
-
-        var chance = job.SuccessChanceFor(
-            effectiveAttack: 0, effectiveDefense: 0, maxSuccessChance: 0.95,
-            heldItemQuantities: new Dictionary<string, int> { ["switchblade"] = 100 });
+        var chance = ItemGatedJob(maxExtras: 10, extraItemSuccessChance: 0.5).SuccessChanceFor(
+            effectiveAttack: 0, effectiveDefense: 0, maxSuccessChance: 0.95, extraItems: Extras(10));
 
         Assert.Equal(0.95, chance, precision: 10);
+    }
+
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(3, true)]
+    [InlineData(4, false)]
+    [InlineData(-1, false)]
+    public void Extras_must_be_between_none_and_what_the_content_allows(int count, bool accepted)
+    {
+        Assert.Equal(accepted, ItemGatedJob(maxExtras: 3).AcceptsExtras(Extras(count)));
+    }
+
+    [Fact]
+    public void Extras_for_an_item_the_job_does_not_use_are_not_accepted()
+    {
+        Assert.False(ItemGatedJob().AcceptsExtras(Extras(1, itemId: "brass-knuckles")));
+    }
+
+    [Fact]
+    public void Asking_for_no_extras_at_all_is_always_accepted()
+    {
+        Assert.True(ItemGatedJob().AcceptsExtras(null));
+        Assert.True(ItemGatedJob().AcceptsExtras(new Dictionary<string, int>()));
+        Assert.True(TestJob().AcceptsExtras(null));
+    }
+
+    [Fact]
+    public void The_stock_must_cover_the_requirement_and_every_extra_committed()
+    {
+        var job = ItemGatedJob(minQuantity: 2, maxExtras: 3);
+
+        Assert.True(job.MeetsItemRequirements(new Dictionary<string, int> { ["switchblade"] = 4 }, Extras(2)));
+        Assert.False(job.MeetsItemRequirements(new Dictionary<string, int> { ["switchblade"] = 3 }, Extras(2)));
+        Assert.True(job.MeetsItemRequirements(new Dictionary<string, int> { ["switchblade"] = 2 }));
     }
 }

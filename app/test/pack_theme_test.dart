@@ -184,6 +184,18 @@ void main() {
         expect(theme.cardTheme.elevation, 0);
       });
 
+      test('filled buttons (Collect) are square and outlined like every other primary action', () {
+        // Material 3 draws a FilledButton as a rounded pill. Collect is the only one in the app, and
+        // with no theme of its own it was the single button that broke the square-corner rule.
+        final theme = packTheme(packWith(primary: '#C81E2C'));
+        final style = theme.filledButtonTheme.style!;
+
+        expect(style.backgroundColor?.resolve({}), const Color(0xFFC81E2C));
+        final shape = style.shape?.resolve({}) as RoundedRectangleBorder?;
+        expect(shape?.borderRadius, BorderRadius.zero);
+        expect(style.side?.resolve({})?.width, greaterThanOrEqualTo(2));
+      });
+
       test('elevated buttons (primary actions) use the pack primary as a filled, square CTA',
           () {
         final theme = packTheme(packWith(primary: '#C81E2C'));
@@ -206,12 +218,32 @@ void main() {
         expect(shape?.borderRadius, BorderRadius.zero);
       });
 
-      test('error/danger colour is the same red as primary -- one spot colour, not two reds', () {
-        // The theme's whole point is colour discipline: a second, independently-generated
-        // "error red" from ColorScheme.fromSeed would quietly break that.
+      test('danger text is the primary hue, lightened only as far as legibility needs', () {
+        // Two rules pulling against each other, and the colour has to satisfy both.
+        //
+        // 1. Colour discipline. A second, independently generated "error red" from
+        //    ColorScheme.fromSeed reads as a slightly-off second accent and would quietly break
+        //    the one-spot-colour design. The danger colour must stay the pack's own hue.
+        // 2. Legibility. Every use of `error` in this app is *text* — gate labels ("Requires
+        //    level 3", "Costs more than you have"), field validation, the failed-job title; none
+        //    of it is a fill. At full strength the primary measures 2.92:1 against the card
+        //    surface, short of the 4.5:1 WCAG asks of body text, and these are precisely the
+        //    labels a player must read to learn why something was refused.
+        //
+        // So: same hue as primary, lifted far enough to read on both grounds it appears against.
         final theme = packTheme(packWith(primary: '#C81E2C'));
+        final error = theme.colorScheme.error;
+        final primary = theme.colorScheme.primary;
 
-        expect(theme.colorScheme.error, theme.colorScheme.primary);
+        expect(_hueDelta(error, primary), lessThan(6),
+            reason: 'danger must stay the pack hue, not become a second red');
+        expect(error.computeLuminance(), greaterThan(primary.computeLuminance()),
+            reason: 'it is lifted off the primary, which is what buys the contrast');
+
+        expect(_contrastRatio(error, theme.colorScheme.surface), greaterThanOrEqualTo(4.5),
+            reason: 'gate and validation text must be readable on a card');
+        expect(_contrastRatio(error, theme.scaffoldBackgroundColor), greaterThanOrEqualTo(4.5),
+            reason: 'and on the page behind the cards');
       });
 
       test('display text roles use the Bebas Neue face', () {
@@ -223,4 +255,26 @@ void main() {
       });
     });
   });
+}
+
+/// WCAG 2.x contrast ratio between two opaque colours.
+///
+/// `Color.computeLuminance` is already WCAG relative luminance, so this is just the ratio formula
+/// around it: `(lighter + 0.05) / (darker + 0.05)`. 4.5:1 is the AA threshold for body text, 3:1
+/// for large text and non-text UI.
+double _contrastRatio(Color a, Color b) {
+  final la = a.computeLuminance();
+  final lb = b.computeLuminance();
+  final lighter = la > lb ? la : lb;
+  final darker = la > lb ? lb : la;
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+/// Shortest angular distance between two colours' hues, in degrees.
+///
+/// Hue is a circle, so a naive subtraction makes 355° and 0° look 355° apart when they are 5°
+/// apart — which matters here because the pack's red sits just below 360°.
+double _hueDelta(Color a, Color b) {
+  final raw = (HSLColor.fromColor(a).hue - HSLColor.fromColor(b).hue).abs() % 360;
+  return raw > 180 ? 360 - raw : raw;
 }

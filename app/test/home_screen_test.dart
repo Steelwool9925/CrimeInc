@@ -207,6 +207,35 @@ void main() {
   });
 
   group('HomeScreen — navigation', () {
+    testWidgets('every live tile sorts above the "Coming soon" ones', (tester) async {
+      // Order is load-bearing on a tall viewport, where only the first row or two is above the
+      // fold. Market used to sit *below* the dead Crew tile, so a player had to scroll past a
+      // feature that does not exist to reach one that does — and a first session now earns enough
+      // to make the Market worth reaching. Pin the rule, not just today's arrangement: no
+      // placeholder may precede a live destination.
+      final state = AppState(
+          apiClient: FakeApiClient(), tokenStore: InMemoryTokenStore());
+      await state.bootstrap();
+
+      await tester.pumpWidget(_wrap(state));
+      await tester.pumpAndSettle();
+
+      const live = [
+        Key('go-to-jobs'),
+        Key('go-to-properties'),
+        Key('go-to-store'),
+        Key('go-to-profile'),
+      ];
+      const placeholders = [Key('go-to-crew'), Key('go-to-territory')];
+
+      double top(Key k) => tester.getTopLeft(find.byKey(k)).dy;
+      final lastLive = live.map(top).reduce((a, b) => a > b ? a : b);
+      final firstPlaceholder = placeholders.map(top).reduce((a, b) => a < b ? a : b);
+
+      expect(firstPlaceholder, greaterThan(lastLive),
+          reason: 'a "Coming soon" tile must never be reachable before a working one');
+    });
+
     testWidgets('offers a way into the Store', (tester) async {
       final state = AppState(
           apiClient: FakeApiClient(), tokenStore: InMemoryTokenStore());

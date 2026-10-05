@@ -53,13 +53,15 @@ public class PropertyCatalogLoaderTests : IDisposable
         int levelRequirement = 1,
         long price = 250,
         long perHour = 120,
-        int capMinutes = 30) => new
+        int capMinutes = 30,
+        int? maxUnits = null) => new
         {
             id,
             name,
             description = "d",
             levelRequirement,
             price,
+            maxUnits,
             income = new { perHour, capMinutes }
         };
 
@@ -353,7 +355,7 @@ public class PropertyCatalogLoaderTests : IDisposable
     [Fact]
     public void The_crime_pack_loads()
     {
-        Assert.NotEmpty(new ContentPackLoader(FindRepoContentRoot()).LoadProperties("crime").Properties);
+        Assert.NotEmpty(new ContentPackLoader(RepoContent.FindRoot()).LoadProperties("crime").Properties);
     }
 
     [Fact]
@@ -362,31 +364,155 @@ public class PropertyCatalogLoaderTests : IDisposable
         // CP3 asks a tester to buy a property and watch it earn. If the cheapest one needed a long grind
         // first, the checkpoint would not be reachable in one sitting. 1000 cash is roughly two full
         // energy bars of the starting job; anything at or under that is a short grind, not a project.
-        var catalog = new ContentPackLoader(FindRepoContentRoot()).LoadProperties("crime");
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadProperties("crime");
 
         Assert.Contains(catalog.Properties, p => p.LevelRequirement == 1 && p.Price <= 1000);
     }
 
     [Fact]
-    public void The_cheapest_level_one_property_fills_up_fast_enough_to_watch()
+    public void A_declared_unit_ceiling_is_carried_onto_the_property()
     {
-        // "Watch income accrue to cap" has to be observable inside a test session, not overnight.
-        var catalog = new ContentPackLoader(FindRepoContentRoot()).LoadProperties("crime");
+        WriteProperties("crime", ValidCatalog(ValidProperty(maxUnits: 3)));
 
-        var starter = catalog.Properties
-            .Where(p => p.LevelRequirement == 1)
+        Assert.Equal(3, Loader().LoadProperties("crime").Properties.Single().MaxUnits);
+    }
+
+    [Fact]
+    public void A_property_that_declares_no_ceiling_has_none()
+    {
+        WriteProperties("crime", ValidCatalog(ValidProperty()));
+
+        Assert.Equal(int.MaxValue, Loader().LoadProperties("crime").Properties.Single().MaxUnits);
+    }
+
+    [Fact]
+    public void A_unit_ceiling_below_one_is_a_named_load_error()
+    {
+        WriteProperties("crime", ValidCatalog(ValidProperty(maxUnits: 0)));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadProperties("crime"));
+
+        Assert.Contains("'maxUnits' must be >= 1 when present, found 0", ex.Message);
+    }
+
+    [Fact]
+    public void Every_property_in_the_pack_declares_a_unit_ceiling()
+    {
+        // The schema lets a property omit it (hand-built definitions and older packs have none), so
+        // nothing but this test stops a new property shipping with unlimited units. Unlimited units
+        // are what let reinvested income compound without bound.
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadProperties("crime");
+
+        foreach (var property in catalog.Properties)
+        {
+            Assert.True(property.MaxUnits != int.MaxValue,
+                $"'{property.Id}' declares no 'maxUnits'. Without one a player can stack it forever, and " +
+                $"every property pays for itself in under two nights, so the stack compounds.");
+        }
+    }
+
+    [Fact]
+    public void A_player_who_reinvests_everything_stops_growing()
+    {
+        // The measured defect: a daily player who put every coin back grew about 4.8x a night, to 4.36
+        // million a night by the fifth. This replays that player against the real pack, ignoring level
+        // gates (the worst case for compounding), and asserts income reaches a ceiling and stays there.
+        // It deliberately does not pin the plateau's value: balance may move it, and only a pack that
+        // lets income run away should fail.
+        var properties = new ContentPackLoader(RepoContent.FindRoot()).LoadProperties("crime").Properties;
+        var owned = properties.ToDictionary(p => p.Id, _ => 0L);
+        double cash = 600;
+
+        // Doubles and a per-night purchase cap, so a pack with no ceilings fails the assertion below
+        // instead of wrapping a long or buying units until the test run is killed.
+        double NightlyIncome() => properties.Sum(p => owned[p.Id] * (double)p.CapPerUnit);
+
+        var incomeByNight = new List<double>();
+        for (int night = 1; night <= 60; night++)
+        {
+            incomeByNight.Add(NightlyIncome());
+            cash += incomeByNight[^1];
+
+            for (int purchases = 0; purchases < 1_000; purchases++)
+            {
+                var best = properties
+                    .Where(p => owned[p.Id] < p.MaxUnits && cash >= p.Price)
+                    .OrderBy(p => (double)p.Price / p.CapPerUnit)
+                    .FirstOrDefault();
+                if (best is null) break;
+                cash -= best.Price;
+                owned[best.Id]++;
+            }
+        }
+
+        Assert.True(incomeByNight[39] == incomeByNight[^1],
+            $"Income was still growing between night 40 ({incomeByNight[39]:N0}) and night 60 " +
+            $"({incomeByNight[^1]:N0}): a player who reinvests everything compounds without bound. " +
+            $"Give every property a 'maxUnits'.");
+        Assert.True(incomeByNight[^1] <= properties.Sum(p => (double)p.MaxUnits * p.CapPerUnit));
+    }
+
+    [Fact]
+    public void Every_property_banks_at_least_a_night_away()
+    {
+        // This assertion used to say the opposite — that the starter property must fill within
+        // half an hour, so a tester could "watch income accrue to cap" inside one session. That
+        // optimised the mechanic for being demonstrated rather than for being played: a daily
+        // player collected the same 60 cash from a street corner whether they had been gone an
+        // hour or a week, forfeiting 99.65% of what it generated over three days. Property
+        // accrual is the only thing in this game shaped like a daily habit, and a cap shorter
+        // than a night is a cap that punishes the habit.
+        //
+        // The watchability concern it was protecting is real and is still covered — by
+        // The_starter_property_earns_a_visible_coin_within_a_minute, which pins the *rate*. Rate
+        // is where that belongs: a casino should out-earn a street corner because it earns
+        // faster, not because the street corner forgets sooner.
+        const int oneNight = 8 * 60;
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadProperties("crime");
+
+        foreach (var property in catalog.Properties)
+        {
+            Assert.True(property.AccrualCapMinutes >= oneNight,
+                $"'{property.Id}' stops earning after {property.AccrualCapMinutes} minutes, so a " +
+                $"player who sleeps loses everything it would have made past that point. A " +
+                $"property's cap is a return cadence, not a difficulty tier.");
+        }
+    }
+
+    [Fact]
+    public void A_dearer_property_never_banks_less_than_a_cheaper_one()
+    {
+        // Caps may still widen with price — they do, 8h at the entry up to 24h at the casino, and
+        // that spread is deliberate. What must never happen again is the ordering running
+        // *backwards*, which is the shape the old tuning had: the 500-cash street corner banked 15
+        // minutes while the 140,000-cash casino banked a full day, so the longer you could afford
+        // to be patient, the less patience the game asked of you.
+        //
+        // Stated as monotonicity rather than as six expected numbers, so a future balance pass is
+        // free to retune the windows and only fails if it re-inverts them.
+        var ordered = new ContentPackLoader(RepoContent.FindRoot())
+            .LoadProperties("crime")
+            .Properties
             .OrderBy(p => p.Price)
-            .First();
+            .ToList();
 
-        Assert.True(starter.AccrualCapMinutes <= 30,
-            $"Starter property '{starter.Id}' takes {starter.AccrualCapMinutes} minutes to fill.");
+        for (int i = 1; i < ordered.Count; i++)
+        {
+            var cheaper = ordered[i - 1];
+            var dearer = ordered[i];
+
+            Assert.True(dearer.AccrualCapMinutes >= cheaper.AccrualCapMinutes,
+                $"'{dearer.Id}' costs {dearer.Price} and banks {dearer.AccrualCapMinutes} minutes, " +
+                $"but the cheaper '{cheaper.Id}' ({cheaper.Price}) banks " +
+                $"{cheaper.AccrualCapMinutes}. Caps must not run backwards against affordability.");
+        }
     }
 
     [Fact]
     public void The_starter_property_earns_a_visible_coin_within_a_minute()
     {
         // A rate below one coin a minute makes the CP3 screen look frozen for the first few minutes.
-        var catalog = new ContentPackLoader(FindRepoContentRoot()).LoadProperties("crime");
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadProperties("crime");
 
         var starter = catalog.Properties
             .Where(p => p.LevelRequirement == 1)
@@ -400,7 +526,7 @@ public class PropertyCatalogLoaderTests : IDisposable
     [Fact]
     public void No_property_is_free()
     {
-        var catalog = new ContentPackLoader(FindRepoContentRoot()).LoadProperties("crime");
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadProperties("crime");
 
         Assert.All(catalog.Properties, p => Assert.True(p.Price > 0, $"Property '{p.Id}' is free."));
     }
@@ -410,31 +536,10 @@ public class PropertyCatalogLoaderTests : IDisposable
     {
         // A property whose lifetime income never repays the purchase is a trap rather than a choice.
         // Full collections needed to break even is the honest measure, since income stops at the cap.
-        var catalog = new ContentPackLoader(FindRepoContentRoot()).LoadProperties("crime");
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadProperties("crime");
 
         Assert.All(catalog.Properties, p =>
             Assert.True(p.CapPerUnit > 0 && p.Price / p.CapPerUnit <= 200,
                 $"Property '{p.Id}' needs {p.Price / Math.Max(p.CapPerUnit, 1)} full collections to break even."));
-    }
-
-    /// <summary>
-    /// Walks up from the test assembly to the repo root's <c>content</c> folder, the same approach
-    /// <see cref="ItemCatalogLoaderTests"/> uses — the test project does not copy content to output.
-    /// </summary>
-    private static string FindRepoContentRoot()
-    {
-        var dir = AppContext.BaseDirectory;
-        for (int i = 0; i < 10; i++)
-        {
-            var candidate = Path.Combine(dir, "content");
-            if (Directory.Exists(candidate))
-                return candidate;
-
-            var parent = Path.GetDirectoryName(dir);
-            if (parent is null) break;
-            dir = parent;
-        }
-
-        throw new DirectoryNotFoundException("Could not locate the repo 'content' folder from the test assembly.");
     }
 }

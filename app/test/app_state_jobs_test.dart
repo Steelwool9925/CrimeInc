@@ -270,6 +270,103 @@ void main() {
     });
   });
 
+  group('AppState.doJob() — gating is left to the next re-read', () {
+    test("does not touch another job's gating locally", () async {
+      final state = await bootstrapped(FakeApiClient(
+        jobsResult: const JobList(
+          jobs: [kCheapJob, kStatLockedJob],
+          currentEnergy: 7,
+          level: 1,
+        ),
+      ));
+      await state.loadJobs();
+
+      await state.doJob('shake-down-corner-store');
+
+      // A level-up alone must never light this job up locally: the server never checked its stats
+      // requirement while level was still the blocker (gate precedence is level -> stats -> items
+      // -> energy), so the client has no way to know whether it would actually pass. It stays
+      // exactly as last reported until the next re-read — this is the fixed version of the bug
+      // where a job blocked by level *and* stats got wrongly marked attemptable the moment level
+      // cleared.
+      final stillLocked =
+          state.jobs.firstWhere((j) => j.id == 'run-numbers-for-the-bookie');
+      expect(stillLocked.canAttempt, isFalse);
+      expect(stillLocked.unavailableReason, 'stats');
+    });
+
+    test('a later loadJobs() call is what actually resolves a job that just cleared', () async {
+      final api = FakeApiClient(
+        jobsResult: const JobList(
+          jobs: [kCheapJob, kStatLockedJob],
+          currentEnergy: 7,
+          level: 1,
+        ),
+      );
+      final state = await bootstrapped(api);
+      await state.loadJobs();
+      await state.doJob('shake-down-corner-store');
+      expect(
+        state.jobs.firstWhere((j) => j.id == 'run-numbers-for-the-bookie').canAttempt,
+        isFalse,
+      );
+
+      // The server now reports the job as genuinely attemptable (level and stats both cleared by
+      // the time of this read) — simulating what the screen's periodic re-read would observe.
+      // Same fields as kStatLockedJob, just now cleared — Job has no copyWith, so this is the
+      // fixture written out with the two changed fields.
+      api.jobsOverride = const JobList(
+        jobs: [
+          kCheapJob,
+          Job(
+            id: 'run-numbers-for-the-bookie',
+            name: 'Run Numbers for the Bookie',
+            description: "Collect the day's slips and skim a little off the top.",
+            area: 'docks',
+            energyCost: 2,
+            levelRequirement: 2,
+            cashMin: 60,
+            cashMax: 110,
+            xp: 26,
+            attackRequirement: 6,
+            defenseRequirement: 5,
+            successChance: 0.72,
+            mastery: kFakeMastery,
+            canAttempt: true,
+          ),
+        ],
+        currentEnergy: 7,
+        level: 2,
+      );
+      await state.loadJobs();
+
+      expect(
+        state.jobs.firstWhere((j) => j.id == 'run-numbers-for-the-bookie').canAttempt,
+        isTrue,
+      );
+    });
+
+    test('passive energy regen is also left to the next re-read, not guessed locally', () async {
+      final state = await bootstrapped(FakeApiClient(
+        jobsResult: const JobList(
+          jobs: [kCheapJob, kUnaffordableJob],
+          currentEnergy: 0,
+          level: 1,
+        ),
+      ));
+      await state.loadJobs();
+
+      await state.doJob('shake-down-corner-store');
+
+      // No re-derivation for energy either, on purpose: the periodic re-read is the single source
+      // of truth for every gating dimension now, not just stats.
+      final stillLocked =
+          state.jobs.firstWhere((j) => j.id == 'hijack-a-delivery-truck');
+      expect(stillLocked.canAttempt, isFalse);
+      expect(stillLocked.unavailableReason, 'energy');
+    });
+  });
+
   group('AppState.allocateSkill()', () {
     test('updates the player from the server response', () async {
       final api = FakeApiClient(

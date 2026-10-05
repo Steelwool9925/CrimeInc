@@ -283,14 +283,26 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task Running_out_of_energy_is_refused_with_reason_energy()
     {
-        // Ten 1-energy runs empty a full starting bar — but they also award exactly 100 XP, which
-        // levels the player to 2 and refills the meters. So the bar has to be drained twice before
-        // energy actually runs out. That interaction is the tuning that makes CP2 work, and this test
-        // documents it.
+        // Draining the bar does not refuse on the first empty: a 1-energy job awards 10 XP, and
+        // crossing a level threshold refills every meter. So the bar refills underneath the drain
+        // several times before energy genuinely runs out. At a 20-energy bar the refills land on
+        // attempts 10 (level 2, 100 XP) and 30 (level 3, 300 XP), which pushes the first real
+        // refusal out to attempt 51.
+        //
+        // The bound scales with EnergyMax rather than being a bare literal. It was previously 40,
+        // sufficient only while the bar was 10, and it silently became too small when the bar moved
+        // to 20 — failing with an unhelpful "value is null" instead of naming the problem.
+        //
+        // Honest caveat: x10 is a safety factor, not a real derivation. The true bound depends on
+        // the level-threshold cascade (how far apart consecutive level-ups get before a gap exceeds
+        // one bar), which is a property of LevelCurve and the job's XP, not of EnergyMax alone. A
+        // future curve change could in principle outgrow it — so the assertion below says so
+        // explicitly rather than leaving the next reader to rediscover it.
         var token = await NewGuestTokenAsync();
 
+        int maxAttempts = PlayerDefaults.EnergyMax * 10;
         HttpResponseMessage? refusal = null;
-        for (int i = 0; i < 40; i++)
+        for (int i = 0; i < maxAttempts; i++)
         {
             var response = await DoJobAsync(token, CheapJob);
             if (response.StatusCode == HttpStatusCode.Conflict)
@@ -300,7 +312,12 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
             }
         }
 
-        Assert.NotNull(refusal);
+        Assert.True(refusal is not null,
+            $"No energy refusal arrived within {maxAttempts} attempts at a " +
+            $"{PlayerDefaults.EnergyMax}-energy bar. Either the drain is being outrun by level-up " +
+            $"meter refills further than the x10 safety factor allows (see the note above), or " +
+            $"running out of energy has stopped producing a 409.");
+
         using var doc = await BodyAsync(refusal!);
         Assert.Equal("energy", doc.RootElement.GetProperty("reason").GetString());
     }
@@ -312,13 +329,21 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task Ten_runs_of_the_cheap_job_level_the_player_and_refill_meters()
     {
-        // The load-bearing CP2 tuning: one full starting energy bar of the cheapest job is exactly
-        // the level-2 threshold, and crosses a mastery rank along the way.
+        // Ten successful runs of the cheapest job are exactly the level-2 threshold (10 XP each),
+        // and cross a mastery rank along the way. Both instants are checked: the sixth run for the
+        // rank, the tenth for the level.
         //
-        // The rank has moved twice. M3R dropped `completionsPerRank` 10 -> 8 so the first rank
-        // stayed reachable once attempts could fail; lowering the first job base chance to 0.65
-        // dropped it again, 8 -> 6. So the rank-up lands on the sixth run. Both instants are
-        // checked: the sixth for the rank, the tenth for the level.
+        // Outcomes are forced, not rolled — CustomWebApplicationFactory swaps IRandomSource for a
+        // deterministic SwitchableRandomSource so "ten jobs" really means "ten completions". The
+        // starter job's base success chance is therefore irrelevant to this test, which is why
+        // raising it 0.65 -> 0.80 did not move these numbers.
+        //
+        // `completionsPerRank` has moved twice (10 -> 8 -> 6) to keep the first rank reachable on
+        // one bar as the odds changed; at 6 the rank-up lands on the sixth run.
+        //
+        // Note ten runs is no longer a *full* bar: PlayerDefaults.EnergyMax is 20, so this test
+        // spends half of one. The level-2 reachability property that depends on the whole bar is
+        // pinned separately by FirstSessionTests.
         var token = await NewGuestTokenAsync();
 
         JsonDocument? sixth = null;
@@ -631,7 +656,7 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task Attempting_the_item_gated_job_below_the_minimum_is_refused()
     {
-        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 1);
+        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 0);
 
         var response = await DoJobAsync(token, ItemGatedJob);
 
@@ -641,7 +666,7 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task The_item_gate_refusal_spends_nothing_and_consumes_no_stock()
     {
-        var (token, playerId) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 1);
+        var (token, playerId) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 0);
 
         using var before = await GetMeAsync(token);
         long cashBefore = before.RootElement.GetProperty("cash").GetInt64();
@@ -652,13 +677,13 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
         using var after = await GetMeAsync(token);
         Assert.Equal(cashBefore, after.RootElement.GetProperty("cash").GetInt64());
         Assert.Equal(energyBefore, after.RootElement.GetProperty("energy").GetProperty("current").GetInt32());
-        Assert.Equal(1, await HeldQuantityAsync(playerId, GateItemId));
+        Assert.Equal(0, await HeldQuantityAsync(playerId, GateItemId));
     }
 
     [Fact]
     public async Task Holding_exactly_the_minimum_is_admitted_and_attempting_it_succeeds()
     {
-        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 2);
+        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 1);
 
         var response = await DoJobAsync(token, ItemGatedJob);
 
@@ -668,7 +693,7 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task A_successful_attempt_consumes_exactly_one_unit_from_stock()
     {
-        // Holding 5, well above the minimum of 2 — proves the spend is the fixed rate, not
+        // Holding 5, well above the minimum of 1 — proves the spend is the fixed rate, not
         // proportional to the surplus that improved the odds.
         var (token, playerId) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 5);
 
@@ -696,16 +721,16 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task Stock_dropping_below_the_minimum_relocks_the_job()
     {
-        var (token, playerId) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 2);
+        var (token, playerId) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 1);
 
         var first = await DoJobAsync(token, ItemGatedJob);
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
-        Assert.Equal(1, await HeldQuantityAsync(playerId, GateItemId));
+        Assert.Equal(0, await HeldQuantityAsync(playerId, GateItemId));
 
-        // Refused: energy for a second attempt is plentiful, but stock is now below the minimum.
+        // Refused: energy for a second attempt is plentiful, but the last blade is spent.
         var second = await DoJobAsync(token, ItemGatedJob);
         Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
-        Assert.Equal(1, await HeldQuantityAsync(playerId, GateItemId));
+        Assert.Equal(0, await HeldQuantityAsync(playerId, GateItemId));
     }
 
     [Fact]
@@ -718,5 +743,293 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
         var response = await DoJobAsync(token, ItemGatedJob);
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    // -------------------------------------------------------------------------
+    // Spending a worn item (the item must not outlive its last copy)
+    // -------------------------------------------------------------------------
+
+    private const string JacketId = "leather-jacket";
+
+    private async Task WearAsync(Guid playerId, string itemId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<GameDbContext>();
+        var holding = await db.PlayerItems.FindAsync(playerId, itemId);
+        holding!.Equip();
+        await db.SaveChangesAsync();
+    }
+
+    private async Task<bool> IsWornAsync(Guid playerId, string itemId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<GameDbContext>();
+        var holding = await db.PlayerItems.AsNoTracking()
+            .FirstOrDefaultAsync(h => h.PlayerId == playerId && h.ItemId == itemId);
+        return holding?.Equipped ?? false;
+    }
+
+    private async Task<JsonElement> GetLoadoutAsync(string token)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/inventory");
+        request.Headers.Add("Authorization", $"Bearer {token}");
+        var response = await _client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await BodyAsync(response)).RootElement.GetProperty("loadout").Clone();
+    }
+
+    private async Task<JsonElement> GetJobAsync(string token, string jobId)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/jobs");
+        request.Headers.Add("Authorization", $"Bearer {token}");
+        var response = await _client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var doc = await BodyAsync(response);
+        return doc.RootElement.GetProperty("jobs").EnumerateArray()
+            .First(j => j.GetProperty("id").GetString() == jobId).Clone();
+    }
+
+    /// <summary>
+    /// The path a real player takes to meet the item-gated job's stat gate: wear the switchblade
+    /// (+7 attack, +1 defense) and the leather jacket (+5 defense) on top of base 2 / 1, which is
+    /// exactly 9 / 7, and hold <paramref name="spareBlades"/> more switchblades beyond the worn one.
+    /// Earlier tests in this file seeded <i>base</i> 9 / 7 with the blade unworn, which is why they
+    /// could not see how a worn blade and a spent blade interact.
+    /// </summary>
+    private async Task<(string Token, Guid PlayerId)> WearingTheGearForTheItemGatedJobAsync(int spareBlades)
+    {
+        var token = await NewGuestTokenAsync();
+        var playerId = await PlayerIdForAsync(token);
+        await SetLevelAndStatsAsync(playerId, level: 3, attack: 2, defense: 1);
+        await GiveItemAsync(playerId, GateItemId, 1 + spareBlades);
+        await GiveItemAsync(playerId, JacketId, 1);
+        await WearAsync(playerId, GateItemId);
+        await WearAsync(playerId, JacketId);
+        return (token, playerId);
+    }
+
+    [Fact]
+    public async Task The_worn_copy_alone_meets_the_stat_gate_but_is_not_spendable()
+    {
+        // Gear alone clears the stats (9 / 7), yet the job is refused for items: the one switchblade the
+        // player holds is the one they are wearing, and a job never spends the worn copy.
+        var (token, _) = await WearingTheGearForTheItemGatedJobAsync(spareBlades: 0);
+
+        var loadout = await GetLoadoutAsync(token);
+        var job = await GetJobAsync(token, ItemGatedJob);
+
+        Assert.Equal(9, loadout.GetProperty("totalAttack").GetInt32());
+        Assert.Equal(7, loadout.GetProperty("totalDefense").GetInt32());
+        Assert.False(job.GetProperty("canAttempt").GetBoolean());
+        Assert.Equal("items", job.GetProperty("unavailableReason").GetString());
+        Assert.Equal(0, job.GetProperty("itemRequirements")[0].GetProperty("held").GetInt32());
+    }
+
+    [Fact]
+    public async Task Attempting_with_only_the_worn_copy_is_refused_and_spends_nothing()
+    {
+        var (token, playerId) = await WearingTheGearForTheItemGatedJobAsync(spareBlades: 0);
+
+        var response = await DoJobAsync(token, ItemGatedJob);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(1, await HeldQuantityAsync(playerId, GateItemId));
+        Assert.True(await IsWornAsync(playerId, GateItemId));
+    }
+
+    [Fact]
+    public async Task A_spare_copy_opens_the_job_and_is_reported_as_the_amount_held()
+    {
+        var (token, _) = await WearingTheGearForTheItemGatedJobAsync(spareBlades: 1);
+
+        var job = await GetJobAsync(token, ItemGatedJob);
+        var requirement = job.GetProperty("itemRequirements")[0];
+
+        Assert.True(job.GetProperty("canAttempt").GetBoolean());
+        Assert.Equal(1, requirement.GetProperty("held").GetInt32());
+        Assert.Equal(3, requirement.GetProperty("maxExtras").GetInt32());
+        Assert.True(requirement.GetProperty("met").GetBoolean());
+    }
+
+    [Fact]
+    public async Task An_attempt_spends_the_spare_and_leaves_the_worn_copy_and_its_stats()
+    {
+        var (token, playerId) = await WearingTheGearForTheItemGatedJobAsync(spareBlades: 1);
+
+        var response = await DoJobAsync(token, ItemGatedJob);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        // Two held, one spent: the worn one remains, still worn, still scoring.
+        Assert.Equal(1, await HeldQuantityAsync(playerId, GateItemId));
+        Assert.True(await IsWornAsync(playerId, GateItemId));
+        var loadout = await GetLoadoutAsync(token);
+        Assert.Equal(9, loadout.GetProperty("totalAttack").GetInt32());
+        Assert.Equal(7, loadout.GetProperty("totalDefense").GetInt32());
+
+        // And with no spare left, the job closes on items rather than on stats.
+        var job = await GetJobAsync(token, ItemGatedJob);
+        Assert.False(job.GetProperty("canAttempt").GetBoolean());
+        Assert.Equal("items", job.GetProperty("unavailableReason").GetString());
+    }
+
+    [Fact]
+    public async Task The_reported_odds_do_not_count_the_stack_the_player_holds()
+    {
+        // Three held, one worn: two spare. Odds follow what the player chooses to spend, so with nothing
+        // committed they are the base 0.65 however much sits in the inventory.
+        var (token, _) = await WearingTheGearForTheItemGatedJobAsync(spareBlades: 2);
+
+        var job = await GetJobAsync(token, ItemGatedJob);
+
+        Assert.Equal(0.65, job.GetProperty("successChance").GetDouble(), precision: 10);
+    }
+
+    // -------------------------------------------------------------------------
+    // Extra items the player chooses to spend for better odds
+    // -------------------------------------------------------------------------
+
+    private async Task<HttpResponseMessage> DoJobWithExtrasAsync(
+        string token, string jobId, Dictionary<string, int> extras)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/jobs/{jobId}/do")
+        {
+            Content = JsonContent.Create(new { extras })
+        };
+        request.Headers.Add("Authorization", $"Bearer {token}");
+        return await _client.SendAsync(request);
+    }
+
+    private static string? ReasonOf(JsonDocument problem) =>
+        problem.RootElement.TryGetProperty("reason", out var reason) ? reason.GetString() : null;
+
+    [Fact]
+    public async Task Committed_extras_are_spent_on_top_of_the_requirement_and_reported()
+    {
+        var (token, playerId) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 5);
+
+        var response = await DoJobWithExtrasAsync(token, ItemGatedJob, new() { [GateItemId] = 2 });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = await BodyAsync(response);
+        var consumed = body.RootElement.GetProperty("result").GetProperty("itemsConsumed")[0];
+        Assert.Equal(3, consumed.GetProperty("quantityConsumed").GetInt32());
+        Assert.Equal(2, consumed.GetProperty("quantityRemaining").GetInt32());
+        Assert.Equal(2, await HeldQuantityAsync(playerId, GateItemId));
+    }
+
+    [Fact]
+    public async Task Extras_change_the_outcome_of_the_same_roll()
+    {
+        // 0.65 base, so a roll of 9000 (90%) misses. Three extras at 10% make it 0.95 and the very same
+        // roll hits. The only thing that differs between the two attempts is the extras.
+        var (withExtras, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 5);
+        var (without, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 5);
+
+        using (_factory.Random.Scripted(9_000, 500))
+        {
+            using var hit = await BodyAsync(
+                await DoJobWithExtrasAsync(withExtras, ItemGatedJob, new() { [GateItemId] = 3 }));
+            Assert.True(hit.RootElement.GetProperty("result").GetProperty("succeeded").GetBoolean());
+        }
+
+        using (_factory.Random.Scripted(9_000, 500, 3))
+        {
+            using var miss = await BodyAsync(await DoJobAsync(without, ItemGatedJob));
+            Assert.False(miss.RootElement.GetProperty("result").GetProperty("succeeded").GetBoolean());
+        }
+    }
+
+    [Fact]
+    public async Task Extras_are_spent_when_the_attempt_fails_too()
+    {
+        var (token, playerId) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 5);
+
+        using (_factory.Random.Scripted(10_000, 500, 3))
+        {
+            using var body = await BodyAsync(
+                await DoJobWithExtrasAsync(token, ItemGatedJob, new() { [GateItemId] = 2 }));
+            Assert.False(body.RootElement.GetProperty("result").GetProperty("succeeded").GetBoolean());
+        }
+
+        Assert.Equal(2, await HeldQuantityAsync(playerId, GateItemId));
+    }
+
+    [Theory]
+    [InlineData("switchblade", 4)]      // above the three the content allows
+    [InlineData("switchblade", -1)]     // negative
+    [InlineData("brass-knuckles", 1)]   // an item the job does not use
+    public async Task Extras_the_job_does_not_accept_are_a_bad_request_and_spend_nothing(string itemId, int count)
+    {
+        var (token, playerId) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 10);
+
+        var response = await DoJobWithExtrasAsync(token, ItemGatedJob, new() { [itemId] = count });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var problem = await BodyAsync(response);
+        Assert.Equal("extras", ReasonOf(problem));
+        Assert.Equal(10, await HeldQuantityAsync(playerId, GateItemId));
+    }
+
+    [Fact]
+    public async Task Extras_the_player_cannot_cover_are_a_conflict_on_items_and_spend_nothing()
+    {
+        // Two held: enough for the requirement alone, not for the requirement plus two extras.
+        var (token, playerId) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 2);
+
+        var response = await DoJobWithExtrasAsync(token, ItemGatedJob, new() { [GateItemId] = 2 });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        using var problem = await BodyAsync(response);
+        Assert.Equal("items", ReasonOf(problem));
+        Assert.Equal(2, await HeldQuantityAsync(playerId, GateItemId));
+    }
+
+    [Fact]
+    public async Task An_explicit_empty_extras_object_is_the_same_as_no_body()
+    {
+        var (token, playerId) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 3);
+
+        var response = await DoJobWithExtrasAsync(token, ItemGatedJob, new());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(2, await HeldQuantityAsync(playerId, GateItemId));
+    }
+
+    [Fact]
+    public async Task Extras_never_spend_the_worn_copy()
+    {
+        // Wearing one of three: two spare, enough for the requirement plus one extra but not two. The
+        // worn copy is not on offer however many extras are asked for.
+        var (token, playerId) = await WearingTheGearForTheItemGatedJobAsync(spareBlades: 2);
+
+        var tooMany = await DoJobWithExtrasAsync(token, ItemGatedJob, new() { [GateItemId] = 2 });
+        Assert.Equal(HttpStatusCode.Conflict, tooMany.StatusCode);
+
+        var fits = await DoJobWithExtrasAsync(token, ItemGatedJob, new() { [GateItemId] = 1 });
+        Assert.Equal(HttpStatusCode.OK, fits.StatusCode);
+        Assert.Equal(1, await HeldQuantityAsync(playerId, GateItemId));
+        Assert.True(await IsWornAsync(playerId, GateItemId));
+    }
+
+    [Fact]
+    public async Task A_worn_row_left_at_zero_copies_by_the_old_behaviour_scores_nothing()
+    {
+        // Players who attempted the job before the fix hold a row at zero copies still flagged as
+        // worn. Written by SQL because the setters are private: this is the state in their database.
+        var (token, playerId) = await WearingTheGearForTheItemGatedJobAsync(spareBlades: 0);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<GameDbContext>();
+            await db.Database.ExecuteSqlRawAsync(
+                "UPDATE \"PlayerItems\" SET \"Quantity\" = 0, \"Equipped\" = TRUE " +
+                "WHERE \"PlayerId\" = {0} AND \"ItemId\" = {1}", playerId, GateItemId);
+        }
+
+        var loadout = await GetLoadoutAsync(token);
+        var job = await GetJobAsync(token, ItemGatedJob);
+
+        Assert.Equal(2, loadout.GetProperty("totalAttack").GetInt32());
+        Assert.Equal(6, loadout.GetProperty("totalDefense").GetInt32());
+        Assert.False(job.GetProperty("canAttempt").GetBoolean());
     }
 }

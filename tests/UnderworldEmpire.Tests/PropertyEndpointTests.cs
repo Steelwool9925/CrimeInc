@@ -33,7 +33,12 @@ public class PropertyEndpointTests : IClassFixture<CustomWebApplicationFactory>
     private const int StarterPerMinute = 4;
 
     /// <summary>What one unit of <see cref="Starter"/> holds when full, from content.</summary>
-    private const int StarterCapPerUnit = 60;
+    /// <remarks>
+    /// <c>perHour 240 × capMinutes 480 ÷ 60 = 1,920</c>. It was 60 while the street corner capped
+    /// at fifteen minutes; the caps were inverted so the entry property banks a night rather than
+    /// a coffee break, which is what makes it a reason to come back tomorrow.
+    /// </remarks>
+    private const int StarterCapPerUnit = 1_920;
 
     public PropertyEndpointTests(CustomWebApplicationFactory factory)
     {
@@ -196,7 +201,10 @@ public class PropertyEndpointTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Equal(1, corner.GetProperty("levelRequirement").GetInt32());
         Assert.Equal(500, corner.GetProperty("price").GetInt64());
         Assert.Equal(240, corner.GetProperty("incomePerHour").GetInt64());
-        Assert.Equal(15, corner.GetProperty("accrualCapMinutes").GetInt32());
+        // 480, not 15: the entry property is the one a returning player comes back to, so it
+        // banks a night rather than a quarter of an hour. PropertyCatalogLoaderTests pins the
+        // rule; this pins that the projection actually reports it.
+        Assert.Equal(480, corner.GetProperty("accrualCapMinutes").GetInt32());
     }
 
     [Fact]
@@ -535,5 +543,77 @@ public class PropertyEndpointTests : IClassFixture<CustomWebApplicationFactory>
         var response = await CollectAsync(token, "no-such-property");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    // -------------------------------------------------------------------------
+    // The unit ceiling
+    // -------------------------------------------------------------------------
+
+    /// <summary>The street corner's ceiling in the shipped pack. Read from content by the tests below.</summary>
+    private const int StarterCeiling = 3;
+
+    private async Task<string> HoldingTheStarterCeilingAsync()
+    {
+        var token = await NewGuestTokenAsync();
+        await SetCashAsync(token, 10_000);
+        for (int i = 0; i < StarterCeiling; i++)
+            Assert.Equal(HttpStatusCode.OK, (await PostAsync(token, $"/properties/{Starter}/buy")).StatusCode);
+        return token;
+    }
+
+    [Fact]
+    public async Task Buying_past_the_ceiling_is_refused_with_reason_limit_and_costs_nothing()
+    {
+        var token = await HoldingTheStarterCeilingAsync();
+        long cashBefore;
+        using (var before = await BodyAsync(await GetPropertiesAsync(token)))
+            cashBefore = before.RootElement.GetProperty("cash").GetInt64();
+
+        var response = await PostAsync(token, $"/properties/{Starter}/buy");
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        using var problem = await BodyAsync(response);
+        Assert.Equal("limit", ReasonOf(problem));
+
+        using var after = await BodyAsync(await GetPropertiesAsync(token));
+        Assert.Equal(cashBefore, after.RootElement.GetProperty("cash").GetInt64());
+        Assert.Equal(StarterCeiling, PropertyNamed(after.RootElement, Starter).GetProperty("quantity").GetInt32());
+    }
+
+    [Fact]
+    public async Task The_listing_reports_the_ceiling_and_stops_offering_the_buy_at_it()
+    {
+        var token = await HoldingTheStarterCeilingAsync();
+
+        using var doc = await BodyAsync(await GetPropertiesAsync(token));
+        var starter = PropertyNamed(doc.RootElement, Starter);
+
+        Assert.Equal(StarterCeiling, starter.GetProperty("maxUnits").GetInt32());
+        Assert.False(starter.GetProperty("canBuy").GetBoolean());
+        Assert.Equal("limit", starter.GetProperty("buyUnavailableReason").GetString());
+    }
+
+    [Fact]
+    public async Task One_unit_short_of_the_ceiling_is_still_offered()
+    {
+        var token = await NewGuestTokenAsync();
+        await SetCashAsync(token, 10_000);
+        for (int i = 0; i < StarterCeiling - 1; i++)
+            await PostAsync(token, $"/properties/{Starter}/buy");
+
+        using var doc = await BodyAsync(await GetPropertiesAsync(token));
+
+        Assert.True(PropertyNamed(doc.RootElement, Starter).GetProperty("canBuy").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Every_property_in_the_listing_reports_a_ceiling()
+    {
+        var token = await NewGuestTokenAsync();
+
+        using var doc = await BodyAsync(await GetPropertiesAsync(token));
+
+        foreach (var property in doc.RootElement.GetProperty("properties").EnumerateArray())
+            Assert.Equal(JsonValueKind.Number, property.GetProperty("maxUnits").ValueKind);
     }
 }

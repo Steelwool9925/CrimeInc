@@ -66,6 +66,20 @@ public sealed record Property
     public required int AccrualCapMinutes { get; init; }
 
     /// <summary>
+    /// The most units of this property one player can hold. <see cref="int.MaxValue"/> means no limit.
+    /// </summary>
+    /// <remarks>
+    /// This is what stops income compounding without bound. Every property pays for itself in well under
+    /// two nights (0.26 to 1.6 of them), and a unit's price is flat, so a player who reinvests everything
+    /// grew about 4.8 times a night with nothing to stop it: measured, a daily player reached 4.36 million a
+    /// night by the fifth. A ceiling per property turns the ladder into a ladder: once a tier is full,
+    /// the only way to earn more is the next one. The shipped pack declares one on every property and
+    /// <c>PropertyCatalogLoaderTests</c> requires it; the unlimited default exists so hand-built
+    /// definitions in tests do not have to say.
+    /// </remarks>
+    public int MaxUnits { get; init; } = int.MaxValue;
+
+    /// <summary>
     /// The most uncollected cash <b>one unit</b> can hold: the income earned over a full window.
     /// </summary>
     /// <remarks>
@@ -106,6 +120,10 @@ public sealed record Property
         if (AccrualCapMinutes < 1)
             throw new ArgumentOutOfRangeException(nameof(AccrualCapMinutes), AccrualCapMinutes,
                 $"Property '{Id}' must hold at least one minute of income.");
+
+        if (MaxUnits < 1)
+            throw new ArgumentOutOfRangeException(nameof(MaxUnits), MaxUnits,
+                $"Property '{Id}' must allow at least one unit, or it could never be bought.");
 
         // Checked before CapPerUnit is read: an unbounded window is exactly what lets the product below
         // wrap, and a wrapped value can come back positive and look reasonable.
