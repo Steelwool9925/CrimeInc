@@ -70,6 +70,10 @@ public record DoJobRequest(Dictionary<string, int>? Extras);
 ///     on a row cannot drift from the odds it actually gets. Reported even for a job the caller
 ///     cannot attempt, so the client can show what clearing the gate would buy.
 /// </param>
+/// <param name="MaxSuccessChance">
+///     The ceiling any attempt's odds are capped at, in <c>[0, 1]</c>. Sent so a client that previews
+///     the odds of a chosen number of extras never shows a figure the server would not roll against.
+/// </param>
 /// <param name="UnavailableReason">
 ///     Why <paramref name="CanAttempt"/> is false — <c>"level"</c>, <c>"stats"</c>, <c>"items"</c> or
 ///     <c>"energy"</c> — or <see langword="null"/> when it is true. A stable token, not display
@@ -90,6 +94,7 @@ public record JobDto(
     IReadOnlyList<JobItemRequirementDto> ItemRequirements,
     double SuccessChance,
     double ExtraSuccessChance,
+    double MaxSuccessChance,
     JobMasteryState Mastery,
     bool CanAttempt,
     string? UnavailableReason);

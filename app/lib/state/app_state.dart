@@ -410,6 +410,7 @@ class AppState extends ChangeNotifier {
         itemRequirements: itemRequirements,
         successChance: job.successChance,
         extraSuccessChance: job.extraSuccessChance,
+        maxSuccessChance: job.maxSuccessChance,
         mastery: outcome.result.mastery,
         canAttempt: reason == null,
         unavailableReason: reason,
@@ -422,6 +423,10 @@ class AppState extends ChangeNotifier {
     _lastJobResult = null;
     notifyListeners();
   }
+
+  /// Drops the result without notifying, for a screen being torn down: it is the only thing showing
+  /// the result, and notifying mid-dispose would rebuild listeners while the tree is locked.
+  void forgetJobResult() => _lastJobResult = null;
 
   /// Acknowledges the level-up dialog.
   void acknowledgeLevelUp() {

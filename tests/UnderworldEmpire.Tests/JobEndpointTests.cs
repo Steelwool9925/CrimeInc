@@ -481,6 +481,7 @@ public class JobEndpointTests : IClassFixture<CustomWebApplicationFactory>
         var job = Job(doc, ItemGatedJob);
 
         Assert.Equal(0.10, job.GetProperty("extraSuccessChance").GetDouble(), precision: 10);
+        Assert.InRange(job.GetProperty("maxSuccessChance").GetDouble(), 0.65, 1.0);
         Assert.Equal(3, job.GetProperty("itemRequirements")[0].GetProperty("maxExtras").GetInt32());
     }
 

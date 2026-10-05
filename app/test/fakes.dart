@@ -174,6 +174,71 @@ const kItemReadyJob = Job(
   canAttempt: true,
 );
 
+/// One switchblade held and one needed: the player is wearing it or has nothing to spare, yet the
+/// content still allows extras. Nothing can be added, but the stepper row is still drawn.
+const kExtrasRequirementNoSpare = JobItemRequirement(
+  itemId: 'switchblade',
+  minQuantity: 1,
+  maxExtras: 3,
+  held: 1,
+  met: true,
+);
+
+const kExtrasJobNoSpare = Job(
+  id: 'hijack-a-delivery-truck',
+  name: 'Hijack a Delivery Truck',
+  description: 'Wait at the light.',
+  area: 'docks',
+  energyCost: 4,
+  levelRequirement: 1,
+  cashMin: 400,
+  cashMax: 620,
+  xp: 55,
+  attackRequirement: 9,
+  defenseRequirement: 7,
+  itemRequirements: [kExtrasRequirementNoSpare],
+  successChance: 0.65,
+  extraSuccessChance: 0.10,
+  mastery: kFakeMastery,
+  canAttempt: true,
+);
+
+/// [kExtrasJob] with a ceiling of 80%, so three extras (95% uncapped) must preview as 80%.
+const kExtrasJobCapped = Job(
+  id: 'hijack-a-delivery-truck',
+  name: 'Hijack a Delivery Truck',
+  description: 'Wait at the light.',
+  area: 'docks',
+  energyCost: 4,
+  levelRequirement: 1,
+  cashMin: 400,
+  cashMax: 620,
+  xp: 55,
+  attackRequirement: 9,
+  defenseRequirement: 7,
+  itemRequirements: [kExtrasRequirement],
+  successChance: 0.65,
+  extraSuccessChance: 0.10,
+  maxSuccessChance: 0.80,
+  mastery: kFakeMastery,
+  canAttempt: true,
+);
+
+/// A win that used up four of the item at once (one required plus three extras), leaving none spare.
+const kExtrasConsumingJobResult = JobResult(
+  jobId: 'hijack-a-delivery-truck',
+  succeeded: true,
+  energySpent: 4,
+  cashEarned: 544,
+  xpEarned: 55,
+  healthLost: 0,
+  mastery: kFakeMastery,
+  masteryRankedUp: false,
+  itemsConsumed: [
+    ItemConsumption(itemId: 'switchblade', quantityConsumed: 4, quantityRemaining: 0),
+  ],
+);
+
 /// A successful attempt at [kItemReadyJob] that consumed one unit of its item requirement, leaving
 /// stock one below what it started with.
 const kItemConsumingJobResult = JobResult(

@@ -464,7 +464,7 @@ void main() {
       final lock = tester.widget<Text>(
           find.byKey(const Key('job-lock-hijack-a-delivery-truck')));
 
-      expect(lock.data, 'Needs 2 spare switchblade');
+      expect(lock.data, 'Needs 2 spare switchblades');
     });
 
     testWidgets('a job with no item requirements shows no item wording', (tester) async {
@@ -530,7 +530,7 @@ void main() {
       final uses = tester.widget<Text>(find.byKey(const Key('job-uses-hijack-a-delivery-truck')));
 
       // The fixture's gate needs two, and the whole requirement is what an attempt uses up.
-      expect(uses.data, contains('Uses up 2 switchblade each attempt'));
+      expect(uses.data, contains('Uses up 2 switchblades each attempt'));
       expect(uses.data, contains('never the one you are wearing'));
     });
 
@@ -635,6 +635,100 @@ void main() {
       await tester.pump();
 
       expect(count(tester), '0');
+    });
+
+    String oddsText(WidgetTester tester) =>
+        tester.widget<Text>(find.byKey(const Key('job-odds-hijack-a-delivery-truck'))).data!;
+
+    testWidgets('the odds on the card follow the extras dialled in', (tester) async {
+      await pumpJobs(tester, withExtrasJob());
+      expect(oddsText(tester), startsWith('65% success'));
+
+      await tester.tap(more());
+      await tester.pump();
+      expect(oddsText(tester), startsWith('75% success'));
+
+      await tester.tap(more());
+      await tester.pump();
+      await tester.tap(more());
+      await tester.pump();
+      expect(oddsText(tester), startsWith('95% success'));
+
+      await tester.tap(less());
+      await tester.pump();
+      expect(oddsText(tester), startsWith('85% success'));
+    });
+
+    testWidgets('the previewed odds never pass the ceiling the server caps at', (tester) async {
+      await pumpJobs(tester, FakeApiClient(
+        jobsResult: const JobList(jobs: [kExtrasJobCapped], currentEnergy: 20, level: 3),
+      ));
+
+      for (var i = 0; i < 3; i++) {
+        await tester.tap(more());
+        await tester.pump();
+      }
+
+      expect(oddsText(tester), startsWith('80% success'));
+    });
+
+    testWidgets('the stepper row stays, inert, when the last spare is gone, so the card keeps its height',
+        (tester) async {
+      await pumpJobs(tester, withExtrasJob());
+      final withSpares = tester.getSize(find.byKey(const Key('job-card-hijack-a-delivery-truck')));
+      await tester.pumpWidget(const SizedBox());
+
+      await pumpJobs(tester, FakeApiClient(
+        jobsResult: const JobList(jobs: [kExtrasJobNoSpare], currentEnergy: 20, level: 3),
+      ));
+
+      expect(more(), findsOneWidget);
+      expect(tester.widget<IconButton>(more()).onPressed, isNull);
+      expect(tester.widget<IconButton>(less()).onPressed, isNull);
+      expect(
+        tester.widget<Text>(find.byKey(const Key('job-extras-label-hijack-a-delivery-truck-switchblade'))).data,
+        contains('no spare copies'),
+      );
+      expect(tester.getSize(find.byKey(const Key('job-card-hijack-a-delivery-truck'))), withSpares);
+    });
+
+    testWidgets('a result that used several of an item says so in the plural', (tester) async {
+      final api = FakeApiClient(
+        jobsResult: const JobList(jobs: [kExtrasJob], currentEnergy: 20, level: 3),
+        doJobResult: const DoJobResult(result: kExtrasConsumingJobResult, player: kFakeMe),
+      );
+      await pumpJobs(tester, api);
+
+      await tester.tap(find.byKey(const Key('do-job-hijack-a-delivery-truck')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('job-result-item-switchblade')),
+          matching: find.text('4 switchblades (0 spare left)'),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('leaving Jobs forgets the result, so coming back shows the placeholder', (tester) async {
+      final state = await pumpJobs(tester, FakeApiClient(
+        jobsResult: const JobList(jobs: [kExtrasJob], currentEnergy: 20, level: 3),
+        doJobResult: const DoJobResult(result: kExtrasConsumingJobResult, player: kFakeMe),
+      ));
+      await tester.tap(find.byKey(const Key('do-job-hijack-a-delivery-truck')));
+      await tester.pumpAndSettle();
+      expect(state.lastJobResult, isNotNull);
+
+      await tester.pumpWidget(const SizedBox());
+      expect(state.lastJobResult, isNull);
+
+      await tester.pumpWidget(MaterialApp(
+        home: JobsScreen(appState: state, refreshInterval: const Duration(hours: 1)),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text('Job complete'), findsNothing);
+      expect(find.byKey(const Key('job-result-item-switchblade')), findsNothing);
     });
 
     testWidgets('the attempt is made with the extras that were dialled in', (tester) async {

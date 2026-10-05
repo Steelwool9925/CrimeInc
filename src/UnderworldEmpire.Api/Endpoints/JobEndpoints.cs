@@ -124,6 +124,7 @@ public static class JobEndpoints
                     SuccessChance: job.SuccessChanceFor(
                         loadout.TotalAttack, loadout.TotalDefense, catalog.MaxSuccessChance),
                     ExtraSuccessChance: job.ExtraItemSuccessChance,
+                    MaxSuccessChance: Math.Min(1.0, catalog.MaxSuccessChance),
                     Mastery: new JobMasteryState(
                         Completions: completions,
                         Rank: rank,

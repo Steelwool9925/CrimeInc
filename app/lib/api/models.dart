@@ -256,6 +256,7 @@ class Job {
     this.itemRequirements = const [],
     required this.successChance,
     this.extraSuccessChance = 0,
+    this.maxSuccessChance = 1,
     required this.mastery,
     required this.canAttempt,
     this.unavailableReason,
@@ -292,6 +293,19 @@ class Job {
   /// with no item gate. The server works out the resulting odds; this is only for saying so.
   final double extraSuccessChance;
 
+  /// The ceiling the server caps any attempt's odds at. Lets the card preview the odds of the extras
+  /// the player has dialled in without ever showing a figure above what will actually be rolled.
+  final double maxSuccessChance;
+
+  /// The odds of an attempt that commits [extras] extra copies in total. A preview only — the
+  /// server works out the odds it rolls against — using the same shape as its formula: the extras
+  /// add on, the ceiling caps, and the result never drops below the odds with none.
+  double chanceWithExtras(int extras) {
+    final raw = successChance + extraSuccessChance * extras;
+    final capped = raw < maxSuccessChance ? raw : maxSuccessChance;
+    return capped > successChance ? capped : successChance;
+  }
+
   final JobMastery mastery;
   final bool canAttempt;
 
@@ -318,6 +332,7 @@ class Job {
         // and `as double` on an int is a runtime type error in Dart rather than a widening.
         successChance: (json['successChance'] as num).toDouble(),
         extraSuccessChance: (json['extraSuccessChance'] as num?)?.toDouble() ?? 0,
+        maxSuccessChance: (json['maxSuccessChance'] as num?)?.toDouble() ?? 1,
         mastery: JobMastery.fromJson(json['mastery'] as Map<String, dynamic>),
         canAttempt: json['canAttempt'] as bool,
         unavailableReason: json['unavailableReason'] as String?,
@@ -366,6 +381,11 @@ class LevelUp {
         metersRefilled: json['metersRefilled'] as bool,
       );
 }
+
+/// "1 switchblade", "4 switchblades". Item ids are the only name the client has, so the plural is a
+/// plain trailing "s" — enough for the one-word ids content uses, and left alone when it already ends in one.
+String countedItem(int count, String itemId) =>
+    count == 1 || itemId.endsWith('s') ? '$count $itemId' : '$count ${itemId}s';
 
 /// One item requirement's consumption from one applied job attempt — win or lose.
 @immutable

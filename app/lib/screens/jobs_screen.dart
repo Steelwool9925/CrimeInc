@@ -73,6 +73,9 @@ class _JobsScreenState extends State<JobsScreen> {
   @override
   void dispose() {
     _refresher?.cancel();
+    // A result describes the attempt just made. Coming back to Jobs later must not greet the player
+    // with an old "Job complete"; the panel is then the empty placeholder.
+    widget.appState.forgetJobResult();
     super.dispose();
   }
 
@@ -272,23 +275,27 @@ class _JobCard extends StatelessWidget {
   /// as a bug. Uses the raw content id since the server does not send a display name here.
   String get _unmetItemRequirementsLabel => job.itemRequirements
       .where((r) => !r.met)
-      .map((r) => '${r.minQuantity} spare ${r.itemId}')
+      .map((r) => countedItem(r.minQuantity, r.itemId).replaceFirst(' ', ' spare '))
       .join(', ');
 
   /// What an attempt uses up, stated before the player commits to it — shown on the card whether or
   /// not the job is currently available, so the cost is known before the button is ever enabled.
   String get _usesLabel =>
-      'Uses up ${job.itemRequirements.map((r) => '${r.minQuantity} ${r.itemId}').join(', ')} '
+      'Uses up ${job.itemRequirements.map((r) => countedItem(r.minQuantity, r.itemId)).join(', ')} '
       'each attempt (never the one you are wearing)';
 
   /// Each extra's worth as a whole percentage, e.g. "10%". Rounded for display only.
   String get _extraChanceLabel => '${(job.extraSuccessChance * 100).round()}%';
 
-  /// The success chance as a whole percentage.
+  /// How many extras are dialled in across every requirement.
+  int get _extrasTotal => chosenExtras.values.fold(0, (a, b) => a + b);
+
+  /// The success chance as a whole percentage, previewed for the extras dialled in right now.
   ///
-  /// Rounded for display only. The server sends the exact figure it will roll against, so this is
-  /// the one place the number is approximated and it never feeds a decision.
-  String get _chanceLabel => '${(job.successChance * 100).round()}%';
+  /// Rounded for display only. With no extras it is exactly the figure the server sends; with some
+  /// it is [Job.chanceWithExtras], the server's own shape (extras add, the ceiling caps), so the
+  /// player sees what the extras buy before paying for them. The server still rolls the real odds.
+  String get _chanceLabel => '${(job.chanceWithExtras(_extrasTotal) * 100).round()}%';
 
   @override
   Widget build(BuildContext context) {
@@ -336,8 +343,11 @@ class _JobCard extends StatelessWidget {
             ],
             // Extras are only offered when the job can actually be done and there is something to add:
             // a stepper on a locked card would invite choosing a cost for an attempt that cannot happen.
+            // The row stays while the job can be done and extras exist at all, even with none to
+            // spare right now (both buttons disabled). Dropping it at the last spare shrank the card
+            // and moved "Do job" up from under the cursor between two attempts.
             if (job.canAttempt)
-              for (final r in job.itemRequirements.where((r) => r.availableExtras > 0)) ...[
+              for (final r in job.itemRequirements.where((r) => r.maxExtras > 0)) ...[
                 const SizedBox(height: 4),
                 _ExtrasStepper(
                   jobId: job.id,
@@ -458,7 +468,9 @@ class _ExtrasStepper extends StatelessWidget {
       children: [
         Expanded(
           child: Text(
-            'Add extra $id  (+$eachLabel success each, spent win or lose)',
+            max > 0
+                ? 'Add extra $id  (+$eachLabel success each, spent win or lose)'
+                : 'Add extra $id  (no spare copies to add)',
             key: Key('job-extras-label-$jobId-$id'),
             style: theme.textTheme.bodySmall,
           ),

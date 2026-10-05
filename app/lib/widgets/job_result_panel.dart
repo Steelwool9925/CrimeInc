@@ -106,7 +106,7 @@ class JobResultPanel extends StatelessWidget {
                       _Stat(
                         key: Key('job-result-item-${consumed.itemId}'),
                         label: 'Used up',
-                        value: '${consumed.quantityConsumed} ${consumed.itemId} '
+                        value: '${countedItem(consumed.quantityConsumed, consumed.itemId)} '
                             '(${consumed.quantityRemaining} spare left)',
                         emphasised: true,
                       ),

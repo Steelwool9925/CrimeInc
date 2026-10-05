@@ -123,6 +123,31 @@ void main() {
       expect(job.extraSuccessChance, 0.1);
     });
 
+    test('reads the ceiling and previews the odds of a number of extras', () {
+      final job = Job.fromJson(jobJson(successChance: 0.65)
+        ..['extraSuccessChance'] = 0.1
+        ..['maxSuccessChance'] = 0.8);
+
+      expect(job.maxSuccessChance, 0.8);
+      expect(job.chanceWithExtras(0), 0.65);
+      expect(job.chanceWithExtras(1), closeTo(0.75, 1e-9));
+      expect(job.chanceWithExtras(3), 0.8, reason: 'capped at the ceiling, not 0.95');
+    });
+
+    test('a server that sends no ceiling previews as uncapped, and never below the listed odds', () {
+      final job = Job.fromJson(jobJson(successChance: 0.9)..['extraSuccessChance'] = 0.2);
+
+      expect(job.maxSuccessChance, 1);
+      expect(job.chanceWithExtras(5), 1);
+      expect(Job.fromJson(jobJson(successChance: 0.9)).chanceWithExtras(3), 0.9);
+    });
+
+    test('counts an item in the singular and the plural', () {
+      expect(countedItem(1, 'switchblade'), '1 switchblade');
+      expect(countedItem(4, 'switchblade'), '4 switchblades');
+      expect(countedItem(2, 'brass-knuckles'), '2 brass-knuckles');
+    });
+
     test('a requirement with no maxExtras allows none', () {
       // A server that predates the field must still read correctly.
       final job = Job.fromJson(jobJson()

@@ -82,6 +82,8 @@ anything worn takes it off, and a worn row with no copies never scores.
 The server refuses an item the job does not use, a negative count, or more than `maxExtras` with a
 `400` (reason `extras`); it refuses a count the player cannot cover with a `409` (reason `items`).
 It works out the resulting odds itself — the client only says how many it is willing to spend.
+In the result, `itemsConsumed[].quantityRemaining` counts *spare* copies, like `held`: it reads 0 after
+the last spare is spent even though the player is still wearing one.
 
 **`itemId` is validated against `items.json` at startup**, the one place these two otherwise
 independent catalogs cross. An id that does not exist, or names a vehicle rather than a weapon or
@@ -105,8 +107,9 @@ Each stat's surplus floors at **zero independently**. Summed algebraically, a la
 would cancel a defense shortfall and the defense requirement would stop meaning anything. Extras are
 a wholly separate term from stat surplus — items must not paper over a stats shortfall, or the reverse.
 `GET /jobs` reports the odds of an attempt with **no** extras, since the player has not chosen yet; the
-job's `extraSuccessChance` and each requirement's `maxExtras` are sent alongside so the card can say
-what an extra is worth.
+job's `extraSuccessChance`, the pack's `maxSuccessChance` ceiling and each requirement's `maxExtras`
+are sent alongside so the card can preview the odds of however many extras the player has dialled in
+(the server still decides the real odds).
 
 Validation reports **every** problem at once rather than stopping at the first, so a content edit
 needs one fix pass rather than one restart per error. Unknown fields are ignored, so a newer pack
