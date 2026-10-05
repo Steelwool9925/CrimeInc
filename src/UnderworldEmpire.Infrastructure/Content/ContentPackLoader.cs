@@ -143,7 +143,7 @@ public sealed class ContentPackLoader
                 BaseSuccessChance = entry.Risk!.BaseSuccessChance,
                 SuccessChancePerSurplusPoint = entry.Risk.SuccessChancePerSurplusPoint,
                 ItemRequirements = (entry.ItemRequirements ?? [])
-                    .Select(r => new ItemRequirement(r.ItemId, r.MinQuantity))
+                    .Select(r => new ItemRequirement(r.ItemId, r.MinQuantity, r.QuantityConsumed))
                     .ToList(),
                 ItemSuccessChancePerSurplusPoint = entry.Risk.ItemSuccessChancePerSurplusPoint,
                 HealthLossMin = entry.Risk.HealthLossMin,
@@ -462,6 +462,18 @@ public sealed class ContentPackLoader
                         errors.Add(
                             $"{where}: 'itemRequirements' entry for '{requirement.ItemId}' has " +
                             $"'minQuantity' {requirement.MinQuantity}, must be >= 1");
+
+                    // The gate only guarantees MinQuantity copies, so spending more than that
+                    // would overdraw the stack on the one attempt that was just admitted.
+                    // Skipped when minQuantity is itself invalid: that is already reported above, and
+                    // the range would only echo it as a second, derived error.
+                    if (requirement.MinQuantity >= 1 &&
+                        (requirement.QuantityConsumed < 1 ||
+                         requirement.QuantityConsumed > requirement.MinQuantity))
+                        errors.Add(
+                            $"{where}: 'itemRequirements' entry for '{requirement.ItemId}' has " +
+                            $"'quantityConsumed' {requirement.QuantityConsumed}, must be between 1 and " +
+                            $"'minQuantity' ({requirement.MinQuantity})");
 
                     // The one place items and jobs cross: jobs.json cannot reference an item.json id
                     // that does not exist, or that exists but is not equippable gear. Skipped when no

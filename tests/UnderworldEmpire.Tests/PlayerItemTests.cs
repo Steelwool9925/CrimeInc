@@ -134,6 +134,68 @@ public class PlayerItemTests
     }
 
     [Theory]
+    [InlineData(3, false, 3)]
+    [InlineData(3, true, 2)]
+    [InlineData(1, false, 1)]
+    [InlineData(1, true, 0)]
+    public void The_spare_quantity_never_includes_the_worn_copy(int copies, bool worn, int expectedSpare)
+    {
+        // What a job's item gate counts: items a job uses are consumed but are not the worn gear.
+        var row = OwnedRow(copies);
+        if (worn)
+            row.Equip();
+
+        Assert.Equal(expectedSpare, row.SpareQuantity);
+    }
+
+    [Fact]
+    public void A_row_with_no_copies_has_no_spare_even_if_it_is_somehow_flagged_worn()
+    {
+        // The state the earlier defect left behind. It must not go negative.
+        var row = new PlayerItem { PlayerId = Guid.NewGuid(), ItemId = "switchblade" };
+        typeof(PlayerItem).GetProperty(nameof(PlayerItem.Equipped))!.SetValue(row, true);
+
+        Assert.Equal(0, row.SpareQuantity);
+    }
+
+    [Fact]
+    public void Consuming_the_last_copy_of_a_worn_item_takes_it_off()
+    {
+        // A worn item the player no longer has must not keep scoring. It used to stay flagged as
+        // equipped at zero copies, which kept its attack and defense in the loadout for good.
+        var row = OwnedRow(copies: 1);
+        row.Equip();
+
+        row.Consume(1);
+
+        Assert.Equal(0, row.Quantity);
+        Assert.False(row.Equipped);
+    }
+
+    [Fact]
+    public void Consuming_some_copies_of_a_worn_item_leaves_it_worn()
+    {
+        // Spending part of a stack is not taking the item off: the player still holds one to wear.
+        var row = OwnedRow(copies: 3);
+        row.Equip();
+
+        row.Consume(2);
+
+        Assert.Equal(1, row.Quantity);
+        Assert.True(row.Equipped);
+    }
+
+    [Fact]
+    public void Consuming_the_last_copy_of_an_unworn_item_leaves_it_unworn()
+    {
+        var row = OwnedRow(copies: 1);
+
+        row.Consume(1);
+
+        Assert.False(row.Equipped);
+    }
+
+    [Theory]
     [InlineData(0)]
     [InlineData(-1)]
     public void Consuming_a_non_positive_number_of_copies_is_rejected(int count)
@@ -151,19 +213,5 @@ public class PlayerItemTests
 
         Assert.Throws<ArgumentOutOfRangeException>(() => row.Consume(3));
         Assert.Equal(2, row.Quantity);
-    }
-
-    [Fact]
-    public void Consuming_the_last_copy_of_an_equipped_item_leaves_it_reporting_as_equipped()
-    {
-        // Equip/Loadout is untouched by design — the item gate and the equip flag are independent
-        // questions about the same row. A gap Tier 3 may close, not this pass.
-        var row = OwnedRow(copies: 1);
-        row.Equip();
-
-        row.Consume(1);
-
-        Assert.Equal(0, row.Quantity);
-        Assert.True(row.Equipped);
     }
 }

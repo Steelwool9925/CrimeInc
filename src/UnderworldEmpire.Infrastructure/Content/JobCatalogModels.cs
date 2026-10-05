@@ -89,6 +89,13 @@ public sealed record JobItemRequirementJson
 
     [JsonPropertyName("minQuantity")]
     public int MinQuantity { get; init; }
+
+    /// <summary>
+    /// Copies spent per attempt. Optional: absent means 1, which keeps every pack written before
+    /// this field valid. Must be between 1 and <see cref="MinQuantity"/>.
+    /// </summary>
+    [JsonPropertyName("quantityConsumed")]
+    public int QuantityConsumed { get; init; } = 1;
 }
 
 /// <summary>Pack-wide mastery thresholds, applied to every job.</summary>

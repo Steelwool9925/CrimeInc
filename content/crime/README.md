@@ -43,6 +43,7 @@ jobs[]   the catalog, in display order — the engine does not sort
   itemRequirements[]  optional item-quantity gates, alongside requirements — absent means ungated
     itemId          a weapon or armor id from items.json (not vehicle; must exist)
     minQuantity     minimum copies held to attempt the job (>= 1)
+    quantityConsumed  copies spent per attempt, win or lose (optional, default 1; 1..minQuantity)
   risk              per-job risk tuning — required, not optional
     baseSuccessChance             chance for a player exactly at the requirements (0..1)
     successChancePerSurplusPoint  added per point of surplus stat (>= 0)
@@ -58,10 +59,26 @@ into the failure path by accident.
 
 **`itemRequirements` is the opposite: absent is the ordinary case.** Every job written before this
 field existed has none, and must keep working unchanged — so unlike `risk`/`requirements`, omitting
-it is not an error. It is one time use: each attempt spends exactly 1 unit of every listed item,
-win or lose, and the same holding also answers the equip question independently — a player can wear
+it is not an error. It is one time use: each attempt spends `quantityConsumed` units of every
+listed item (1 unless the entry says otherwise), win or lose, and the same holding also answers the
+equip question independently — a player can wear
 a weapon (satisfying `requirements`) and separately need spare stock of it (satisfying
 `itemRequirements`); those are different questions about the same rows.
+
+**Holding and spending are two numbers.** `minQuantity` is what the player must have on hand;
+`quantityConsumed` is what the attempt burns. The spend can never exceed the hold, because the gate
+only guarantees `minQuantity` copies and a larger spend would overdraw the stack on the very attempt
+it admitted — the loader rejects it by name. Omitting the field means 1, so every existing entry is
+unchanged. A job that burns its whole requirement says `"quantityConsumed": <minQuantity>`.
+The payout rule below prices the *spend*, not the hold.
+
+**Items a job uses are consumed, but they are never the worn copy.** A player can wear a switchblade to
+meet a stat gate and separately hold one to spend. `minQuantity` and `quantityConsumed` count only
+*spare* copies: the stack minus the one being worn. So a job asking for one switchblade needs the player
+to hold two if they are wearing one, and spending the spare leaves the worn copy and its stats alone.
+The API reports this as `held` (spare copies) and the card says "Needs 1 spare switchblade" and "Uses
+up 1 switchblade each attempt (never the one you are wearing)". As a backstop, spending the last copy
+of anything worn takes it off, and a worn row with no copies never scores.
 
 **`itemId` is validated against `items.json` at startup**, the one place these two otherwise
 independent catalogs cross. An id that does not exist, or names a vehicle rather than a weapon or
@@ -134,7 +151,7 @@ first sitting.
 | shake-down-corner-store | 1 | 1 / 1 | 0.65 | 0.010 | 0–1 | — |
 | boost-a-parked-car | 1 | 5 / 1 | 0.75 | 0.010 | 0–3 | — |
 | run-numbers-for-the-bookie | 2 | 6 / 5 | 0.72 | 0.010 | 0–4 | — |
-| hijack-a-delivery-truck | 3 | 9 / 7 | 0.65 | 0.008 | 2–8 | 2× switchblade, +0.01/surplus |
+| hijack-a-delivery-truck | 3 | 9 / 7 | 0.65 | 0.008 | 2–8 | 1× switchblade, +0.01/surplus |
 | torch-a-rival-warehouse | 5 | 14 / 10 | 0.60 | 0.006 | 4–14 | — |
 | rob-an-armored-transport | 8 | 22 / 16 | 0.55 | 0.005 | 8–25 | — |
 
@@ -168,8 +185,18 @@ significant and `Boost-A-Parked-Car` is a different id from `boost-a-parked-car`
 
 **`hijack-a-delivery-truck`'s item gate is a first-pass balance choice, explicitly tunable — not a
 frozen decision.** It sits on a mid-tier job with headroom before *Torch*/*Rob*'s harder stat gates,
-and asks for 2 switchblades: a level-2 unlock, so a level-3 player attempting *Hijack* has plausibly
-already bought one for *Boost a Parked Car* and needs one more.
+and asks for 1 switchblade, which each attempt then spends. The gate used to ask for 2 while still
+spending 1, so the stated requirement quietly disagreed with what an attempt consumed; "hold one,
+spend one" says what actually happens, and keeps the Market a recurring cost rather than a one-time
+purchase.
+
+**A job that consumes an item must pay for it.** Expected cash — success chance times the mean
+payout, plus the consolation fraction on a failure — must exceed the price of every item the attempt
+spends. This is the rule the original *Hijack* broke: 140–260 against a 180 blade was −49 per
+attempt, a job that cost the player money every time they did it and said nothing about it. It is
+pinned by `JobEconomyInvariantTests` over the whole pack, so the next edit that breaks it fails the
+build instead of shipping. A deliberate loss-leader needs an explicit content flag, never a deleted
+test.
 
 ## `items.json`
 

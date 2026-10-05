@@ -40,6 +40,18 @@ public class PlayerItem
     /// <summary>Whether the player owns at least one copy.</summary>
     public bool IsOwned => Quantity > 0;
 
+    /// <summary>
+    /// Copies the player could spend without giving up the one they are wearing.
+    /// </summary>
+    /// <remarks>
+    /// Items a job uses are consumed, but they are not the player's equipped gear: the worn copy is
+    /// never the spent one. A worn item therefore sets one copy aside, and what a job's item gate and
+    /// its odds count is only the rest. Without this, wearing a switchblade to meet a stat gate and
+    /// then running the job that needs one spends the very weapon that met the gate, and the player
+    /// loses its stats on the first attempt.
+    /// </remarks>
+    public int SpareQuantity => Equipped && IsOwned ? Quantity - 1 : Quantity;
+
     /// <summary>Adds <paramref name="count"/> copies to the holding.</summary>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="count"/> is not positive.</exception>
     public void AddCopies(int count)
@@ -74,10 +86,17 @@ public class PlayerItem
     /// Removes <paramref name="count"/> copies from the holding — a one-time-use consumable spend.
     /// </summary>
     /// <remarks>
-    /// The inverse of <see cref="AddCopies"/>. Does not touch <see cref="Equipped"/>: a job's
-    /// item-quantity gate and the equip/loadout system ask independent questions about the same row
-    /// (see <c>Job.ItemRequirements</c>'s remarks), so spending the last copy of an equipped item
-    /// leaves it reporting as equipped with zero left — a gap Tier 3 may close, not this pass.
+    /// The inverse of <see cref="AddCopies"/>. A job's item-quantity gate and the equip/loadout system
+    /// ask independent questions about the same row (see <c>Job.ItemRequirements</c>'s remarks), so
+    /// spending *some* copies leaves the item worn.
+    /// <para>
+    /// Spending the **last** copy takes it off. This used to leave the row reporting as equipped with
+    /// zero copies, which kept adding the item's attack and defense to the player's loadout for good:
+    /// once a job needed only one copy (<c>hijack-a-delivery-truck</c> went from hold-two to hold-one),
+    /// the ordinary way to meet its stat gate — wear the switchblade, then run the job — spent the worn
+    /// copy and kept its +7 attack. Nothing equipped can be unowned, because <see cref="Equip"/> refuses
+    /// an item the player does not hold; this keeps the same invariant on the way out.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">
     ///     Thrown when <paramref name="count"/> is not positive, or exceeds <see cref="Quantity"/>.
@@ -91,5 +110,8 @@ public class PlayerItem
                 $"Cannot consume {count} copies from a holding of {Quantity}.");
 
         Quantity -= count;
+
+        if (Quantity == 0)
+            Equipped = false;
     }
 }

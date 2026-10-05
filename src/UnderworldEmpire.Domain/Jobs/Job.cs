@@ -2,18 +2,27 @@ namespace UnderworldEmpire.Domain.Jobs;
 
 /// <summary>
 /// One item-quantity gate on a job: the player must hold at least <see cref="MinQuantity"/> copies
-/// of <see cref="ItemId"/> to attempt it, and every attempt spends exactly one — win or lose (see
-/// <see cref="JobOutcome.ItemsConsumed"/>).
+/// of <see cref="ItemId"/> to attempt it, and every attempt spends <see cref="QuantityConsumed"/> of
+/// them — win or lose (see <see cref="JobOutcome.ItemsConsumed"/>).
 /// </summary>
 /// <remarks>
 /// Sits alongside <see cref="Job.MeetsStatRequirements"/>, not instead of it: a job can gate on
-/// stats, items, both, or neither, and the two gates are answered independently. Fixed at "consume 1
-/// per requirement per attempt" for this first pass — a variable rate is a later refinement, not a
-/// Tier-1 requirement.
+/// stats, items, both, or neither, and the two gates are answered independently.
+/// <para>
+/// <b>Holding and spending are separate numbers on purpose.</b> This used to be a constant 1 inside
+/// <c>JobService</c>, so a requirement of 2 meant "hold two, spend one" by an accident of that
+/// constant, and a job that wanted to spend its whole requirement could not say so. The spend can
+/// never exceed the hold: the gate only guarantees <see cref="MinQuantity"/> copies, so spending
+/// more would overdraw the stack.
+/// </para>
 /// </remarks>
 /// <param name="ItemId">Content id of the required weapon/armor item.</param>
 /// <param name="MinQuantity">Minimum copies held to attempt the job. Always &gt;= 1.</param>
-public readonly record struct ItemRequirement(string ItemId, int MinQuantity);
+/// <param name="QuantityConsumed">
+/// Copies spent per attempt. Defaults to 1, which is what every job did before this existed. Always
+/// between 1 and <paramref name="MinQuantity"/>.
+/// </param>
+public readonly record struct ItemRequirement(string ItemId, int MinQuantity, int QuantityConsumed = 1);
 
 /// <summary>
 /// A single job definition as the domain sees it, projected from the content pack's
@@ -256,6 +265,11 @@ public sealed record Job
                 throw new ArgumentOutOfRangeException(nameof(ItemRequirements), requirement.MinQuantity,
                     $"Job '{Id}' has an item requirement for '{requirement.ItemId}' with a minimum " +
                     "quantity below 1.");
+            if (requirement.QuantityConsumed < 1 || requirement.QuantityConsumed > requirement.MinQuantity)
+                throw new ArgumentOutOfRangeException(nameof(ItemRequirements), requirement.QuantityConsumed,
+                    $"Job '{Id}' has an item requirement for '{requirement.ItemId}' consuming " +
+                    $"{requirement.QuantityConsumed} per attempt, which must be between 1 and its " +
+                    $"minimum quantity ({requirement.MinQuantity}): the gate only guarantees that many.");
             // A duplicate would let MeetsItemRequirements evaluate the same held quantity against
             // the same minimum twice — harmless there, but JobService.Attempt would then build two
             // ItemConsumption entries for the one item, and the second Consume() at the

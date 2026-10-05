@@ -17,10 +17,14 @@ public record JobMasteryState(int Completions, int Rank, int MaxRank, int? Compl
 /// player's current holding, so the client never needs a follow-up call to explain a lock.
 /// </summary>
 /// <param name="ItemId">Content id of the required weapon or armor item.</param>
-/// <param name="MinQuantity">Minimum copies held to attempt the job.</param>
-/// <param name="Held">How many copies this player currently holds.</param>
+/// <param name="MinQuantity">Minimum spare copies needed to attempt the job.</param>
+/// <param name="QuantityConsumed">Copies each attempt uses up, win or lose.</param>
+/// <param name="Held">
+/// How many <b>spare</b> copies this player has: the stack minus the one they are wearing, since a worn
+/// item is never spent.
+/// </param>
 /// <param name="Met">Whether <see cref="Held"/> meets <see cref="MinQuantity"/>.</param>
-public record JobItemRequirementDto(string ItemId, int MinQuantity, int Held, bool Met);
+public record JobItemRequirementDto(string ItemId, int MinQuantity, int QuantityConsumed, int Held, bool Met);
 
 /// <summary>
 /// One job as offered to the calling player: the content definition plus that player's mastery and

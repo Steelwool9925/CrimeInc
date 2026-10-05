@@ -657,6 +657,49 @@ public class JobServiceTests
     }
 
     [Fact]
+    public void A_requirement_can_spend_more_than_one_unit_per_attempt()
+    {
+        // The spend used to be a constant 1 inside JobService, so a job could not say it burns two.
+        // Holding 5 against a requirement of 3 that spends 2 leaves 3 - not 4 (the old constant) and
+        // not 2 (spending the whole minimum).
+        var player = TestPlayer();
+        var service = new JobService(FakeRandomSource.AlwaysMin());
+
+        var result = Attempt(service, player,
+            TestJob(itemRequirements: [new ItemRequirement("switchblade", MinQuantity: 3, QuantityConsumed: 2)]),
+            TestMastery(player.Id),
+            heldItemQuantities: new Dictionary<string, int> { ["switchblade"] = 5 });
+
+        var consumed = Assert.Single(result.Outcome!.ItemsConsumed);
+        Assert.Equal(2, consumed.QuantityConsumed);
+        Assert.Equal(3, consumed.QuantityRemaining);
+    }
+
+    [Fact]
+    public void A_requirement_that_spends_its_whole_minimum_leaves_nothing_at_the_floor()
+    {
+        var player = TestPlayer();
+        var service = new JobService(FakeRandomSource.AlwaysMin());
+
+        var result = Attempt(service, player,
+            TestJob(itemRequirements: [new ItemRequirement("switchblade", MinQuantity: 2, QuantityConsumed: 2)]),
+            TestMastery(player.Id),
+            heldItemQuantities: new Dictionary<string, int> { ["switchblade"] = 2 });
+
+        var consumed = Assert.Single(result.Outcome!.ItemsConsumed);
+        Assert.Equal(2, consumed.QuantityConsumed);
+        Assert.Equal(0, consumed.QuantityRemaining);
+    }
+
+    [Fact]
+    public void A_requirement_that_does_not_say_defaults_to_spending_one()
+    {
+        // Every job written before the field existed, and every call site that builds a requirement
+        // with two arguments, must behave exactly as it always did.
+        Assert.Equal(1, new ItemRequirement("switchblade", 2).QuantityConsumed);
+    }
+
+    [Fact]
     public void A_refused_attempt_consumes_nothing()
     {
         var player = TestPlayer();

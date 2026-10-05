@@ -198,6 +198,7 @@ class JobItemRequirement {
   const JobItemRequirement({
     required this.itemId,
     required this.minQuantity,
+    this.quantityConsumed = 1,
     required this.held,
     required this.met,
   });
@@ -205,8 +206,13 @@ class JobItemRequirement {
   final String itemId;
   final int minQuantity;
 
-  /// How many copies this player currently holds. Zero when they own none at all, the same as a
-  /// holding with too few — the server does not distinguish "never bought one" on the wire.
+  /// Copies each attempt uses up, win or lose. Defaults to 1 so a server that predates the field
+  /// still reads correctly.
+  final int quantityConsumed;
+
+  /// How many **spare** copies this player has: the stack minus the one they are wearing, because a
+  /// job never spends the worn copy. Zero when they own none, or only the one they are wearing —
+  /// the server does not distinguish the two on the wire.
   final int held;
 
   /// Whether [held] meets [minQuantity]. Derivable client-side, but sent anyway so the card never
@@ -216,6 +222,7 @@ class JobItemRequirement {
   factory JobItemRequirement.fromJson(Map<String, dynamic> json) => JobItemRequirement(
         itemId: json['itemId'] as String,
         minQuantity: json['minQuantity'] as int,
+        quantityConsumed: (json['quantityConsumed'] as int?) ?? 1,
         held: json['held'] as int,
         met: json['met'] as bool,
       );

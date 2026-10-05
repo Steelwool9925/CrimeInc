@@ -109,7 +109,7 @@ public class JobConcurrencyTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task Two_concurrent_item_gated_attempts_consume_stock_exactly_once_each()
     {
-        // Well above the minimum of 2, so both attempts clear the item gate regardless of read
+        // Well above the minimum of 1, so both attempts clear the item gate regardless of read
         // ordering — this isolates the property under test (does the child-row write ever get lost
         // or double-applied?) from the item gate itself, which DoJobEndpointTests already covers.
         var playerId = await SeedPlayerReadyForItemGatedJobAsync(switchbladeQuantity: 10);
@@ -141,7 +141,8 @@ public class JobConcurrencyTests : IClassFixture<CustomWebApplicationFactory>
     public async Task Sequential_item_gated_attempts_each_consume_their_own_unit()
     {
         // The counterpart to the race: with no contention, both attempts must go through and each
-        // must spend its own unit — not one shared spend across both.
+        // must spend its own unit — not one shared spend across both. The requirement is one, so two
+        // units is exactly enough for two attempts and the second leaves none.
         var playerId = await SeedPlayerReadyForItemGatedJobAsync(switchbladeQuantity: 2);
         var now = DateTimeOffset.UtcNow;
 
@@ -155,10 +156,16 @@ public class JobConcurrencyTests : IClassFixture<CustomWebApplicationFactory>
         var second = await scopeB.ServiceProvider.GetRequiredService<JobActionService>()
             .PerformAsync(playerId, ItemGatedJobId, now);
 
-        // Stock dropped below the minimum after the first attempt, so the second is refused.
-        Assert.False(second.WasApplied);
-        Assert.Equal(JobFailure.InsufficientItems, second.Failure);
-        Assert.Equal(1, await HeldQuantityAsync(playerId, GateItemId));
+        Assert.True(second.WasApplied);
+        Assert.Equal(0, await HeldQuantityAsync(playerId, GateItemId));
+
+        // With the last blade gone, a third is refused.
+        using var scopeC = _factory.Services.CreateScope();
+        var third = await scopeC.ServiceProvider.GetRequiredService<JobActionService>()
+            .PerformAsync(playerId, ItemGatedJobId, now);
+        Assert.False(third.WasApplied);
+        Assert.Equal(JobFailure.InsufficientItems, third.Failure);
+        Assert.Equal(0, await HeldQuantityAsync(playerId, GateItemId));
     }
 
     [Fact]

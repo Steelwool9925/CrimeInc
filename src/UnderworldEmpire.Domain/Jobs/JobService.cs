@@ -136,16 +136,16 @@ public sealed class JobService
         // Mastery measures completions, not attempts. A failure advances nothing.
         bool rankedUp = succeeded && mastery.RecordCompletion(completionsPerRank, maxRank);
 
-        // Consumption is deterministic, not rolled: every requirement spends exactly 1 unit whether
-        // the attempt succeeds or fails, so it is computed here rather than needing its own place in
-        // the roll order. Empty for the jobs that opt into no item gate.
+        // Consumption is deterministic, not rolled: every requirement spends its declared quantity
+        // whether the attempt succeeds or fails, so it is computed here rather than needing its own
+        // place in the roll order. Empty for the jobs that opt into no item gate.
         IReadOnlyList<ItemConsumption> itemsConsumed = job.ItemRequirements.Count == 0
             ? Array.Empty<ItemConsumption>()
             : job.ItemRequirements
                 .Select(requirement => new ItemConsumption(
                     ItemId: requirement.ItemId,
-                    QuantityConsumed: 1,
-                    QuantityRemaining: held.GetValueOrDefault(requirement.ItemId) - 1))
+                    QuantityConsumed: requirement.QuantityConsumed,
+                    QuantityRemaining: held.GetValueOrDefault(requirement.ItemId) - requirement.QuantityConsumed))
                 .ToList();
 
         return JobAttemptResult.Applied(new JobOutcome(

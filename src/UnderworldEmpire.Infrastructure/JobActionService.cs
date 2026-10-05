@@ -151,7 +151,8 @@ public class JobActionService
             trackedHoldings = await _db.PlayerItems
                 .Where(h => h.PlayerId == playerId && itemIds.Contains(h.ItemId))
                 .ToListAsync(cancellationToken);
-            heldItemQuantities = trackedHoldings.ToDictionary(h => h.ItemId, h => h.Quantity);
+            // Spare copies, not the whole stack: the worn one is never spent (see PlayerItem.SpareQuantity).
+            heldItemQuantities = trackedHoldings.ToDictionary(h => h.ItemId, h => h.SpareQuantity);
         }
 
         var result = _jobs.Attempt(

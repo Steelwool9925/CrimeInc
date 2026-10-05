@@ -160,6 +160,26 @@ public class JobTests
             () => TestJob(itemRequirements: [new ItemRequirement("switchblade", 0)]).EnsureValid());
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(3)]
+    public void An_item_requirement_cannot_spend_nothing_or_more_than_the_gate_guarantees(int consumed)
+    {
+        // Spending more than MinQuantity would overdraw the stack on the very attempt the gate just
+        // admitted: a player holding exactly the minimum would go negative.
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => TestJob(itemRequirements: [new ItemRequirement("switchblade", 2, consumed)]).EnsureValid());
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void An_item_requirement_may_spend_anything_up_to_its_minimum(int consumed)
+    {
+        TestJob(itemRequirements: [new ItemRequirement("switchblade", 2, consumed)]).EnsureValid();
+    }
+
     [Fact]
     public void A_duplicate_item_requirement_for_the_same_item_is_rejected()
     {

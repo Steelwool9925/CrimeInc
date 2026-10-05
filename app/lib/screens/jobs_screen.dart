@@ -175,15 +175,17 @@ class _JobsScreenState extends State<JobsScreen> {
               ),
             ],
           ),
-        if (state.lastJobResult != null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-            child: JobResultPanel(
-              result: state.lastJobResult!,
-              cashLabel: cashLabel,
-              onDismiss: state.dismissJobResult,
-            ),
+        // Always mounted, with a same-sized placeholder before the first result and after a
+        // dismissal: the list sits beneath it, so a panel that appeared from nothing pushed every
+        // "Do job" button down by its own height on the first attempt of a session.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          child: JobResultPanel(
+            result: state.lastJobResult,
+            cashLabel: cashLabel,
+            onDismiss: state.dismissJobResult,
           ),
+        ),
         Expanded(
           child: ListView.builder(
             padding: const EdgeInsets.all(16),
@@ -234,13 +236,21 @@ class _JobCard extends StatelessWidget {
         _ => 'Unavailable',
       };
 
-  /// Describes the item requirements this player has not yet met, e.g. "2 switchblade" — or every
-  /// unmet one joined together, for a job with more than one. Uses the raw content id since the
-  /// server does not send a display name here; a friendlier label is a later, client-side lookup.
+  /// Describes the item requirements this player has not yet met, e.g. "2 spare switchblade" — or
+  /// every unmet one joined together, for a job with more than one. "Spare" because the copy a
+  /// player is wearing is never the one a job spends: someone wearing their only switchblade is
+  /// still short one, and a bare "Needs 1 switchblade" beside a Market card saying "Owned: 1" reads
+  /// as a bug. Uses the raw content id since the server does not send a display name here.
   String get _unmetItemRequirementsLabel => job.itemRequirements
       .where((r) => !r.met)
-      .map((r) => '${r.minQuantity} ${r.itemId}')
+      .map((r) => '${r.minQuantity} spare ${r.itemId}')
       .join(', ');
+
+  /// What an attempt uses up, stated before the player commits to it — shown on the card whether or
+  /// not the job is currently available, so the cost is known before the button is ever enabled.
+  String get _usesLabel =>
+      'Uses up ${job.itemRequirements.map((r) => '${r.quantityConsumed} ${r.itemId}').join(', ')} '
+      'each attempt (never the one you are wearing)';
 
   /// The success chance as a whole percentage.
   ///
@@ -284,6 +294,14 @@ class _JobCard extends StatelessWidget {
               key: Key('job-odds-${job.id}'),
               style: theme.textTheme.bodySmall,
             ),
+            if (job.itemRequirements.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                _usesLabel,
+                key: Key('job-uses-${job.id}'),
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
             if (job.mastery.maxRank > 0) ...[
               const SizedBox(height: 8),
               // The bar and its "Rank x/y" caption are one fact, announced as one.

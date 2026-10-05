@@ -88,8 +88,8 @@
       "energyCost": 4,
       "levelRequirement": 3,
       "payout": {
-        "cashMin": 140,
-        "cashMax": 260,
+        "cashMin": 260,
+        "cashMax": 480,
         "xp": 55
       },
       "requirements": {
@@ -97,7 +97,7 @@
         "defense": 7
       },
       "itemRequirements": [
-        { "itemId": "switchblade", "minQuantity": 2 }
+        { "itemId": "switchblade", "minQuantity": 1 }
       ],
       "risk": {
         "baseSuccessChance": 0.65,

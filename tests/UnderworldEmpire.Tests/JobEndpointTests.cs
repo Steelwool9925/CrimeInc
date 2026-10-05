@@ -370,21 +370,21 @@ public class JobEndpointTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task An_item_gated_job_reports_its_requirement_content_and_the_callers_holding()
     {
-        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 1);
+        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 3);
 
         using var doc = await GetJobsAsync(token);
         var requirement = Job(doc, ItemGatedJob).GetProperty("itemRequirements")[0];
 
         Assert.Equal(GateItemId, requirement.GetProperty("itemId").GetString());
-        Assert.Equal(2, requirement.GetProperty("minQuantity").GetInt32());
-        Assert.Equal(1, requirement.GetProperty("held").GetInt32());
-        Assert.False(requirement.GetProperty("met").GetBoolean());
+        Assert.Equal(1, requirement.GetProperty("minQuantity").GetInt32());
+        Assert.Equal(3, requirement.GetProperty("held").GetInt32());
+        Assert.True(requirement.GetProperty("met").GetBoolean());
     }
 
     [Fact]
     public async Task Holding_the_minimum_quantity_marks_the_requirement_met()
     {
-        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 2);
+        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 1);
 
         using var doc = await GetJobsAsync(token);
         var requirement = Job(doc, ItemGatedJob).GetProperty("itemRequirements")[0];
@@ -408,8 +408,9 @@ public class JobEndpointTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task An_item_gated_job_below_the_minimum_is_locked_with_reason_items()
     {
-        // Level and stats already cleared, so the item gate is the only reason left.
-        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 1);
+        // Level and stats already cleared, so the item gate is the only reason left. The minimum
+        // is one, so "below" is holding none.
+        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 0);
 
         using var doc = await GetJobsAsync(token);
         var hijack = Job(doc, ItemGatedJob);
@@ -421,7 +422,7 @@ public class JobEndpointTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task Holding_enough_of_the_required_item_unlocks_the_job()
     {
-        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 2);
+        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 1);
 
         using var doc = await GetJobsAsync(token);
         var hijack = Job(doc, ItemGatedJob);
@@ -462,10 +463,10 @@ public class JobEndpointTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task The_reported_chance_includes_the_item_surplus_term()
     {
-        // Exactly at the stat requirement (no stat surplus), holding 3 above the item minimum of 2:
+        // Exactly at the stat requirement (no stat surplus), holding 3 above the item minimum of 1:
         // 0.65 base + 3 * 0.01 item-surplus rate = 0.68. Computed by the same Job.SuccessChanceFor
         // the attempt would roll against, so this figure cannot drift from what an attempt gets.
-        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 5);
+        var (token, _) = await ReadyForItemGatedJobAsync(switchbladeQuantity: 4);
 
         using var doc = await GetJobsAsync(token);
 

@@ -112,6 +112,31 @@ void main() {
       expect(job.unavailableReason, 'items');
     });
 
+    test('reads how many copies an attempt uses up', () {
+      final job = Job.fromJson(jobJson()
+        ..['itemRequirements'] = [
+          {
+            'itemId': 'switchblade',
+            'minQuantity': 3,
+            'quantityConsumed': 2,
+            'held': 3,
+            'met': true,
+          },
+        ]);
+
+      expect(job.itemRequirements.single.quantityConsumed, 2);
+    });
+
+    test('a requirement with no quantityConsumed uses up one', () {
+      // A server that predates the field must still read correctly.
+      final job = Job.fromJson(jobJson()
+        ..['itemRequirements'] = [
+          {'itemId': 'switchblade', 'minQuantity': 2, 'held': 2, 'met': true},
+        ]);
+
+      expect(job.itemRequirements.single.quantityConsumed, 1);
+    });
+
     test('reads a met item requirement', () {
       final job = Job.fromJson(jobJson()
         ..['itemRequirements'] = [

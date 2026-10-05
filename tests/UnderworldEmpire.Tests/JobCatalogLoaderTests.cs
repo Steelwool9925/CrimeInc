@@ -688,6 +688,43 @@ public class JobCatalogLoaderTests : IDisposable
     }
 
     [Fact]
+    public void A_requirement_that_omits_quantity_consumed_spends_one()
+    {
+        // The field is additive: every pack written before it existed must load unchanged.
+        WriteJobs("crime", ValidCatalog(ValidJob(
+            itemRequirements: [ValidItemRequirement(minQuantity: 3)])));
+
+        var requirement = Assert.Single(Loader().LoadJobs("crime", TestItemCatalog()).Jobs.Single().ItemRequirements);
+
+        Assert.Equal(1, requirement.QuantityConsumed);
+    }
+
+    [Fact]
+    public void A_declared_quantity_consumed_is_carried_through()
+    {
+        WriteJobs("crime", ValidCatalog(ValidJob(
+            itemRequirements: [new { itemId = "switchblade", minQuantity = 3, quantityConsumed = 2 }])));
+
+        var requirement = Assert.Single(Loader().LoadJobs("crime", TestItemCatalog()).Jobs.Single().ItemRequirements);
+
+        Assert.Equal(3, requirement.MinQuantity);
+        Assert.Equal(2, requirement.QuantityConsumed);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(3)]
+    public void A_quantity_consumed_outside_one_to_the_minimum_throws(int consumed)
+    {
+        WriteJobs("crime", ValidCatalog(ValidJob(
+            itemRequirements: [new { itemId = "switchblade", minQuantity = 2, quantityConsumed = consumed }])));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+
+        Assert.Contains($"'quantityConsumed' {consumed}, must be between 1 and 'minQuantity' (2)", ex.Message);
+    }
+
+    [Fact]
     public void An_item_requirement_with_a_minimum_quantity_below_one_throws()
     {
         WriteJobs("crime", ValidCatalog(ValidJob(
@@ -733,7 +770,8 @@ public class JobCatalogLoaderTests : IDisposable
 
         var requirement = Assert.Single(job.ItemRequirements);
         Assert.Equal("switchblade", requirement.ItemId);
-        Assert.Equal(2, requirement.MinQuantity);
+        // Hold one, spend one: the requirement matches what an attempt actually consumes.
+        Assert.Equal(1, requirement.MinQuantity);
         Assert.True(job.ItemSuccessChancePerSurplusPoint > 0.0);
     }
 

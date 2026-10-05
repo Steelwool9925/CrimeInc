@@ -444,6 +444,21 @@ public class ItemCatalogLoaderTests : IDisposable
     }
 
     [Fact]
+    public void A_worn_holding_with_no_copies_left_scores_nothing()
+    {
+        // Rows written before Consume cleared the worn flag exist in real databases: zero copies,
+        // still marked worn. The setters are private, so the row is built the way EF materialises
+        // one, by setting the backing properties directly.
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadItems("crime");
+        var ghost = new PlayerItem { PlayerId = Guid.NewGuid(), ItemId = "switchblade" };
+        typeof(PlayerItem).GetProperty(nameof(PlayerItem.Equipped))!.SetValue(ghost, true);
+        Assert.Equal(0, ghost.Quantity);
+        Assert.True(ghost.Equipped);
+
+        Assert.Empty(catalog.ResolveEquipped([ghost]));
+    }
+
+    [Fact]
     public void An_equipped_holding_whose_item_no_longer_exists_is_skipped_rather_than_throwing()
     {
         // Content dropped the item after the player bought it. The row stays — so a restored item comes

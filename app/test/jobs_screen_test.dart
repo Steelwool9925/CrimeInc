@@ -18,6 +18,13 @@ Future<AppState> pumpJobs(
   FakeApiClient api, {
   Duration refreshInterval = const Duration(hours: 1),
 }) async {
+  // Tall enough to build every card. The list is lazy and the result panel above it is always
+  // present (a placeholder before the first attempt), so the default 800x600 surface no longer
+  // reaches the last card.
+  tester.view.physicalSize = const Size(800, 1400);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+
   final state = AppState(apiClient: api, tokenStore: InMemoryTokenStore());
   await state.bootstrap();
 
@@ -457,7 +464,7 @@ void main() {
       final lock = tester.widget<Text>(
           find.byKey(const Key('job-lock-hijack-a-delivery-truck')));
 
-      expect(lock.data, 'Needs 2 switchblade');
+      expect(lock.data, 'Needs 2 spare switchblade');
     });
 
     testWidgets('a job with no item requirements shows no item wording', (tester) async {
@@ -493,7 +500,7 @@ void main() {
       expect(
         find.descendant(
           of: find.byKey(const Key('job-result-item-switchblade')),
-          matching: find.text('-1 (1 left)'),
+          matching: find.text('1 switchblade (1 spare left)'),
         ),
         findsOneWidget,
       );
@@ -506,6 +513,90 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('job-result-item-switchblade')), findsNothing);
+    });
+  });
+
+  group('JobsScreen — what an item-using job costs, before and after', () {
+    FakeApiClient withJobs(List<Job> jobs, {DoJobResult? doJobResult}) => FakeApiClient(
+          jobsResult: JobList(jobs: jobs, currentEnergy: 7, level: 3),
+          doJobResult: doJobResult,
+        );
+
+    testWidgets('the card says what an attempt uses up, even while the job is locked', (tester) async {
+      // The cost is known before the button is ever enabled. A locked job is exactly when the player
+      // is deciding whether to go and get the item.
+      await pumpJobs(tester, withJobs([kItemGatedJob]));
+
+      final uses = tester.widget<Text>(find.byKey(const Key('job-uses-hijack-a-delivery-truck')));
+
+      expect(uses.data, contains('Uses up 1 switchblade each attempt'));
+      expect(uses.data, contains('never the one you are wearing'));
+    });
+
+    testWidgets('the card says it when the job is available too', (tester) async {
+      await pumpJobs(tester, withJobs([kItemReadyJob]));
+
+      expect(find.byKey(const Key('job-uses-hijack-a-delivery-truck')), findsOneWidget);
+    });
+
+    testWidgets('a job that uses up nothing draws no such line', (tester) async {
+      await pumpJobs(tester, FakeApiClient());
+
+      expect(find.byKey(const Key('job-uses-shake-down-corner-store')), findsNothing);
+    });
+
+    testWidgets('the used-up tile names the loss in words, not a bare -1', (tester) async {
+      await pumpJobs(
+        tester,
+        withJobs([kItemReadyJob],
+            doJobResult: const DoJobResult(result: kItemConsumingJobResult, player: kFakeMe)),
+      );
+
+      await tester.tap(find.byKey(const Key('do-job-hijack-a-delivery-truck')));
+      await tester.pumpAndSettle();
+
+      final tile = find.byKey(const Key('job-result-item-switchblade'));
+      expect(find.descendant(of: tile, matching: find.text('Used up')), findsOneWidget);
+      expect(find.descendant(of: tile, matching: find.textContaining('switchblade')), findsOneWidget);
+    });
+  });
+
+  group('JobsScreen — the list does not move when a result appears', () {
+    Future<Offset> doJobButton(WidgetTester tester) async =>
+        tester.getTopLeft(find.byKey(const Key('do-job-shake-down-corner-store')));
+
+    testWidgets('the Do job button stays put before the first attempt, after it, and after a dismissal',
+        (tester) async {
+      // The result panel sits above the list, so a panel that appeared from nothing pushed every
+      // button down by its own height on a session's first attempt — two of three quick taps at the
+      // same spot then landed on the banner. The invariant that matters is the button's position, not
+      // the panel's size.
+      await pumpJobs(tester, FakeApiClient());
+      final before = await doJobButton(tester);
+      expect(find.byKey(const Key('job-result-placeholder')), findsOneWidget);
+      expect(find.byKey(const Key('job-result-panel')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('do-job-shake-down-corner-store')));
+      await tester.pumpAndSettle();
+      final after = await doJobButton(tester);
+      expect(find.byKey(const Key('job-result-panel')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('dismiss-job-result')));
+      await tester.pumpAndSettle();
+      final dismissed = await doJobButton(tester);
+
+      expect(after, before, reason: 'the first result moved the list');
+      expect(dismissed, before, reason: 'dismissing the result moved the list');
+    });
+
+    testWidgets('the placeholder offers nothing to press and says nothing misleading', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pumpJobs(tester, FakeApiClient());
+
+      // Its dismiss button is laid out (to keep the row's height) but hidden and inert.
+      expect(find.bySemanticsLabel('Dismiss'), findsNothing);
+      expect(find.text('Your latest job shows up here.'), findsOneWidget);
+      semantics.dispose();
     });
   });
 

@@ -57,7 +57,9 @@ public static class JobEndpoints
                 .ToListAsync();
 
             var loadout = Loadout.For(player, content.ItemCatalog.ResolveEquipped(holdings));
-            var heldQuantities = holdings.ToDictionary(h => h.ItemId, h => h.Quantity, StringComparer.Ordinal);
+            // Spare copies, not the whole stack, so the gate and the odds here agree with the attempt: the
+            // worn copy is never the one a job spends.
+            var heldQuantities = holdings.ToDictionary(h => h.ItemId, h => h.SpareQuantity, StringComparer.Ordinal);
 
             var now = DateTimeOffset.UtcNow;
             int currentEnergy = player.Energy.CurrentAt(now, MeterRates.Energy);
@@ -96,6 +98,7 @@ public static class JobEndpoints
                             return new JobItemRequirementDto(
                                 ItemId: r.ItemId,
                                 MinQuantity: r.MinQuantity,
+                                QuantityConsumed: r.QuantityConsumed,
                                 Held: held,
                                 Met: held >= r.MinQuantity);
                         })
