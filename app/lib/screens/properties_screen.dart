@@ -149,10 +149,10 @@ class _PropertiesScreenState extends State<PropertiesScreen> {
 
     return Column(
       children: [
-        if (state.actionMessage != null)
+        if (state.actionMessageFor(ActionScope.properties) != null)
           MaterialBanner(
             key: const Key('action-message'),
-            content: Text(state.actionMessage!),
+            content: Text(state.actionMessageFor(ActionScope.properties)!),
             actions: [
               TextButton(
                 onPressed: state.clearActionMessage,

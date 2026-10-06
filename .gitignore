@@ -66,3 +66,4 @@ scripts/cloudflared.exe
 
 # ---- Local run/debug logs written to the repo root by scripts and ad-hoc runs.
 _*.log
+changes.md

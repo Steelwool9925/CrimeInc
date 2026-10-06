@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:underworld_empire/api/models.dart';
+import 'package:underworld_empire/screens/store_screen.dart';
 import 'package:underworld_empire/state/app_state.dart';
 import 'package:underworld_empire/widgets/app_shell.dart';
 
@@ -79,13 +81,36 @@ void main() {
       expect(find.byKey(const Key('job-card-shake-down-corner-store')), findsOneWidget);
     });
 
-    testWidgets('tapping Crew shows the Crew coming-soon screen', (tester) async {
+    testWidgets('Inventory has a button of its own on the bottom bar', (tester) async {
       await setWidth(tester, 400);
       await pumpShell(tester, FakeApiClient());
 
-      await tapNavLabel(tester, 'Crew');
+      await tapNavLabel(tester, 'Inventory');
 
-      expect(find.widgetWithText(AppBar, 'Crew'), findsOneWidget);
+      expect(find.text('Brass Knuckles'), findsOneWidget);
+      expect(find.byType(BottomNavigationBar), findsOneWidget, reason: 'a tab, not a pushed screen');
+      expect(find.byTooltip('Back'), findsNothing);
+    });
+
+    testWidgets('Inventory has a button of its own on the wide rail', (tester) async {
+      await setWidth(tester, 1200);
+      await pumpShell(tester, FakeApiClient());
+
+      await tester.tap(find.descendant(of: find.byType(NavigationRail), matching: find.byIcon(Icons.backpack_outlined)));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Brass Knuckles'), findsOneWidget);
+    });
+
+    testWidgets('Crew is no longer a top-level destination; it stays a tile on Home', (tester) async {
+      await setWidth(tester, 400);
+      await pumpShell(tester, FakeApiClient());
+
+      expect(
+        find.descendant(of: find.byType(BottomNavigationBar), matching: find.text('Crew')),
+        findsNothing,
+      );
+      expect(find.byKey(const Key('go-to-crew')), findsOneWidget);
     });
 
     testWidgets('tapping Profile shows the Profile screen content', (tester) async {
@@ -110,6 +135,84 @@ void main() {
       await tapNavLabel(tester, 'Home');
 
       expect(find.text('12345'), findsOneWidget);
+    });
+  });
+
+  group('AppShell — Inventory as a tab', () {
+    testWidgets("the empty state's Market button opens the Market over the shell and Back returns to the tab",
+        (tester) async {
+      await setWidth(tester, 400);
+      await pumpShell(
+        tester,
+        FakeApiClient(
+          inventoryResult: const InventoryList(
+            items: [kUnaffordableArmor, kLockedWeapon],
+            loadout: kBareLoadout,
+            cash: 100,
+            level: 1,
+          ),
+        ),
+      );
+
+      await tapNavLabel(tester, 'Inventory');
+      await tester.tap(find.byKey(const Key('inv-empty-go-to-market')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(StoreScreen), findsOneWidget);
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+
+      expect(find.byType(StoreScreen), findsNothing);
+      expect(find.byKey(const Key('inv-empty')), findsOneWidget, reason: 'the shell and its Inventory tab are still there');
+      expect(find.byType(BottomNavigationBar), findsOneWidget);
+    });
+  });
+
+  group('AppShell — resizing', () {
+    Future<void> openMarketFromHome(WidgetTester tester) async {
+      await tester.ensureVisible(find.byKey(const Key('go-to-store')));
+      await tester.tap(find.byKey(const Key('go-to-store')));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('an open Market survives the window growing past the breakpoint and shrinking back', (tester) async {
+      await setWidth(tester, 400);
+      await pumpShell(tester, FakeApiClient());
+      await openMarketFromHome(tester);
+      expect(find.byType(StoreScreen), findsOneWidget);
+
+      await setWidth(tester, 1200);
+      await tester.pumpAndSettle();
+      expect(find.byType(StoreScreen), findsOneWidget, reason: 'widening must not pop the Market');
+
+      await setWidth(tester, 400);
+      await tester.pumpAndSettle();
+      expect(find.byType(StoreScreen), findsOneWidget, reason: 'narrowing must not pop it either');
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('go-to-store')), findsOneWidget, reason: 'Back lands on Home');
+    });
+
+    testWidgets('the Market keeps its scroll position through a resize', (tester) async {
+      await setWidth(tester, 400);
+      await pumpShell(tester, FakeApiClient());
+      await openMarketFromHome(tester);
+
+      final scrollable = find.descendant(of: find.byType(StoreScreen), matching: find.byType(Scrollable)).first;
+      final before = tester.state<ScrollableState>(scrollable);
+      before.position.jumpTo(40);
+      await tester.pumpAndSettle();
+      final offset = before.position.pixels;
+
+      await setWidth(tester, 1200);
+      await tester.pumpAndSettle();
+
+      final after = tester.state<ScrollableState>(
+        find.descendant(of: find.byType(StoreScreen), matching: find.byType(Scrollable)).first,
+      );
+      expect(after.position.pixels, offset);
     });
   });
 

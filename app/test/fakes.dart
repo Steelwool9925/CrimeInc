@@ -680,6 +680,9 @@ class FakeApiClient implements ApiClient {
 
   final SessionResult _sessionResult;
   final Me _meResult;
+
+  /// When set, GET /me returns this instead — lets a test move cash or level between polls.
+  Me? meOverride;
   final ContentPack _contentPackResult;
   final JobList _jobsResult;
 
@@ -799,7 +802,7 @@ class FakeApiClient implements ApiClient {
   Future<Me> me(String deviceToken) async {
     meCalls++;
     if (_throwOnMe) throw const ApiException(500, 'me error');
-    return _meResult;
+    return meOverride ?? _meResult;
   }
 
   @override
@@ -816,8 +819,14 @@ class FakeApiClient implements ApiClient {
   Future<JobList> jobs(String deviceToken) async {
     jobsCalls++;
     if (_throwOnJobs) throw const ApiException(500, 'jobs error');
-    return jobsOverride ?? _jobsResult;
+    // As with the inventory: the answer is what the server held when the request arrived.
+    final answer = jobsOverride ?? _jobsResult;
+    if (jobsGate != null) await jobsGate!.future;
+    return answer;
   }
+
+  /// When set, every GET /jobs waits on this before returning.
+  Completer<void>? jobsGate;
 
   /// When set, doJob waits on this before returning.
   ///
@@ -838,9 +847,13 @@ class FakeApiClient implements ApiClient {
     return _doJobResult;
   }
 
+  /// When set, allocateSkill waits on this before answering, so a test can hold a spend in flight.
+  Completer<void>? allocateGate;
+
   @override
   Future<Me> allocateSkill(String deviceToken, String target) async {
     allocateCalls.add(target);
+    if (allocateGate != null) await allocateGate!.future;
     if (refuseAllocateWith != null) {
       throw JobRefusedException(refuseAllocateWith!, 'refused: $refuseAllocateWith');
     }
@@ -857,8 +870,11 @@ class FakeApiClient implements ApiClient {
   Future<InventoryList> inventory(String deviceToken) async {
     inventoryCalls++;
     if (_throwOnInventory) throw const ApiException(500, 'inventory error');
+    // A server answers with the state it saw when the request arrived, however long the reply is
+    // held up on the way back.
+    final answer = _inventoryResult;
     if (inventoryGate != null) await inventoryGate!.future;
-    return _inventoryResult;
+    return answer;
   }
 
   @override

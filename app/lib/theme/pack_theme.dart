@@ -135,6 +135,12 @@ ThemeData packTheme(ContentPack? pack) {
   return ThemeData(
     colorScheme: scheme,
     brightness: Brightness.dark,
+    // Flutter picks a compact density on desktop platforms, which also shrinks every button's hit
+    // area below 44px — and this is a phone-shaped game that is just as often played in a narrow
+    // desktop browser window or on a touch laptop. Fixed here so the hit area (48px) does not
+    // depend on which platform built the theme.
+    visualDensity: VisualDensity.standard,
+    materialTapTargetSize: MaterialTapTargetSize.padded,
     scaffoldBackgroundColor: secondary,
     cardColor: surface,
     // Material 3's Card widget does not read ThemeData.cardColor at all — it reads

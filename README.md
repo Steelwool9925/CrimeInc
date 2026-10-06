@@ -68,7 +68,7 @@ docker compose up -d postgres
 #    recreated — compose gives you a database, not a schema. Safe to re-run.
 ./scripts/migrate.ps1
 
-# 3. Build + test everything (570 .NET tests, 240 Flutter tests)
+# 3. Build + test everything (755 .NET tests, 508 Flutter tests)
 ./scripts/test.ps1
 
 # 4. Run the API — Swagger at http://localhost:5080/swagger
@@ -119,6 +119,18 @@ says it cannot find one.
 
 Drives the real HTTP surface end to end — session, the art route, a job grind, buy + equip,
 and the property gate — and prints a pass/fail line per check.
+
+## Client navigation
+
+The app shell shows a bottom bar on narrow screens and a side rail from 800px up. Its five
+destinations are Home, Jobs, Properties, Inventory and Profile. Inventory is where bought gear is
+equipped. Crew is still a placeholder, so it is a tile on Home rather than a destination.
+
+The Market (store) is reached from a Home tile. A Market item that would improve on the gear you
+have equipped is flagged with an upgrade prompt and a "seen" dot; the server decides what is
+buyable and why not, and the client only presents it. Which upgrades you have already seen is kept
+on the device (`app/lib/storage/upgrade_seen_store.dart`). Interactive controls meet a 48px minimum
+hit area, set once in the theme (`app/lib/theme/pack_theme.dart`).
 
 ## Content packs
 

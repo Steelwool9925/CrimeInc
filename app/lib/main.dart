@@ -8,6 +8,7 @@ import 'screens/welcome_screen.dart';
 import 'state/app_state.dart';
 import 'storage/server_address_store.dart';
 import 'storage/token_store.dart';
+import 'storage/upgrade_seen_store.dart';
 import 'theme/pack_theme.dart';
 import 'widgets/app_shell.dart';
 import 'widgets/content_width_limit.dart';
@@ -44,6 +45,7 @@ class UnderworldEmpireApp extends StatefulWidget {
 class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
   final ServerAddressStore _serverAddressStore = SharedPrefsServerAddressStore();
   final TokenStore _tokenStore = SharedPrefsTokenStore();
+  final UpgradeSeenStore _seenStore = SharedPrefsUpgradeSeenStore();
 
   // Null until a server address is known — either read from storage at startup, or entered on
   // ServerAddressScreen just now. AppState/HttpApiClient cannot be constructed before then: the
@@ -102,6 +104,7 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
   AppState _buildAppState(String address) => AppState(
         apiClient: HttpApiClient(client: createResilientHttpClient(), baseUrl: address),
         tokenStore: _tokenStore,
+        seenStore: _seenStore,
       );
 
   /// Builds [AppState] against [address] and bootstraps it immediately — matching exactly what

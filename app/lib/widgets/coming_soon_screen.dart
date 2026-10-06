@@ -53,9 +53,8 @@ class ComingSoonScreen extends StatelessWidget {
   }
 }
 
-/// The Crew placeholder, shared so its title/icon/message are declared exactly once. Both the
-/// Home dashboard tile and the app shell's Crew tab route here, rather than each constructing
-/// their own copy of the same three literals.
+/// The Crew placeholder, declared once so every route to it shows the same title, icon and message
+/// (today the Home dashboard tile).
 const ComingSoonScreen crewComingSoonScreen = ComingSoonScreen(
   title: 'Crew',
   icon: Icons.groups_outlined,
