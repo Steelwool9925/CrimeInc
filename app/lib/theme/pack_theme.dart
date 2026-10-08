@@ -15,6 +15,69 @@ import '../api/models.dart';
 /// item. Everything else stays achromatic on purpose; a second accent hue would break the "one
 /// spot colour" read the whole palette is built around.
 
+/// How the app moves, beside how it looks. Success and failure are told apart by direction and
+/// easing rather than hue (the palette has exactly one accent), so the curves are part of the
+/// vocabulary: a success rises and overshoots; a failure accelerates into a hard stop with no
+/// rebound. Failure also settles faster than success arrives, because things leave quicker than they
+/// enter.
+///
+/// Any animated outcome surface reads these instead of choosing its own numbers, so the next one
+/// inherits the same feel. Not pack-declared yet: a pack that wants a different register can
+/// override the extension on its theme.
+@immutable
+class PackMotion extends ThemeExtension<PackMotion> {
+  const PackMotion({
+    this.successDuration = const Duration(milliseconds: 260),
+    this.failureDuration = const Duration(milliseconds: 200),
+    this.statsDuration = const Duration(milliseconds: 450),
+    this.successCurve = Curves.easeOutBack,
+    this.failureCurve = Curves.easeInQuad,
+  });
+
+  /// The verdict landing on a success / a failure.
+  final Duration successDuration;
+  final Duration failureDuration;
+
+  /// The stat tiles fading in and counting up, after the verdict.
+  final Duration statsDuration;
+
+  final Curve successCurve;
+  final Curve failureCurve;
+
+  static const PackMotion standard = PackMotion();
+
+  Duration stampDuration({required bool succeeded}) =>
+      succeeded ? successDuration : failureDuration;
+
+  /// The whole reveal. [stampOnly] is a plain win: the verdict lands and nothing else is staged.
+  Duration totalDuration({required bool succeeded, bool stampOnly = false}) =>
+      stampDuration(succeeded: succeeded) + (stampOnly ? Duration.zero : statsDuration);
+
+  /// The motion in effect for [context], falling back to [standard] under a theme that carries none.
+  static PackMotion of(BuildContext context) =>
+      Theme.of(context).extension<PackMotion>() ?? standard;
+
+  @override
+  PackMotion copyWith({
+    Duration? successDuration,
+    Duration? failureDuration,
+    Duration? statsDuration,
+    Curve? successCurve,
+    Curve? failureCurve,
+  }) =>
+      PackMotion(
+        successDuration: successDuration ?? this.successDuration,
+        failureDuration: failureDuration ?? this.failureDuration,
+        statsDuration: statsDuration ?? this.statsDuration,
+        successCurve: successCurve ?? this.successCurve,
+        failureCurve: failureCurve ?? this.failureCurve,
+      );
+
+  /// Durations and curves do not blend; a theme animation snaps to whichever side is nearer.
+  @override
+  PackMotion lerp(PackMotion? other, double t) => t < 0.5 || other == null ? this : other;
+}
+
 /// Fallbacks used when the pack has not loaded yet, or declares an unparseable colour. Chosen to
 /// match the shipped `crime` pack (Steamnoir: blood red / ink black / dried-blood accent) so the
 /// pre-load frame does not flash a different palette.
@@ -134,6 +197,7 @@ ThemeData packTheme(ContentPack? pack) {
 
   return ThemeData(
     colorScheme: scheme,
+    extensions: const [PackMotion.standard],
     brightness: Brightness.dark,
     scaffoldBackgroundColor: secondary,
     cardColor: surface,

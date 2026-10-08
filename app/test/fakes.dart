@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:underworld_empire/api/api_client.dart';
 import 'package:underworld_empire/api/models.dart';
+import 'package:underworld_empire/audio/outcome_sfx.dart';
 import 'package:underworld_empire/storage/token_store.dart';
 
 /// A canned mastery standing: 3 of 10 completions toward rank 1 of 5.
@@ -1081,4 +1082,20 @@ class InMemoryTokenStore implements TokenStore {
 
   @override
   Future<void> clear() async => _token = null;
+}
+
+/// Records every cue instead of playing it, so a test can assert what sounded and when.
+class RecordingOutcomeSfx implements OutcomeSfx {
+  final List<SfxCue> played = [];
+  int stops = 0;
+  bool disposed = false;
+
+  @override
+  void play(SfxCue cue) => played.add(cue);
+
+  @override
+  void stop() => stops++;
+
+  @override
+  void dispose() => disposed = true;
 }

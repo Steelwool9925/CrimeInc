@@ -68,7 +68,7 @@ docker compose up -d postgres
 #    recreated — compose gives you a database, not a schema. Safe to re-run.
 ./scripts/migrate.ps1
 
-# 3. Build + test everything (570 .NET tests, 240 Flutter tests)
+# 3. Build + test everything (570 .NET tests, 487 Flutter tests)
 ./scripts/test.ps1
 
 # 4. Run the API — Swagger at http://localhost:5080/swagger
@@ -126,6 +126,16 @@ Content is fully data-driven: `content/<pack>/pack.json` plus `jobs.json`, `prop
 `items.json`, `strings.json`. The engine references abstract ids; packs supply concrete content
 and art paths. **The MVP ships only the `crime` pack.** The architecture keeps other packs
 possible (a separate future app can reuse the engine), but no other theme is built here.
+
+## Job reveal and sound
+
+A finished job is revealed rather than dropped on screen: a short hold, then a verdict whose
+weight (scrape, clean win, strong, major, failure) is judged against that job's own payout range.
+Motion honours the OS reduce-motion setting. Verdicts have optional audio cues, off by a **Sound**
+toggle on the Rap Sheet that persists across restarts and *Change server*.
+
+The cue files live in `app/assets/sfx/` (see the README there for names and licence rules). Until
+they are added the game is silent; a missing cue is never an error.
 
 ## Status
 
