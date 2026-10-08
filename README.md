@@ -134,8 +134,9 @@ weight (scrape, clean win, strong, major, failure) is judged against that job's 
 Motion honours the OS reduce-motion setting. Verdicts have optional audio cues, off by a **Sound**
 toggle on the Rap Sheet that persists across restarts and *Change server*.
 
-The cue files live in `app/assets/sfx/` (see the README there for names and licence rules). Until
-they are added the game is silent; a missing cue is never an error.
+The four cues live in `app/assets/sfx/` (see the README there for names and licence rules). They
+are generated placeholder tones; drop in same-named mp3s to replace them. A missing cue is never an
+error, it just plays nothing.
 
 ## Status
 
