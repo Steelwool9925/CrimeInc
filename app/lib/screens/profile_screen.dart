@@ -69,6 +69,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const SizedBox(height: 16),
                 _SoundToggle(appState: state),
                 const SizedBox(height: 16),
+                if (state.notificationsAvailable) ...[
+                  _NotificationsSection(appState: state),
+                  const SizedBox(height: 16),
+                ],
                 const _ComingSoonPanel(),
               ],
             ),
@@ -268,6 +272,45 @@ class _ComingSoonPanel extends StatelessWidget {
           style: Theme.of(context).textTheme.bodyMedium,
         ),
       ),
+    );
+  }
+}
+
+/// The one switch for return notifications. Off until the player says yes; turning it on asks the
+/// OS if it has not already agreed, and says where to fix it if it refuses.
+class _NotificationsSection extends StatelessWidget {
+  const _NotificationsSection({required this.appState});
+
+  final AppState appState;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SwitchListTile(
+          key: const Key('profile-notifications-toggle'),
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Return reminders'),
+          subtitle: const Text(
+            'A nudge when your energy is full or a property is ready to collect.',
+          ),
+          value: appState.notificationsEnabled,
+          onChanged: appState.setNotificationsEnabled,
+        ),
+        if (appState.notificationsBlocked)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              'Notifications are blocked for this app. Allow them in the system settings, '
+              'then turn this on again.',
+              key: const Key('profile-notifications-blocked'),
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
+            ),
+          ),
+      ],
     );
   }
 }

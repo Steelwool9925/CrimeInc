@@ -68,7 +68,7 @@ docker compose up -d postgres
 #    recreated — compose gives you a database, not a schema. Safe to re-run.
 ./scripts/migrate.ps1
 
-# 3. Build + test everything (755 .NET tests, 588 Flutter tests)
+# 3. Build + test everything (755 .NET tests, 677 Flutter tests)
 ./scripts/test.ps1
 
 # 4. Run the API — Swagger at http://localhost:5080/swagger
@@ -149,6 +149,26 @@ toggle on the Rap Sheet that persists across restarts and *Change server*.
 The four cues live in `app/assets/sfx/` (see the README there for names and licence rules). They
 are generated placeholder tones; drop in same-named mp3s to replace them. A missing cue is never an
 error, it just plays nothing.
+
+## Return reminders
+
+On Android the app can nudge a player who has walked away: once when their energy is full again, and
+once for each property that has filled to its cap. Nothing is sent from the server. The app works the
+times out from what it last read and hands them to the OS as local notifications when it goes to the
+background, then clears them when the player comes back.
+
+The permission is not requested at launch. After a player's first finished job the Jobs screen offers
+the reminders in plain words, and only **Yes, nudge me** spends the one-shot Android 13+ prompt;
+**Not now** records nothing, so the prompt stays available. A **Return reminders** switch on the Rap
+Sheet changes the choice at any time. If the player later takes the permission away in system
+settings, the app notices on the next sign-in or return and shows the switch as off and blocked,
+rather than promising reminders that cannot arrive. Web has no notifications, so nothing is
+offered there.
+
+Reminders use inexact alarms, so no exact-alarm permission is needed, but some phones' battery
+optimisation will delay or drop them. That is accepted rather than engineered around. The status-bar
+icon is a white silhouette (`app/android/app/src/main/res/drawable/ic_stat_nudge.xml`); a `keep.xml`
+beside it stops release builds stripping a resource the plugin only finds by name.
 
 ## Status
 

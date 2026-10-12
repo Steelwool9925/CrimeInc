@@ -6,6 +6,9 @@ import 'package:flutter/services.dart';
 import '../api/api_client.dart';
 import '../api/models.dart';
 import '../audio/outcome_sfx.dart';
+import '../notifications/return_notifier.dart';
+import '../notifications/return_schedule.dart';
+import '../storage/notification_preference_store.dart';
 import '../storage/sound_preference_store.dart';
 import '../storage/token_store.dart';
 import '../storage/upgrade_seen_store.dart';
@@ -28,12 +31,19 @@ class AppState extends ChangeNotifier {
     OutcomeSfx? sfx,
     SoundPreferenceStore? soundStore,
     bool soundEnabled = true,
+    ReturnNotifier returnNotifier = const SilentReturnNotifier(),
+    NotificationPreferenceStore? notificationPreferenceStore,
+    DateTime Function() clock = DateTime.now,
   })  : _apiClient = apiClient,
         _tokenStore = tokenStore,
         _seenStore = seenStore ?? InMemoryUpgradeSeenStore(),
         _sfx = sfx ?? const SilentOutcomeSfx(),
         _soundStore = soundStore ?? InMemorySoundPreferenceStore(),
-        _soundEnabled = soundEnabled;
+        _soundEnabled = soundEnabled,
+        _returnNotifier = returnNotifier,
+        _notificationPreferenceStore =
+            notificationPreferenceStore ?? InMemoryNotificationPreferenceStore(),
+        _clock = clock;
 
   /// How long the app holds a job's outcome, already in hand, before showing it. `main.dart` passes
   /// this; it defaults to zero so a bare [AppState] (every test) never waits.
@@ -47,6 +57,9 @@ class AppState extends ChangeNotifier {
   final UpgradeSeenStore _seenStore;
   final OutcomeSfx _sfx;
   final SoundPreferenceStore _soundStore;
+  final ReturnNotifier _returnNotifier;
+  final NotificationPreferenceStore _notificationPreferenceStore;
+  final DateTime Function() _clock;
 
   bool _soundEnabled;
 
@@ -65,7 +78,16 @@ class AppState extends ChangeNotifier {
   }
 
   LoadStatus _status = LoadStatus.loading;
-  Me? _me;
+
+  // Every assignment to [_me] stamps when it arrived: the energy wait it carries runs from that
+  // moment, and the return notifications are scheduled from it.
+  Me? _meValue;
+  DateTime? _meFetchedAt;
+  Me? get _me => _meValue;
+  set _me(Me? value) {
+    _meValue = value;
+    _meFetchedAt = _clock();
+  }
   ContentPack? _contentPack;
   String? _errorMessage;
   Timer? _pollingTimer;
@@ -128,6 +150,7 @@ class AppState extends ChangeNotifier {
 
   // ---- Properties ----
   List<Property> _properties = const [];
+  DateTime? _propertiesFetchedAt;
   bool _propertiesLoading = false;
   String? _propertiesError;
 
@@ -503,6 +526,9 @@ class AppState extends ChangeNotifier {
       // A level-up can unlock jobs, and the client does not work out which (see below). Ask now
       // rather than leaving the list locked until the screen's next periodic read.
       if (outcome.levelUp != null) unawaited(loadJobs(supersede: true));
+
+      // The first finished job is when a nudge is obviously worth having, so it is when we offer.
+      unawaited(_offerNotifications());
     } on JobRefusedException catch (e) {
       _setActionMessage(
         ActionScope.jobs,
@@ -834,6 +860,7 @@ class AppState extends ChangeNotifier {
     try {
       final list = await _apiClient.properties(token);
       _properties = list.properties;
+      _propertiesFetchedAt = _clock();
     } catch (e) {
       _propertiesError = e.toString();
     } finally {
@@ -935,6 +962,166 @@ class AppState extends ChangeNotifier {
     } finally {
       _skillInFlight = false;
       notifyListeners();
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Return notifications
+  // -------------------------------------------------------------------------
+
+  /// Null until the player has been asked; then their answer.
+  bool? _notificationsEnabled;
+  bool _notificationPreferenceLoaded = false;
+  bool _notificationOfferOpen = false;
+  bool _notificationOfferDeclined = false;
+  bool _notificationsBlocked = false;
+
+  /// Whether this device can show them at all — what decides if the Rap Sheet offers the setting.
+  bool get notificationsAvailable => _returnNotifier.isSupported;
+
+  /// Whether the player wants them. False until they say yes.
+  bool get notificationsEnabled => _notificationsEnabled ?? false;
+
+  /// True after the player turned them on and the OS refused. The switch stays off, and the screen
+  /// can say where to fix it.
+  bool get notificationsBlocked => _notificationsBlocked;
+
+  /// Reads the saved choice. Call once at startup, before any nudge is scheduled.
+  Future<void> loadNotificationPreference() async {
+    if (_notificationPreferenceLoaded) return;
+    try {
+      _notificationsEnabled = await _notificationPreferenceStore.read();
+    } catch (_) {
+      // an unreadable preference reads as "never asked"
+    }
+    _notificationPreferenceLoaded = true;
+    notifyListeners();
+  }
+
+  /// True while the screen should offer the player return reminders: a job has finished, they have
+  /// never decided, and they have not said "not now" this session.
+  ///
+  /// This is a question to the player, not the OS. The Android 13+ permission prompt is spendable
+  /// once and a refusal is effectively permanent, so it is held back until the player says yes to
+  /// something they have read.
+  bool get notificationOfferPending => _notificationOfferOpen;
+
+  Future<void> _offerNotifications() async {
+    if (!_returnNotifier.isSupported || _notificationOfferOpen || _notificationOfferDeclined) {
+      return;
+    }
+    await loadNotificationPreference();
+    if (_notificationsEnabled != null || _disposed) return;
+    _notificationOfferOpen = true;
+    notifyListeners();
+  }
+
+  /// "Yes" on the offer: closes it and spends the OS request.
+  Future<void> acceptNotificationOffer() async {
+    _notificationOfferOpen = false;
+    notifyListeners();
+    await setNotificationsEnabled(true);
+  }
+
+  /// "Not now": closes the offer for this session and records nothing, so the OS prompt is still
+  /// available when the player does want it (the Rap Sheet switch is always there).
+  void declineNotificationOffer() {
+    _notificationOfferOpen = false;
+    _notificationOfferDeclined = true;
+    notifyListeners();
+  }
+
+  /// The Rap Sheet switch. Turning on asks the OS if it has not already said yes; if it refuses the
+  /// switch stays off and [notificationsBlocked] says why.
+  Future<void> setNotificationsEnabled(bool enabled) async {
+    await loadNotificationPreference();
+    _notificationsBlocked = false;
+
+    if (enabled) {
+      final granted = await _returnNotifier.requestPermission();
+      _notificationsBlocked = !granted;
+      await _saveNotificationChoice(granted);
+    } else {
+      await _saveNotificationChoice(false);
+      await cancelReturnNudges();
+    }
+  }
+
+  Future<void> _saveNotificationChoice(bool enabled) async {
+    _notificationsEnabled = enabled;
+    _notificationOfferOpen = false;
+    notifyListeners();
+    try {
+      await _notificationPreferenceStore.write(enabled);
+    } catch (_) {
+      // the choice still holds for this session
+    }
+    // The permission is granted *after* sign-in, so without this the first backgrounding would
+    // schedule energy and nothing else — refreshNudgeSnapshot declined to read until just now.
+    // notifyListeners() is already silent once disposed, but a network read is not.
+    if (enabled && !_disposed) await refreshNudgeSnapshot();
+  }
+
+  /// Re-reads the property listing, but only when a nudge could actually use it.
+  ///
+  /// The takings are the one snapshot nothing else refreshes on its own, and
+  /// [scheduleReturnNudges] schedules from whatever this leaves behind — so it is worth a read on
+  /// sign-in and on every resume. On a device that cannot show notifications, or for a player who
+  /// has not opted in, that read banks nothing and tells nobody, so it is not made at all.
+  ///
+  /// The saved choice is loaded first so a preference still in flight does not read as "opted
+  /// out" and skip the refresh. [loadNotificationPreference] only guards against a *completed*
+  /// load, so racing the one `main.dart` starts can read the store twice — two local reads and a
+  /// redundant notify, deliberately left alone rather than given machinery to prevent.
+  Future<void> refreshNudgeSnapshot() async {
+    await loadNotificationPreference();
+    await _dropRevokedPermission();
+    if (!notificationsAvailable || !notificationsEnabled) return;
+    await loadProperties();
+  }
+
+  /// The player can take the permission away in system settings without telling the app, which
+  /// would leave the Rap Sheet switch reading "on" for reminders that can no longer arrive. Checked
+  /// wherever the app comes back or signs in. The setting becomes "off, and blocked", the same
+  /// state a refusal leaves, so the same message says how to get it back.
+  Future<void> _dropRevokedPermission() async {
+    if (!_returnNotifier.isSupported || _notificationsEnabled != true) return;
+    if (await _returnNotifier.isPermitted() || _disposed) return;
+    _notificationsBlocked = true;
+    await _saveNotificationChoice(false);
+  }
+
+  /// Puts the nudges worth sending on the device, replacing any earlier ones. Called as the app
+  /// goes to the background, from the last snapshot it holds.
+  Future<void> scheduleReturnNudges() async {
+    final me = _me;
+    final meFetchedAt = _meFetchedAt;
+    if (!_returnNotifier.isSupported || me == null || meFetchedAt == null) return;
+
+    final now = _clock();
+    final nudges = planReturnNudges(
+      enabled: notificationsEnabled,
+      me: me,
+      meFetchedAt: meFetchedAt,
+      properties: _properties,
+      propertiesFetchedAt: _propertiesFetchedAt ?? now,
+      now: now,
+    );
+    try {
+      await _returnNotifier.replaceAll(nudges);
+    } catch (_) {
+      // a nudge that fails to schedule is a nudge missed, never a failure
+    }
+  }
+
+  /// Clears every nudge. Called when the player is back in the app, where they no longer need
+  /// telling.
+  Future<void> cancelReturnNudges() async {
+    if (!_returnNotifier.isSupported) return;
+    try {
+      await _returnNotifier.cancelAll();
+    } catch (_) {
+      // nothing to do about a failed cancel
     }
   }
 

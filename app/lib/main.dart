@@ -4,9 +4,12 @@ import 'package:flutter/semantics.dart';
 import 'api/api_client.dart';
 import 'api/resilient_http_client.dart';
 import 'audio/outcome_sfx.dart';
+import 'notifications/return_lifecycle.dart';
+import 'notifications/return_notifier.dart';
 import 'screens/server_address_screen.dart';
 import 'screens/welcome_screen.dart';
 import 'state/app_state.dart';
+import 'storage/notification_preference_store.dart';
 import 'storage/server_address_store.dart';
 import 'storage/sound_preference_store.dart';
 import 'storage/token_store.dart';
@@ -38,11 +41,16 @@ void main() {
 }
 
 class UnderworldEmpireApp extends StatefulWidget {
-  const UnderworldEmpireApp({super.key, this.apiClientFactory});
+  const UnderworldEmpireApp({super.key, this.apiClientFactory, this.returnNotifier});
 
   /// Builds the client for a server address. Null in the shipped app (a real [HttpApiClient]);
   /// tests inject a fake so the whole startup flow can run without a network.
   final ApiClient Function(String address)? apiClientFactory;
+
+  /// The device's notification channel. Null in the shipped app (the real plugin); tests inject a
+  /// recorder so the first-job offer, the background schedule and the resume cancel can be driven
+  /// without a phone.
+  final ReturnNotifier? returnNotifier;
 
   @override
   State<UnderworldEmpireApp> createState() => _UnderworldEmpireAppState();
@@ -57,6 +65,9 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
   // One player for the app's life: AppState is rebuilt on a server change, the speakers are not.
   final OutcomeSfx _sfx = AudioPlayersOutcomeSfx();
   bool _soundEnabled = true;
+  final NotificationPreferenceStore _notificationPreferenceStore =
+      SharedPrefsNotificationPreferenceStore();
+  late final ReturnNotifier _returnNotifier = widget.returnNotifier ?? LocalReturnNotifier();
 
   // Null until a server address is known — either read from storage at startup, or entered on
   // ServerAddressScreen just now. AppState/HttpApiClient cannot be constructed before then: the
@@ -113,23 +124,29 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
     }
   }
 
-  AppState _buildAppState(String address) => AppState(
-        apiClient: widget.apiClientFactory?.call(address) ??
-            HttpApiClient(client: createResilientHttpClient(), baseUrl: address),
-        tokenStore: _tokenStore,
-        seenStore: _seenStore,
-        revealDelay: AppState.defaultRevealDelay,
-        sfx: _sfx,
-        soundStore: _soundStore,
-        soundEnabled: _soundEnabled,
-      );
+  AppState _buildAppState(String address) {
+    final appState = AppState(
+      apiClient: widget.apiClientFactory?.call(address) ??
+          HttpApiClient(client: createResilientHttpClient(), baseUrl: address),
+      tokenStore: _tokenStore,
+      seenStore: _seenStore,
+      revealDelay: AppState.defaultRevealDelay,
+      sfx: _sfx,
+      soundStore: _soundStore,
+      soundEnabled: _soundEnabled,
+      returnNotifier: _returnNotifier,
+      notificationPreferenceStore: _notificationPreferenceStore,
+    );
+    appState.loadNotificationPreference();
+    return appState;
+  }
 
   /// Builds [AppState] against [address] and bootstraps it immediately — matching exactly what
   /// this file did unconditionally before this gate existed. Used by the returning-player fast
   /// path in [_resolveStartup] and by "continue as guest" on [WelcomeScreen].
   void _startAppState(String address) {
     final appState = _buildAppState(address);
-    appState.bootstrap();
+    appState.bootstrap().then((_) => appState.refreshNudgeSnapshot());
     appState.startPolling();
     setState(() {
       _appState = appState;
@@ -150,7 +167,7 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
 
   void _continueAsGuest() {
     final appState = _appState!;
-    appState.bootstrap();
+    appState.bootstrap().then((_) => appState.refreshNudgeSnapshot());
     appState.startPolling();
     setState(() => _needsWelcomeChoice = false);
   }
@@ -176,6 +193,7 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
     // ready) by the time WelcomeScreen/LoginScreen call this — only polling and the gate flag
     // are this file's responsibility.
     _appState!.startPolling();
+    _appState!.refreshNudgeSnapshot();
     setState(() => _needsWelcomeChoice = false);
   }
 
@@ -236,7 +254,10 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
           builder: _widthLimited,
           title: pack?.name.isNotEmpty == true ? pack!.name : 'Underworld Empire',
           theme: packTheme(pack),
-          home: AppShell(appState: appState, onChangeServer: _changeServer),
+          home: ReturnNotifierLifecycle(
+            appState: appState,
+            child: AppShell(appState: appState, onChangeServer: _changeServer),
+          ),
         );
       },
     );
