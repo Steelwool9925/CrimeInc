@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:underworld_empire/notifications/return_lifecycle.dart';
 import 'package:underworld_empire/notifications/return_notifier.dart';
 import 'package:underworld_empire/notifications/return_schedule.dart';
+import 'package:underworld_empire/screens/jobs_screen.dart';
 import 'package:underworld_empire/screens/profile_screen.dart';
 import 'package:underworld_empire/state/app_state.dart';
 import 'package:underworld_empire/storage/notification_preference_store.dart';
@@ -120,6 +121,30 @@ void main() {
           'inexactAllowWhileIdle');
     });
 
+    test('shows the white status-bar silhouette, not the coloured launcher icon', () async {
+      await LocalReturnNotifier().replaceAll([_nudge('energy')]);
+
+      final init = calls.firstWhere((c) => c.method == 'initialize');
+      expect(init.arguments['defaultIcon'], 'ic_stat_nudge',
+          reason: 'Android draws status-bar icons from alpha alone, so a coloured one is a blob');
+    });
+
+    test('reports whether the OS currently lets the app notify', () async {
+      behaviour = (call) => call.method == 'areNotificationsEnabled' ? false : null;
+
+      expect(await LocalReturnNotifier().isPermitted(), isFalse);
+    });
+
+    test('a permission query that fails is taken as still permitted', () async {
+      behaviour = (call) {
+        if (call.method == 'areNotificationsEnabled') throw PlatformException(code: 'boom');
+        return null;
+      };
+
+      expect(await LocalReturnNotifier().isPermitted(), isTrue,
+          reason: 'a plugin hiccup must not switch off a setting the player chose');
+    });
+
     test('initialises the plugin once however many times it is used', () async {
       final notifier = LocalReturnNotifier();
 
@@ -167,52 +192,92 @@ void main() {
     });
   });
 
-  group('AppState — asking for permission', () {
-    test('asks once, after the first finished job, and remembers a yes', () async {
-      final s = await _signedIn();
-      expect(s.notifier.permissionRequests, 0, reason: 'nothing is asked at launch');
-
+  group('AppState — the notification offer', () {
+    Future<void> firstJob(_World s) async {
       await s.state.doJob('shake-down-corner-store');
       await pumpEventQueue();
+    }
+
+    test('offers after the first finished job but does not touch the OS', () async {
+      final s = await _signedIn();
+      expect(s.state.notificationOfferPending, isFalse, reason: 'nothing is offered at launch');
+
+      await firstJob(s);
+
+      expect(s.state.notificationOfferPending, isTrue);
+      expect(s.notifier.permissionRequests, 0,
+          reason: 'the OS prompt is spendable once, so only a yes may spend it');
+      expect(await s.store.read(), isNull, reason: 'an open offer is not a decision');
+    });
+
+    test('yes spends the OS request once and remembers a grant', () async {
+      final s = await _signedIn();
+      await firstJob(s);
+
+      await s.state.acceptNotificationOffer();
 
       expect(s.notifier.permissionRequests, 1);
+      expect(s.state.notificationOfferPending, isFalse);
       expect(s.state.notificationsEnabled, isTrue);
       expect(await s.store.read(), isTrue);
 
-      await s.state.doJob('shake-down-corner-store');
-      await pumpEventQueue();
-      expect(s.notifier.permissionRequests, 1);
+      await firstJob(s);
+      expect(s.notifier.permissionRequests, 1, reason: 'a later job never asks again');
+      expect(s.state.notificationOfferPending, isFalse);
     });
 
-    test('a refusal is remembered too, and the OS is never asked again', () async {
-      final s = await _signedIn(notifier: RecordingReturnNotifier(grantPermission: false));
+    test('not now closes the offer and leaves the choice unasked', () async {
+      final s = await _signedIn();
+      await firstJob(s);
 
-      await s.state.doJob('shake-down-corner-store');
-      await pumpEventQueue();
-      await s.state.doJob('shake-down-corner-store');
-      await pumpEventQueue();
+      s.state.declineNotificationOffer();
+
+      expect(s.state.notificationOfferPending, isFalse);
+      expect(s.notifier.permissionRequests, 0);
+      expect(s.state.notificationsEnabled, isFalse);
+      expect(await s.store.read(), isNull,
+          reason: 'null is what keeps the one-shot OS prompt available later');
+    });
+
+    test('not now is not repeated on the next job of the same session', () async {
+      final s = await _signedIn();
+      await firstJob(s);
+      s.state.declineNotificationOffer();
+
+      await firstJob(s);
+
+      expect(s.state.notificationOfferPending, isFalse);
+    });
+
+    test('an OS refusal after yes is remembered, says blocked, and is never re-offered', () async {
+      final s = await _signedIn(notifier: RecordingReturnNotifier(grantPermission: false));
+      await firstJob(s);
+
+      await s.state.acceptNotificationOffer();
+      await firstJob(s);
 
       expect(s.notifier.permissionRequests, 1);
       expect(s.state.notificationsEnabled, isFalse);
+      expect(s.state.notificationsBlocked, isTrue);
+      expect(s.state.notificationOfferPending, isFalse);
       expect(await s.store.read(), isFalse);
     });
 
-    test('does not ask a player who already chose', () async {
+    test('does not offer a player who already chose', () async {
       final s = await _signedIn(saved: false);
 
-      await s.state.doJob('shake-down-corner-store');
-      await pumpEventQueue();
+      await firstJob(s);
 
+      expect(s.state.notificationOfferPending, isFalse);
       expect(s.notifier.permissionRequests, 0);
-      expect(s.state.notificationsEnabled, isFalse);
     });
 
-    test('does not ask on a device that cannot notify', () async {
+    test('does not offer on a device that cannot notify', () async {
       final s = await _signedIn(notifier: RecordingReturnNotifier(supported: false));
 
-      await s.state.doJob('shake-down-corner-store');
-      await pumpEventQueue();
+      await firstJob(s);
 
+      expect(s.state.notificationOfferPending, isFalse);
       expect(s.notifier.permissionRequests, 0);
       expect(s.state.notificationsAvailable, isFalse);
       expect(await s.store.read(), isNull, reason: 'no decision is recorded for what cannot work');
@@ -221,10 +286,28 @@ void main() {
     test('a job that is refused does not count as the first job', () async {
       final s = await _signedIn(api: FakeApiClient(refuseDoJobWith: 'energy'));
 
-      await s.state.doJob('shake-down-corner-store');
-      await pumpEventQueue();
+      await firstJob(s);
 
-      expect(s.notifier.permissionRequests, 0);
+      expect(s.state.notificationOfferPending, isFalse);
+    });
+
+    test('turning the Rap Sheet switch on answers an open offer', () async {
+      final s = await _signedIn();
+      await firstJob(s);
+
+      await s.state.setNotificationsEnabled(true);
+
+      expect(s.state.notificationOfferPending, isFalse);
+      expect(s.state.notificationsEnabled, isTrue);
+    });
+
+    test('an offer left open does not survive the app being torn down', () async {
+      final s = await _signedIn();
+      await firstJob(s);
+
+      s.state.dispose();
+
+      await expectLater(s.state.acceptNotificationOffer(), completes);
     });
   });
 
@@ -431,6 +514,169 @@ void main() {
 
       expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
       expect(find.byKey(const Key('profile-notifications-blocked')), findsOneWidget);
+    });
+  });
+
+  group('JobsScreen — the notification offer', () {
+    const offer = Key('notification-offer');
+    const yes = Key('notification-offer-yes');
+    const later = Key('notification-offer-later');
+    const doJob = Key('do-job-shake-down-corner-store');
+
+    Future<_World> pumpJobsAfterFirstJob(WidgetTester tester, {_World? world}) async {
+      tester.view.physicalSize = const Size(800, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final s = world ?? await _signedIn();
+      await s.state.loadJobs();
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: JobsScreen(appState: s.state, refreshInterval: const Duration(hours: 1)),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
+
+      await s.state.doJob('shake-down-corner-store');
+      await tester.pumpAndSettle();
+      return s;
+    }
+
+    testWidgets('is not on screen until a job has finished', (tester) async {
+      tester.view.physicalSize = const Size(800, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final s = await _signedIn();
+      await s.state.loadJobs();
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: JobsScreen(appState: s.state, refreshInterval: const Duration(hours: 1)),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
+
+      expect(find.byKey(offer), findsNothing);
+    });
+
+    testWidgets('appears after the first job with a plain question and two choices',
+        (tester) async {
+      await pumpJobsAfterFirstJob(tester);
+
+      expect(find.byKey(offer), findsOneWidget);
+      expect(find.text('Want a nudge when your energy is full?'), findsOneWidget);
+      expect(find.byKey(yes), findsOneWidget);
+      expect(find.byKey(later), findsOneWidget);
+    });
+
+    testWidgets('both choices are at least 48px tall', (tester) async {
+      await pumpJobsAfterFirstJob(tester);
+
+      expect(tester.getSize(find.byKey(yes)).height, greaterThanOrEqualTo(48));
+      expect(tester.getSize(find.byKey(later)).height, greaterThanOrEqualTo(48));
+    });
+
+    testWidgets('yes asks the OS exactly once and the offer goes away', (tester) async {
+      final s = await pumpJobsAfterFirstJob(tester);
+      expect(s.notifier.permissionRequests, 0);
+
+      await tester.tap(find.byKey(yes));
+      await tester.pumpAndSettle();
+
+      expect(s.notifier.permissionRequests, 1);
+      expect(s.state.notificationsEnabled, isTrue);
+      expect(find.byKey(offer), findsNothing);
+    });
+
+    testWidgets('not now never touches the OS and the offer goes away', (tester) async {
+      final s = await pumpJobsAfterFirstJob(tester);
+
+      await tester.tap(find.byKey(later));
+      await tester.pumpAndSettle();
+
+      expect(s.notifier.permissionRequests, 0);
+      expect(await s.store.read(), isNull);
+      expect(find.byKey(offer), findsNothing);
+    });
+
+    testWidgets('opening and closing it does not move the Do job button', (tester) async {
+      await pumpJobsAfterFirstJob(tester);
+      final open = tester.getTopLeft(find.byKey(doJob));
+
+      await tester.tap(find.byKey(later));
+      await tester.pumpAndSettle();
+
+      expect(tester.getTopLeft(find.byKey(doJob)), open,
+          reason: 'a bar that pushed the list down would make the next tap land on the wrong job');
+    });
+
+    testWidgets('is absent for a player who already chose', (tester) async {
+      await pumpJobsAfterFirstJob(tester, world: await _signedIn(saved: false));
+
+      expect(find.byKey(offer), findsNothing);
+    });
+  });
+
+  group('AppState — a permission revoked in system settings', () {
+    test('turns the setting off and says blocked, so the switch stops promising', () async {
+      final s = await _signedIn(notifier: RecordingReturnNotifier(permitted: false), saved: true);
+      expect(s.state.notificationsEnabled, isTrue, reason: 'the saved choice says yes');
+
+      await s.state.refreshNudgeSnapshot();
+
+      expect(s.state.notificationsEnabled, isFalse);
+      expect(s.state.notificationsBlocked, isTrue);
+      expect(await s.store.read(), isFalse,
+          reason: 'false, not null: this player has decided, and must not be offered again');
+    });
+
+    test('leaves the setting alone while the permission is still held', () async {
+      final s = await _signedIn(saved: true);
+
+      await s.state.refreshNudgeSnapshot();
+
+      expect(s.state.notificationsEnabled, isTrue);
+      expect(s.state.notificationsBlocked, isFalse);
+    });
+
+    test('does not second-guess a player who never opted in', () async {
+      final s = await _signedIn(notifier: RecordingReturnNotifier(permitted: false));
+
+      await s.state.refreshNudgeSnapshot();
+
+      expect(s.state.notificationsBlocked, isFalse);
+      expect(await s.store.read(), isNull);
+    });
+
+    test('does not read the properties for a player it has just switched off', () async {
+      final s = await _signedIn(notifier: RecordingReturnNotifier(permitted: false), saved: true);
+      final before = s.api.propertiesCalls;
+
+      await s.state.refreshNudgeSnapshot();
+
+      expect(s.api.propertiesCalls, before);
+    });
+
+    test('schedules nothing once switched off', () async {
+      final s = await _signedIn(notifier: RecordingReturnNotifier(permitted: false), saved: true);
+
+      await s.state.refreshNudgeSnapshot();
+      await s.state.scheduleReturnNudges();
+
+      expect(s.notifier.lastScheduled, isEmpty);
+    });
+
+    test('is not checked on a device that cannot notify', () async {
+      final s = await _signedIn(
+        notifier: RecordingReturnNotifier(supported: false, permitted: false),
+        saved: true,
+      );
+
+      await s.state.refreshNudgeSnapshot();
+
+      expect(s.state.notificationsBlocked, isFalse);
+      expect(await s.store.read(), isTrue);
     });
   });
 

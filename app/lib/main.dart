@@ -41,11 +41,16 @@ void main() {
 }
 
 class UnderworldEmpireApp extends StatefulWidget {
-  const UnderworldEmpireApp({super.key, this.apiClientFactory});
+  const UnderworldEmpireApp({super.key, this.apiClientFactory, this.returnNotifier});
 
   /// Builds the client for a server address. Null in the shipped app (a real [HttpApiClient]);
   /// tests inject a fake so the whole startup flow can run without a network.
   final ApiClient Function(String address)? apiClientFactory;
+
+  /// The device's notification channel. Null in the shipped app (the real plugin); tests inject a
+  /// recorder so the first-job offer, the background schedule and the resume cancel can be driven
+  /// without a phone.
+  final ReturnNotifier? returnNotifier;
 
   @override
   State<UnderworldEmpireApp> createState() => _UnderworldEmpireAppState();
@@ -62,7 +67,7 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
   bool _soundEnabled = true;
   final NotificationPreferenceStore _notificationPreferenceStore =
       SharedPrefsNotificationPreferenceStore();
-  final ReturnNotifier _returnNotifier = LocalReturnNotifier();
+  late final ReturnNotifier _returnNotifier = widget.returnNotifier ?? LocalReturnNotifier();
 
   // Null until a server address is known — either read from storage at startup, or entered on
   // ServerAddressScreen just now. AppState/HttpApiClient cannot be constructed before then: the

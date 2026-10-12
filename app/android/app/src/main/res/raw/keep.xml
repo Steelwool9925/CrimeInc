@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The notification plugin finds this drawable by name at runtime, which resource shrinking cannot
+     see, so a release build would strip it and show a blank icon. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_stat_nudge" />

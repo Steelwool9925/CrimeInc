@@ -20,6 +20,10 @@ abstract class ReturnNotifier {
   /// prompt, which on Android 13+ is effectively spendable once.
   Future<bool> requestPermission();
 
+  /// Whether the OS lets the app notify right now. Never shows a prompt. The answer can change
+  /// behind the app's back: a player can revoke the permission in system settings at any time.
+  Future<bool> isPermitted();
+
   /// Replaces everything scheduled with [nudges]. An empty list clears it.
   Future<void> replaceAll(List<ScheduledNudge> nudges);
 
@@ -37,6 +41,9 @@ class SilentReturnNotifier implements ReturnNotifier {
 
   @override
   Future<bool> requestPermission() async => false;
+
+  @override
+  Future<bool> isPermitted() async => false;
 
   @override
   Future<void> replaceAll(List<ScheduledNudge> nudges) async {}
@@ -82,7 +89,7 @@ class LocalReturnNotifier implements ReturnNotifier {
     if (!_initialized) {
       await _plugin.initialize(
         settings: const InitializationSettings(
-          android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+          android: AndroidInitializationSettings('ic_stat_nudge'),
         ),
       );
       _initialized = true;
@@ -98,6 +105,19 @@ class LocalReturnNotifier implements ReturnNotifier {
     } catch (e) {
       debugPrint('Return notifications: permission request failed: $e');
       return false;
+    }
+  }
+
+  @override
+  Future<bool> isPermitted() async {
+    try {
+      final android = await _android();
+      // An error is taken as "still permitted": a plugin hiccup must not switch off a setting the
+      // player chose. Only a clear no from the OS counts.
+      return await android?.areNotificationsEnabled() ?? true;
+    } catch (e) {
+      debugPrint('Return notifications: could not read the permission: $e');
+      return true;
     }
   }
 

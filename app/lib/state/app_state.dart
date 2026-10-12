@@ -527,8 +527,8 @@ class AppState extends ChangeNotifier {
       // rather than leaving the list locked until the screen's next periodic read.
       if (outcome.levelUp != null) unawaited(loadJobs(supersede: true));
 
-      // The first finished job is when a nudge is obviously worth having, so it is when we ask.
-      unawaited(_askForNotificationsOnce());
+      // The first finished job is when a nudge is obviously worth having, so it is when we offer.
+      unawaited(_offerNotifications());
     } on JobRefusedException catch (e) {
       _setActionMessage(
         ActionScope.jobs,
@@ -972,7 +972,8 @@ class AppState extends ChangeNotifier {
   /// Null until the player has been asked; then their answer.
   bool? _notificationsEnabled;
   bool _notificationPreferenceLoaded = false;
-  bool _askingForNotifications = false;
+  bool _notificationOfferOpen = false;
+  bool _notificationOfferDeclined = false;
   bool _notificationsBlocked = false;
 
   /// Whether this device can show them at all — what decides if the Rap Sheet offers the setting.
@@ -997,23 +998,37 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Asks the OS once, on the first finished job, then remembers the answer either way.
+  /// True while the screen should offer the player return reminders: a job has finished, they have
+  /// never decided, and they have not said "not now" this session.
   ///
-  /// The Android 13+ prompt is spendable once: a refusal is effectively permanent, so it must not
-  /// come at launch before the player cares, and never twice. Nothing is asked on a device that
-  /// cannot show notifications.
-  Future<void> _askForNotificationsOnce() async {
-    if (!_returnNotifier.isSupported || _askingForNotifications) return;
-    _askingForNotifications = true;
-    try {
-      await loadNotificationPreference();
-      if (_notificationsEnabled != null) return;
+  /// This is a question to the player, not the OS. The Android 13+ permission prompt is spendable
+  /// once and a refusal is effectively permanent, so it is held back until the player says yes to
+  /// something they have read.
+  bool get notificationOfferPending => _notificationOfferOpen;
 
-      final granted = await _returnNotifier.requestPermission();
-      await _saveNotificationChoice(granted);
-    } finally {
-      _askingForNotifications = false;
+  Future<void> _offerNotifications() async {
+    if (!_returnNotifier.isSupported || _notificationOfferOpen || _notificationOfferDeclined) {
+      return;
     }
+    await loadNotificationPreference();
+    if (_notificationsEnabled != null || _disposed) return;
+    _notificationOfferOpen = true;
+    notifyListeners();
+  }
+
+  /// "Yes" on the offer: closes it and spends the OS request.
+  Future<void> acceptNotificationOffer() async {
+    _notificationOfferOpen = false;
+    notifyListeners();
+    await setNotificationsEnabled(true);
+  }
+
+  /// "Not now": closes the offer for this session and records nothing, so the OS prompt is still
+  /// available when the player does want it (the Rap Sheet switch is always there).
+  void declineNotificationOffer() {
+    _notificationOfferOpen = false;
+    _notificationOfferDeclined = true;
+    notifyListeners();
   }
 
   /// The Rap Sheet switch. Turning on asks the OS if it has not already said yes; if it refuses the
@@ -1034,6 +1049,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> _saveNotificationChoice(bool enabled) async {
     _notificationsEnabled = enabled;
+    _notificationOfferOpen = false;
     notifyListeners();
     try {
       await _notificationPreferenceStore.write(enabled);
@@ -1059,8 +1075,20 @@ class AppState extends ChangeNotifier {
   /// redundant notify, deliberately left alone rather than given machinery to prevent.
   Future<void> refreshNudgeSnapshot() async {
     await loadNotificationPreference();
+    await _dropRevokedPermission();
     if (!notificationsAvailable || !notificationsEnabled) return;
     await loadProperties();
+  }
+
+  /// The player can take the permission away in system settings without telling the app, which
+  /// would leave the Rap Sheet switch reading "on" for reminders that can no longer arrive. Checked
+  /// wherever the app comes back or signs in. The setting becomes "off, and blocked", the same
+  /// state a refusal leaves, so the same message says how to get it back.
+  Future<void> _dropRevokedPermission() async {
+    if (!_returnNotifier.isSupported || _notificationsEnabled != true) return;
+    if (await _returnNotifier.isPermitted() || _disposed) return;
+    _notificationsBlocked = true;
+    await _saveNotificationChoice(false);
   }
 
   /// Puts the nudges worth sending on the device, replacing any earlier ones. Called as the app

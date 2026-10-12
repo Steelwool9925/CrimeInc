@@ -7,6 +7,7 @@ import '../state/app_state.dart';
 import '../widgets/job_drama.dart';
 import '../widgets/job_result_panel.dart';
 import '../widgets/level_up_dialog.dart';
+import '../widgets/notification_offer.dart';
 
 /// The job list — the core of the game loop.
 ///
@@ -250,6 +251,12 @@ class _JobsScreenState extends State<JobsScreen> {
             },
           ),
         ),
+        if (state.notificationOfferPending)
+          NotificationOffer(
+            key: const Key('notification-offer'),
+            onYes: state.acceptNotificationOffer,
+            onLater: state.declineNotificationOffer,
+          ),
       ],
     );
   }

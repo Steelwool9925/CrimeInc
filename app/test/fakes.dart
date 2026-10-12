@@ -1123,12 +1123,17 @@ class RecordingReturnNotifier implements ReturnNotifier {
   RecordingReturnNotifier({
     this.supported = true,
     this.grantPermission = true,
+    this.permitted = true,
     this.failReplace = false,
     this.failCancel = false,
   });
 
   final bool supported;
   bool grantPermission;
+
+  /// What the OS reports right now, independent of what [requestPermission] last said: the player
+  /// can revoke in system settings at any time.
+  bool permitted;
   final bool failReplace;
   final bool failCancel;
 
@@ -1152,6 +1157,9 @@ class RecordingReturnNotifier implements ReturnNotifier {
     if (permissionGate != null) await permissionGate!.future;
     return grantPermission;
   }
+
+  @override
+  Future<bool> isPermitted() async => permitted;
 
   @override
   Future<void> replaceAll(List<ScheduledNudge> nudges) async {
