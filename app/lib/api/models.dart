@@ -14,6 +14,15 @@ class MeterState {
   final int regenSecondsPerPoint;
   final int? secondsUntilNextPoint;
 
+  /// Seconds from the moment this snapshot was served until the meter is full, or null when it
+  /// already is. The server publishes the wait for the next point only; the rest are whole regen
+  /// intervals after it.
+  int? get secondsUntilFull {
+    if (current >= max) return null;
+    final toNextPoint = secondsUntilNextPoint ?? regenSecondsPerPoint;
+    return toNextPoint + (max - current - 1) * regenSecondsPerPoint;
+  }
+
   factory MeterState.fromJson(Map<String, dynamic> json) => MeterState(
         current: json['current'] as int,
         max: json['max'] as int,
@@ -725,6 +734,17 @@ class Property {
   /// Stable token from the server: 'notOwned' or 'nothingToCollect'. Null when [canCollect] is
   /// true.
   final String? collectUnavailableReason;
+
+  /// Seconds from the moment this listing was served until [projectedPending] reaches [cap], or
+  /// null when nothing is filling (none owned, already full, or an income of nothing).
+  ///
+  /// Rounded up, where [projectedPending] rounds down, so at this many seconds the projection is
+  /// guaranteed to read [cap] and one second earlier it is guaranteed not to.
+  int? get secondsUntilCap {
+    final perHour = incomePerHour * quantity;
+    if (quantity < 1 || perHour <= 0 || cap <= 0 || pending >= cap) return null;
+    return ((cap - pending) * 3600 + perHour - 1) ~/ perHour;
+  }
 
   /// Whether the player holds at least one unit — what puts a counter on the card.
   bool get isOwned => quantity > 0;

@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:underworld_empire/api/api_client.dart';
 import 'package:underworld_empire/api/models.dart';
 import 'package:underworld_empire/audio/outcome_sfx.dart';
+import 'package:underworld_empire/notifications/return_notifier.dart';
+import 'package:underworld_empire/notifications/return_schedule.dart';
 import 'package:underworld_empire/storage/token_store.dart';
 
 /// A canned mastery standing: 3 of 10 completions toward rank 1 of 5.
@@ -1114,4 +1116,52 @@ class RecordingOutcomeSfx implements OutcomeSfx {
 
   @override
   void dispose() => disposed = true;
+}
+
+/// A [ReturnNotifier] that records what it was asked and can be told to refuse or to break.
+class RecordingReturnNotifier implements ReturnNotifier {
+  RecordingReturnNotifier({
+    this.supported = true,
+    this.grantPermission = true,
+    this.failReplace = false,
+    this.failCancel = false,
+  });
+
+  final bool supported;
+  bool grantPermission;
+  final bool failReplace;
+  final bool failCancel;
+
+  int permissionRequests = 0;
+  int cancelCalls = 0;
+  final List<List<ScheduledNudge>> replacements = [];
+
+  /// When set, every permission request waits on this before answering — same purpose as
+  /// [FakeApiClient.propertiesGate]: it holds the OS prompt open so a test can tear the app down
+  /// while the player is still looking at it.
+  Completer<void>? permissionGate;
+
+  List<ScheduledNudge>? get lastScheduled => replacements.isEmpty ? null : replacements.last;
+
+  @override
+  bool get isSupported => supported;
+
+  @override
+  Future<bool> requestPermission() async {
+    permissionRequests++;
+    if (permissionGate != null) await permissionGate!.future;
+    return grantPermission;
+  }
+
+  @override
+  Future<void> replaceAll(List<ScheduledNudge> nudges) async {
+    if (failReplace) throw StateError('plugin exploded');
+    replacements.add(nudges);
+  }
+
+  @override
+  Future<void> cancelAll() async {
+    cancelCalls++;
+    if (failCancel) throw StateError('plugin exploded');
+  }
 }

@@ -5,6 +5,13 @@
          fail with EPERM, which is exactly the pair of symptoms that sent us hunting through VPNs,
          Private DNS, Battery Saver, and per-app data toggles before finding the real cause here. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Return notifications (energy full, property capped). POST_NOTIFICATIONS is the Android 13+
+         runtime permission; the game asks for it after the first job rather than at launch.
+         RECEIVE_BOOT_COMPLETED lets the plugin restore scheduled nudges after a reboot. Nudges use
+         inexact scheduling on purpose, so no exact-alarm permission (denied by default on Android
+         14) is needed: a "your energy is full" nudge a few minutes late costs nothing. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <application
         android:label="Underworld Empire"
         android:name="${applicationName}"
@@ -31,6 +38,15 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
+        <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
+            </intent-filter>
+        </receiver>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
