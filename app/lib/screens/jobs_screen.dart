@@ -193,10 +193,10 @@ class _JobsScreenState extends State<JobsScreen> {
 
     return Column(
       children: [
-        if (state.actionMessage != null)
+        if (state.actionMessageFor(ActionScope.jobs) != null)
           MaterialBanner(
             key: const Key('action-message'),
-            content: Text(state.actionMessage!),
+            content: Text(state.actionMessageFor(ActionScope.jobs)!),
             actions: [
               TextButton(
                 onPressed: state.clearActionMessage,

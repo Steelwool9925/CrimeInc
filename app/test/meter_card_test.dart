@@ -170,6 +170,25 @@ void main() {
       expect(fullText.style?.color, theme.colorScheme.onSurface);
     });
 
+    testWidgets('a meter keeps its height whether it is full, counting down or has no timing',
+        (tester) async {
+      // The status line is always laid out. Home stacks three meters in one card, and a meter
+      // that grew a line as it drained would shove the dashboard tiles down by that much.
+      Future<double> heightOf(MeterState m) async {
+        await tester.pumpWidget(wrap(MeterCard(label: 'Energy', meter: m, embedded: true)));
+        final h = tester.getSize(find.byType(MeterCard)).height;
+        await tester.pumpWidget(const SizedBox());
+        return h;
+      }
+
+      final full = await heightOf(meter(current: 10, max: 10, secondsUntilNextPoint: null));
+      final counting = await heightOf(meter(current: 3, secondsUntilNextPoint: 65));
+      final untimed = await heightOf(meter(current: 3, secondsUntilNextPoint: null));
+
+      expect(counting, full);
+      expect(untimed, full);
+    });
+
     testWidgets('does not tick once the meter is full', (tester) async {
       await tester.pumpWidget(
         wrap(MeterCard(

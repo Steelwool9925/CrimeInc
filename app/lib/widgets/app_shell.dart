@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../screens/home_screen.dart';
+import '../screens/inventory_screen.dart';
 import '../screens/jobs_screen.dart';
 import '../screens/profile_screen.dart';
 import '../screens/properties_screen.dart';
 import '../state/app_state.dart';
-import 'coming_soon_screen.dart';
 
 /// The app's persistent navigation chrome: a bottom bar on narrow screens, a side rail on wide
 /// ones, wrapping the five top-level destinations.
@@ -33,7 +33,9 @@ class _AppShellState extends State<AppShell> {
   /// bottom bar instead.
   static const double _wideBreakpoint = 800;
 
-  /// The five top-level destinations, declared once. `_buildNarrow` and `_buildWide` each map
+  /// The five top-level destinations, declared once. Crew is not one of them while it is only a
+  /// placeholder: it stays a tile on Home, and Inventory — where bought gear is put on — has a button
+  /// of its own. `_buildNarrow` and `_buildWide` each map
   /// this into their own destination widget type, so adding, renaming, or reordering a
   /// destination only has to happen here. Narrow and wide labels are kept distinct because the
   /// two layouts intentionally disagree on some of them (e.g. 'Props' vs 'Properties').
@@ -46,7 +48,7 @@ class _AppShellState extends State<AppShell> {
       narrowLabel: 'Props',
       wideLabel: 'Properties',
     ),
-    (icon: Icons.groups_outlined, narrowLabel: 'Crew', wideLabel: 'Crew'),
+    (icon: Icons.backpack_outlined, narrowLabel: 'Inventory', wideLabel: 'Inventory'),
     (icon: Icons.badge_outlined, narrowLabel: 'Profile', wideLabel: 'Profile'),
   ];
 
@@ -57,7 +59,7 @@ class _AppShellState extends State<AppShell> {
         0 => HomeScreen(appState: widget.appState, onChangeServer: widget.onChangeServer),
         1 => JobsScreen(appState: widget.appState),
         2 => PropertiesScreen(appState: widget.appState),
-        3 => crewComingSoonScreen,
+        3 => InventoryScreen(appState: widget.appState),
         4 => ProfileScreen(appState: widget.appState),
         _ => throw StateError('unknown destination index: $index'),
       };

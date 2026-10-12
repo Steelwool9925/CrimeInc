@@ -29,11 +29,17 @@ class MeterCard extends StatefulWidget {
     super.key,
     required this.label,
     required this.meter,
+    this.embedded = false,
     this.tickInterval = const Duration(seconds: 1),
   });
 
   final String label;
   final MeterState meter;
+
+  /// Draws only the row, with no card of its own, so several meters can share one card. Home
+  /// groups its three that way: a card each cost about 230px, which pushed the dashboard tiles
+  /// below the fold on a phone.
+  final bool embedded;
 
   /// Injectable so widget tests can drive the countdown deterministically, matching the
   /// convention PropertiesScreen already uses for its accrual ticker.
@@ -104,41 +110,50 @@ class _MeterCardState extends State<MeterCard> {
     final meter = widget.meter;
     final progress = meter.max > 0 ? meter.current / meter.max : 0.0;
 
-    return Card(
-      // One announcement per meter, not four.
-      //
-      // Visually this is a label, a count, a bar and a status line, and the eye fuses them
-      // instantly. To a screen reader they were four unrelated nodes — "Energy", "20 / 20", a
-      // progress bar, "Full" — read in sequence with nothing tying them together, and the bar
-      // announcing a bare percentage of its own. `MergeSemantics` plus an explicit label on the
-      // whole card collapses that into the sentence a sighted player actually perceives.
-      child: MergeSemantics(
-        child: Semantics(
-          label: _semanticSummary(),
-          excludeSemantics: true,
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(widget.label, style: theme.textTheme.titleMedium),
-                    Text('${meter.current} / ${meter.max}',
-                        style: theme.textTheme.bodyMedium),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                LinearProgressIndicator(value: progress.clamp(0.0, 1.0)),
-                const SizedBox(height: 4),
-                _status(theme),
-              ],
+    // One announcement per meter, not four.
+    //
+    // Visually this is a label, a count, a bar and a status line, and the eye fuses them
+    // instantly. To a screen reader they were four unrelated nodes — "Energy", "20 / 20", a
+    // progress bar, "Full" — read in sequence with nothing tying them together, and the bar
+    // announcing a bare percentage of its own. `MergeSemantics` plus an explicit label on the
+    // whole row collapses that into the sentence a sighted player actually perceives.
+    final row = MergeSemantics(
+      child: Semantics(
+        label: _semanticSummary(),
+        excludeSemantics: true,
+        child: Row(
+          children: [
+            // A fixed slot keeps the bars of stacked meters starting at the same x; the label
+            // shrinks rather than overflowing when the player has large text turned on.
+            SizedBox(
+              width: 76,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(widget.label, style: theme.textTheme.titleMedium),
+              ),
             ),
-          ),
+            Expanded(child: LinearProgressIndicator(value: progress.clamp(0.0, 1.0))),
+            const SizedBox(width: 10),
+            // The count above, the status beneath it. The status line is always laid out (empty
+            // when there is nothing to say), so a meter does not change height as it fills.
+            ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 84),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text('${meter.current} / ${meter.max}', style: theme.textTheme.bodyMedium),
+                  SizedBox(height: 16, child: _status(theme)),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
+
+    if (widget.embedded) return row;
+    return Card(child: Padding(padding: const EdgeInsets.all(12), child: row));
   }
 
   /// The whole card as one sentence, e.g. "Energy, 20 of 20, full" or

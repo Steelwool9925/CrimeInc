@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:underworld_empire/api/models.dart';
@@ -186,6 +188,72 @@ void main() {
 
       state.acknowledgeLevelUp();
       expect(state.pendingLevelUp, isNull);
+    });
+
+    group('after a level-up', () {
+      const levelUpOutcome = DoJobResult(
+        result: JobResult(
+          jobId: 'shake-down-corner-store',
+          succeeded: true,
+          energySpent: 1,
+          cashEarned: 20,
+          xpEarned: 10,
+          healthLost: 0,
+          mastery: kFakeMastery,
+          masteryRankedUp: false,
+        ),
+        player: kFakeMe,
+        levelUp: LevelUp(levelsGained: 1, newLevel: 2, skillPointsGranted: 1, metersRefilled: true),
+      );
+      const afterLevelUp = JobList(jobs: [kCheapJob], currentEnergy: 20, level: 2);
+
+      test('re-reads the job list at once, so a job the new level unlocks is not left locked', () async {
+        final api = FakeApiClient(doJobResult: levelUpOutcome);
+        final state = await bootstrapped(api);
+        await state.loadJobs();
+        final readsBefore = api.jobsCalls;
+
+        api.jobsOverride = afterLevelUp;
+        await state.doJob('shake-down-corner-store');
+        await pumpEventQueue();
+
+        expect(api.jobsCalls, readsBefore + 1);
+        expect(state.jobs.map((j) => j.id), [kCheapJob.id]);
+      });
+
+      test('an ordinary job does not trigger an extra read', () async {
+        final api = FakeApiClient();
+        final state = await bootstrapped(api);
+        await state.loadJobs();
+        final readsBefore = api.jobsCalls;
+
+        await state.doJob('shake-down-corner-store');
+        await pumpEventQueue();
+
+        expect(api.jobsCalls, readsBefore);
+      });
+
+      test('a read already in flight cannot put the pre-level-up list back', () async {
+        final gate = Completer<void>();
+        final api = FakeApiClient(doJobResult: levelUpOutcome);
+        final state = await bootstrapped(api);
+        await state.loadJobs();
+
+        api.jobsGate = gate;
+        final periodicRead = state.loadJobs();
+        await pumpEventQueue();
+
+        api.jobsOverride = afterLevelUp;
+        await state.doJob('shake-down-corner-store');
+        await pumpEventQueue();
+
+        gate.complete();
+        await periodicRead;
+        await pumpEventQueue();
+
+        expect(state.jobs.map((j) => j.id), [kCheapJob.id]);
+        expect(state.jobsLoading, isFalse);
+      });
     });
 
     test('dismissJobResult clears the panel', () async {

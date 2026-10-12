@@ -24,10 +24,10 @@ class SkillsScreen extends StatelessWidget {
               ? const Center(child: CircularProgressIndicator())
               : Column(
                   children: [
-                    if (appState.actionMessage != null)
+                    if (appState.actionMessageFor(ActionScope.skills) != null)
                       MaterialBanner(
                         key: const Key('skills-message'),
-                        content: Text(appState.actionMessage!),
+                        content: Text(appState.actionMessageFor(ActionScope.skills)!),
                         actions: [
                           TextButton(
                             onPressed: appState.clearActionMessage,
@@ -63,7 +63,7 @@ class SkillsScreen extends StatelessWidget {
                             label: 'Attack',
                             value: me.attack,
                             target: 'attack',
-                            enabled: me.skillPoints > 0,
+                            enabled: me.skillPoints > 0 && !appState.skillInFlight,
                             onAllocate: appState.allocateSkill,
                           ),
                           const SizedBox(height: 8),
@@ -71,7 +71,7 @@ class SkillsScreen extends StatelessWidget {
                             label: 'Defense',
                             value: me.defense,
                             target: 'defense',
-                            enabled: me.skillPoints > 0,
+                            enabled: me.skillPoints > 0 && !appState.skillInFlight,
                             onAllocate: appState.allocateSkill,
                           ),
                         ],

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:underworld_empire/api/models.dart';
 import 'package:underworld_empire/screens/inventory_screen.dart';
+import 'package:underworld_empire/screens/store_screen.dart';
 import 'package:underworld_empire/state/app_state.dart';
 
 import 'fakes.dart';
@@ -40,13 +41,68 @@ void main() {
       final api = FakeApiClient();
       await pumpInventory(tester, api);
 
-      expect(api.inventoryCalls, 1);
+      // One read at bootstrap (so Home can advise an upgrade), one when the screen opens.
+      expect(api.inventoryCalls, 2);
     });
 
     testWidgets('shows an empty state when nothing is owned', (tester) async {
       await pumpInventory(tester, FakeApiClient(inventoryResult: _nothingOwned));
 
       expect(find.byKey(const Key('inv-empty')), findsOneWidget);
+    });
+
+    testWidgets('the empty state names the Market and has a button that opens it', (tester) async {
+      await pumpInventory(tester, FakeApiClient(inventoryResult: _nothingOwned));
+
+      final text = tester.widget<Text>(find.byKey(const Key('inv-empty'))).data!;
+      expect(text, contains('Market'));
+      expect(text, isNot(contains('Store')));
+
+      await tester.tap(find.byKey(const Key('inv-empty-go-to-market')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(StoreScreen), findsOneWidget);
+    });
+
+    testWidgets('opened as a pushed screen, the Market takes its place so Back returns to where the player came from',
+        (tester) async {
+      final state = AppState(apiClient: FakeApiClient(inventoryResult: _nothingOwned), tokenStore: InMemoryTokenStore());
+      await state.bootstrap();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  key: const Key('open-inventory'),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => InventoryScreen(appState: state)),
+                  ),
+                  child: const Text('base'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('open-inventory')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('inv-empty-go-to-market')));
+      await tester.pumpAndSettle();
+      expect(find.byType(StoreScreen), findsOneWidget);
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('open-inventory')), findsOneWidget, reason: 'Back lands on the base page');
+      expect(find.byType(InventoryScreen, skipOffstage: false), findsNothing, reason: 'no Inventory left underneath');
+    });
+
+    testWidgets('the empty-state button is not offered once there is something to show', (tester) async {
+      await pumpInventory(tester, FakeApiClient());
+
+      expect(find.byKey(const Key('inv-empty-go-to-market')), findsNothing);
     });
   });
 
@@ -153,11 +209,12 @@ void main() {
     testWidgets('retry re-requests the catalog', (tester) async {
       final api = FakeApiClient(throwOnInventory: true);
       await pumpInventory(tester, api);
+      expect(api.inventoryCalls, 2, reason: 'bootstrap read plus the screen opening');
 
       await tester.tap(find.byKey(const Key('inv-retry')));
       await tester.pumpAndSettle();
 
-      expect(api.inventoryCalls, 2);
+      expect(api.inventoryCalls, 3);
     });
   });
 }

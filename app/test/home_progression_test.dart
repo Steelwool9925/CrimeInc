@@ -42,6 +42,20 @@ void main() {
       expect(find.text('450 XP'), findsOneWidget);
     });
 
+    testWidgets('cash, level, xp and base stats share one card', (tester) async {
+      await pumpHome(tester, FakeApiClient(meResult: meWith(level: 3, xp: 450, attack: 11)));
+
+      final card = find.ancestor(of: find.byKey(const Key('home-level')), matching: find.byType(Card));
+      for (final key in ['home-xp', 'home-attack', 'home-defense']) {
+        expect(
+          find.descendant(of: card.first, matching: find.byKey(Key(key))),
+          findsOneWidget,
+          reason: '$key belongs in the same card as the level',
+        );
+      }
+      expect(find.descendant(of: card.first, matching: find.textContaining('Cash')), findsOneWidget);
+    });
+
     testWidgets('shows attack and defense — CP2 checks the stat here', (tester) async {
       await pumpHome(tester, FakeApiClient(meResult: meWith(attack: 11, defense: 7)));
 
@@ -50,23 +64,67 @@ void main() {
       expect(find.text('Base defense 7'), findsOneWidget);
     });
 
-    testWidgets('prompts when skill points are unspent', (tester) async {
+    testWidgets('says so on the Skills button when skill points are unspent', (tester) async {
       await pumpHome(tester, FakeApiClient(meResult: meWith(skillPoints: 1)));
 
-      expect(find.byKey(const Key('home-skill-points')), findsOneWidget);
-      expect(find.text('1 skill point to spend'), findsOneWidget);
+      final label = find.descendant(
+        of: find.byKey(const Key('go-to-skills')),
+        matching: find.byKey(const Key('home-skill-points')),
+      );
+      expect(label, findsOneWidget);
+      expect(tester.widget<Text>(label).data, 'Skills · 1 point to spend');
+    });
+
+    testWidgets('a screen reader hears the count, not the separator', (tester) async {
+      final handle = tester.ensureSemantics();
+      await pumpHome(tester, FakeApiClient(meResult: meWith(skillPoints: 2)));
+
+      expect(find.semantics.byLabel('Skills, 2 points to spend'), findsOneWidget);
+      expect(find.semantics.byLabel(RegExp('·')), findsNothing);
+      handle.dispose();
     });
 
     testWidgets('pluralises the skill point prompt', (tester) async {
       await pumpHome(tester, FakeApiClient(meResult: meWith(skillPoints: 3)));
 
-      expect(find.text('3 skill points to spend'), findsOneWidget);
+      expect(find.text('Skills · 3 points to spend'), findsOneWidget);
     });
 
     testWidgets('hides the prompt with no points', (tester) async {
       await pumpHome(tester, FakeApiClient(meResult: meWith(skillPoints: 0)));
 
       expect(find.byKey(const Key('home-skill-points')), findsNothing);
+      expect(find.text('Skills'), findsOneWidget);
+    });
+
+    testWidgets('does not repeat the prompt as a line of its own in the character card', (tester) async {
+      await pumpHome(tester, FakeApiClient(meResult: meWith(skillPoints: 2)));
+
+      expect(find.textContaining('skill point'), findsNothing);
+      final card = find.ancestor(of: find.byKey(const Key('home-level')), matching: find.byType(Card)).first;
+      expect(find.descendant(of: card, matching: find.textContaining('to spend')), findsNothing);
+    });
+
+    testWidgets('an unspent skill point costs the dashboard no vertical space', (tester) async {
+      tester.view.physicalSize = const Size(375, 667);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      Future<double> marketTop(int skillPoints) async {
+        final state = AppState(
+          apiClient: FakeApiClient(meResult: meWith(skillPoints: skillPoints)),
+          tokenStore: InMemoryTokenStore(),
+        );
+        await state.bootstrap();
+        await tester.pumpWidget(MaterialApp(home: HomeScreen(appState: state, onChangeServer: () {})));
+        await tester.pumpAndSettle();
+        return tester.getRect(find.byKey(const Key('go-to-store'))).top;
+      }
+
+      final without = await marketTop(0);
+      final withPoint = await marketTop(1);
+
+      expect(withPoint, without, reason: 'the Market tile must not move down for a skill point');
     });
   });
 
@@ -107,7 +165,7 @@ void main() {
     testWidgets('the Skills button shows the unspent count', (tester) async {
       await pumpHome(tester, FakeApiClient(meResult: meWith(skillPoints: 2)));
 
-      expect(find.text('Skills (2)'), findsOneWidget);
+      expect(find.text('Skills · 2 points to spend'), findsOneWidget);
     });
 
     testWidgets('the Skills button omits the count at zero', (tester) async {

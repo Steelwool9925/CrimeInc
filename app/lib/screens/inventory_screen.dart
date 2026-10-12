@@ -4,6 +4,7 @@ import '../api/models.dart';
 import '../state/app_state.dart';
 import '../widgets/accessible_name.dart';
 import '../widgets/item_gating.dart';
+import 'store_screen.dart';
 
 /// The inventory — what the player owns, what they are wearing, and the stats that produces.
 ///
@@ -25,6 +26,20 @@ class _InventoryScreenState extends State<InventoryScreen> {
     super.initState();
     WidgetsBinding.instance
         .addPostFrameCallback((_) => widget.appState.loadInventory());
+  }
+
+  /// Opened as a pushed screen, the Market takes this one's place so Back does not loop between
+  /// the two. As a tab of the app shell this screen is the shell itself, which must stay put.
+  void _openMarket() {
+    final navigator = Navigator.of(context);
+    final route = MaterialPageRoute<void>(
+      builder: (_) => StoreScreen(appState: widget.appState),
+    );
+    if (navigator.canPop()) {
+      navigator.pushReplacement(route);
+    } else {
+      navigator.push(route);
+    }
   }
 
   @override
@@ -73,10 +88,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
     return Column(
       children: [
-        if (state.actionMessage != null)
+        if (state.actionMessageFor(ActionScope.items) != null)
           MaterialBanner(
             key: const Key('action-message'),
-            content: Text(state.actionMessage!),
+            content: Text(state.actionMessageFor(ActionScope.items)!),
             actions: [
               TextButton(
                 onPressed: state.clearActionMessage,
@@ -94,11 +109,22 @@ class _InventoryScreenState extends State<InventoryScreen> {
               ? Center(
                   child: Padding(
                     padding: const EdgeInsets.all(32),
-                    child: Text(
-                      'You own nothing yet. Visit the Store to buy your first piece of gear.',
-                      key: const Key('inv-empty'),
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodyMedium,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'You own nothing yet. Visit the Market to buy your first piece of gear.',
+                          key: const Key('inv-empty'),
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        const SizedBox(height: 16),
+                        FilledButton(
+                          key: const Key('inv-empty-go-to-market'),
+                          onPressed: _openMarket,
+                          child: const Text('Open the Market'),
+                        ),
+                      ],
                     ),
                   ),
                 )

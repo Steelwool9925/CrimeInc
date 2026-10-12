@@ -8,20 +8,29 @@ import '../api/models.dart';
 import '../audio/outcome_sfx.dart';
 import '../storage/sound_preference_store.dart';
 import '../storage/token_store.dart';
+import '../storage/upgrade_seen_store.dart';
 import '../widgets/job_drama.dart';
+import '../widgets/upgrade_advice.dart';
 
 enum LoadStatus { loading, ready, error }
+
+/// The part of the game an [AppState.actionMessage] came from. A refusal is about one thing the
+/// player just did, so only the screens for that thing show it: an error from spending a skill point
+/// has no business on the Market.
+enum ActionScope { jobs, items, properties, skills }
 
 class AppState extends ChangeNotifier {
   AppState({
     required ApiClient apiClient,
     required TokenStore tokenStore,
+    UpgradeSeenStore? seenStore,
     this.revealDelay = Duration.zero,
     OutcomeSfx? sfx,
     SoundPreferenceStore? soundStore,
     bool soundEnabled = true,
   })  : _apiClient = apiClient,
         _tokenStore = tokenStore,
+        _seenStore = seenStore ?? InMemoryUpgradeSeenStore(),
         _sfx = sfx ?? const SilentOutcomeSfx(),
         _soundStore = soundStore ?? InMemorySoundPreferenceStore(),
         _soundEnabled = soundEnabled;
@@ -35,6 +44,7 @@ class AppState extends ChangeNotifier {
 
   final ApiClient _apiClient;
   final TokenStore _tokenStore;
+  final UpgradeSeenStore _seenStore;
   final OutcomeSfx _sfx;
   final SoundPreferenceStore _soundStore;
 
@@ -64,6 +74,7 @@ class AppState extends ChangeNotifier {
   // ---- Jobs ----
   List<Job> _jobs = const [];
   bool _jobsLoading = false;
+  int _jobsRequest = 0;
   String? _jobsError;
 
   /// The id of the job currently being performed, so the UI can disable just that row.
@@ -86,15 +97,34 @@ class AppState extends ChangeNotifier {
 
   /// A refusal or error from the last action, shown transiently.
   String? _actionMessage;
+  ActionScope? _actionMessageScope;
 
   // ---- Inventory & store ----
   List<InventoryItem> _inventory = const [];
   LoadoutStats? _loadout;
   bool _inventoryLoading = false;
+  int _inventoryRequest = 0;
   String? _inventoryError;
+
+  /// The player's level when the catalog on hand was requested. The gating on each row includes a
+  /// `level` verdict, so a level-up makes that picture stale in a way cash changes do not.
+  int? _inventoryLevel;
+
+  /// The level the newest catalog request was made at. While a read is in flight this, not
+  /// [_inventoryLevel], says what the answer will reflect.
+  int? _inventoryRequestedLevel;
+
+  // The upgrade advice, derived from the catalog and cash and recomputed only when one of them
+  // changes — never on a timer. See [upgradeAdvice].
+  UpgradeAdvice? _advice;
+  List<InventoryItem>? _adviceInventory;
+  int? _adviceCash;
 
   /// The id of the item currently being bought or worn, so the UI can disable just that row.
   String? _itemInFlight;
+
+  /// True while a skill point is being spent, so the screen can disable both buttons.
+  bool _skillInFlight = false;
 
   // ---- Properties ----
   List<Property> _properties = const [];
@@ -120,6 +150,8 @@ class AppState extends ChangeNotifier {
   int get totalJobsCompleted =>
       _jobs.fold(0, (sum, job) => sum + job.mastery.completions);
 
+  bool get skillInFlight => _skillInFlight;
+
   bool get jobsLoading => _jobsLoading;
   String? get jobsError => _jobsError;
   String? get jobInFlight => _jobInFlight;
@@ -132,14 +164,72 @@ class AppState extends ChangeNotifier {
   LevelUp? get pendingLevelUp => _pendingLevelUp;
   String? get actionMessage => _actionMessage;
 
+  /// The message, but only to the screens it belongs to; null for everyone else.
+  String? actionMessageFor(ActionScope scope) => _actionMessageScope == scope ? _actionMessage : null;
+
+  void _setActionMessage(ActionScope scope, String text) {
+    _actionMessage = text;
+    _actionMessageScope = scope;
+  }
+
   List<InventoryItem> get inventory => _inventory;
 
-  /// Effective combat stats. Null until the inventory has been read once — [Me] carries only the
+  /// Effective combat stats. Null until the inventory has been read — [Me] carries only the
   /// player's base stats, because building a loadout costs a query the progression endpoints do not
-  /// need to pay for.
+  /// need to pay for. Bootstrap starts that read without waiting for it, so Home briefly has no
+  /// loadout on a cold start.
   LoadoutStats? get loadout => _loadout;
 
   bool get inventoryLoading => _inventoryLoading;
+
+  /// The advised item the player has already been shown in the Market. The accent dot is for
+  /// attention, so it clears once they have looked; a different item being advised later raises it
+  /// again, because that is news.
+  String? _upgradeSeenItemId;
+
+  /// Whether the saved answer has been read (or given up on). Until then the dot stays hidden rather
+  /// than flash for an item the player has in fact already been shown.
+  bool _upgradeSeenLoaded = false;
+
+  /// Whether the Market tile's dot should show: there is advice and the player has not yet opened
+  /// the Market since it named this item. The words ("Upgrade available") do not depend on this.
+  bool get upgradeBadgeVisible {
+    final advice = upgradeAdvice;
+    return _upgradeSeenLoaded && advice != null && advice.item.id != _upgradeSeenItemId;
+  }
+
+  /// Records that the Market was opened while [upgradeAdvice] named an item. A no-op, with no
+  /// notification, once recorded — safe to call on every build of the Market.
+  void markUpgradeSeen() {
+    final id = upgradeAdvice?.item.id;
+    if (id == null || id == _upgradeSeenItemId) return;
+    _upgradeSeenItemId = id;
+    notifyListeners();
+    unawaited(_rememberSeen(id));
+  }
+
+  /// Best effort in both directions: not being able to remember costs only the dot coming back.
+  Future<void> _rememberSeen(String itemId) async {
+    final playerId = _me?.playerId;
+    if (playerId == null) return;
+    try {
+      await _seenStore.write(playerId, itemId);
+    } catch (_) {}
+  }
+
+  /// The one upgrade worth mentioning right now, or null. Derived from data already held — the
+  /// catalog and cash — so showing it costs no request, and memoised so a rebuild is a comparison.
+  UpgradeAdvice? get upgradeAdvice {
+    final me = _me;
+    if (me == null) return null;
+    if (!identical(_adviceInventory, _inventory) || _adviceCash != me.cash) {
+      _advice = adviseUpgrade(me, _inventory);
+      _adviceInventory = _inventory;
+      _adviceCash = me.cash;
+    }
+    return _advice;
+  }
+
   String? get inventoryError => _inventoryError;
   String? get itemInFlight => _itemInFlight;
 
@@ -205,6 +295,24 @@ class AppState extends ChangeNotifier {
     _deviceToken = deviceToken;
     await _tokenStore.write(deviceToken);
     _status = LoadStatus.ready;
+
+    // Read the catalog now so the upgrade advice exists on the first Home, not only after a visit
+    // to the Market. Not awaited: Home paints from the player projection alone, and a failure here
+    // costs nothing but the nudge (the Market re-reads when opened).
+    unawaited(loadInventory());
+    unawaited(_loadSeen(_me!.playerId));
+  }
+
+  /// Reads which advised upgrade this player has already been shown. Off the path to Home like the
+  /// catalog read: a slow or broken store costs only the dot, never the screen.
+  Future<void> _loadSeen(String playerId) async {
+    try {
+      final id = await _seenStore.read(playerId);
+      // Opening the Market before this arrives is newer news than what was saved.
+      _upgradeSeenItemId ??= id;
+    } catch (_) {}
+    _upgradeSeenLoaded = true;
+    notifyListeners();
   }
 
   bool _loggingIn = false;
@@ -304,6 +412,7 @@ class AppState extends ChangeNotifier {
       if (_status != LoadStatus.ready) {
         _status = LoadStatus.ready;
       }
+      _reloadInventoryIfLevelChanged();
     } catch (e) {
       // silent on poll failure — keep last known state
     }
@@ -324,23 +433,29 @@ class AppState extends ChangeNotifier {
   // Jobs
   // -------------------------------------------------------------------------
 
-  /// Loads the job catalog. Safe to call repeatedly; concurrent calls are collapsed.
-  Future<void> loadJobs() async {
+  /// Loads the job catalog. Safe to call repeatedly; concurrent calls are collapsed unless
+  /// [supersede] is set. A level-up sets it: a read already in flight was requested before the
+  /// level-up and would answer with the old gating, so only the newest read's answer is applied.
+  Future<void> loadJobs({bool supersede = false}) async {
     final token = _deviceToken;
-    if (token == null || _jobsLoading) return;
+    if (token == null || (_jobsLoading && !supersede)) return;
 
+    final request = ++_jobsRequest;
     _jobsLoading = true;
     _jobsError = null;
     notifyListeners();
 
     try {
       final list = await _apiClient.jobs(token);
+      if (request != _jobsRequest) return;
       _jobs = list.jobs;
     } catch (e) {
-      _jobsError = e.toString();
+      if (request == _jobsRequest) _jobsError = e.toString();
     } finally {
-      _jobsLoading = false;
-      notifyListeners();
+      if (request == _jobsRequest) {
+        _jobsLoading = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -380,20 +495,28 @@ class AppState extends ChangeNotifier {
       if (outcome.levelUp != null) {
         _pendingLevelUp = outcome.levelUp;
       }
+      _reloadInventoryIfLevelChanged();
 
       // The catalog carries per-job mastery and affordability, both of which just changed.
       _applyOutcomeToCatalog(outcome);
+
+      // A level-up can unlock jobs, and the client does not work out which (see below). Ask now
+      // rather than leaving the list locked until the screen's next periodic read.
+      if (outcome.levelUp != null) unawaited(loadJobs(supersede: true));
     } on JobRefusedException catch (e) {
-      _actionMessage = switch (e.reason) {
-        'energy' => 'Not enough energy.',
-        'level' => 'Your level is too low for that job.',
-        'stats' => 'Your attack or defense is too low for that job.',
-        'items' => 'You do not have enough of a required item for that job.',
-        'extras' => 'That job does not take those extra items.',
-        _ => e.detail,
-      };
+      _setActionMessage(
+        ActionScope.jobs,
+        switch (e.reason) {
+          'energy' => 'Not enough energy.',
+          'level' => 'Your level is too low for that job.',
+          'stats' => 'Your attack or defense is too low for that job.',
+          'items' => 'You do not have enough of a required item for that job.',
+          'extras' => 'That job does not take those extra items.',
+          _ => e.detail,
+        },
+      );
     } catch (e) {
-      _actionMessage = 'Could not do that job. $e';
+      _setActionMessage(ActionScope.jobs, 'Could not do that job. $e');
     } finally {
       _jobInFlight = null;
       notifyListeners();
@@ -566,25 +689,47 @@ class AppState extends ChangeNotifier {
 
   /// Loads the item catalog with this player's holdings and gating folded in.
   ///
-  /// Safe to call repeatedly; concurrent calls are collapsed.
-  Future<void> loadInventory() async {
+  /// Safe to call repeatedly; concurrent calls are collapsed unless [supersede] is set. An item
+  /// action sets it: a read already in flight was requested before the action and will answer with
+  /// the pre-action catalog, so the action needs its own read, and only the newest read's answer is
+  /// applied.
+  Future<void> loadInventory({bool supersede = false}) async {
     final token = _deviceToken;
-    if (token == null || _inventoryLoading) return;
+    if (token == null || (_inventoryLoading && !supersede)) return;
 
+    final request = ++_inventoryRequest;
     _inventoryLoading = true;
     _inventoryError = null;
+    final levelAtRequest = _me?.level;
+    _inventoryRequestedLevel = levelAtRequest;
     notifyListeners();
 
     try {
       final list = await _apiClient.inventory(token);
+      if (request != _inventoryRequest) return;
       _inventory = list.items;
       _loadout = list.loadout;
+      _inventoryLevel = levelAtRequest;
     } catch (e) {
-      _inventoryError = e.toString();
+      if (request == _inventoryRequest) _inventoryError = e.toString();
     } finally {
-      _inventoryLoading = false;
-      notifyListeners();
+      if (request == _inventoryRequest) {
+        _inventoryLoading = false;
+        notifyListeners();
+      }
     }
+  }
+
+  /// Re-reads the catalog when the player's level has moved since it was requested: a level-up can
+  /// unlock items, and the client never works that out itself. Event-driven — one request per
+  /// level-up, not a poll.
+  void _reloadInventoryIfLevelChanged() {
+    final level = _me?.level;
+    // A read still in flight was requested at some level and will answer for that one, so that is
+    // the picture to compare against; once nothing is in flight it is the catalog on hand.
+    final baseline = _inventoryLoading ? _inventoryRequestedLevel : _inventoryLevel;
+    if (level == null || baseline == null || level == baseline) return;
+    unawaited(loadInventory(supersede: true));
   }
 
   /// Buys one copy of [itemId].
@@ -633,8 +778,9 @@ class AppState extends ChangeNotifier {
   /// The in-flight guard is held across the refresh, not released when the action returns. Between
   /// those two points the rows on screen still carry the gating the server computed *before* the
   /// action, so a second action started there would be aimed at a picture the server has already
-  /// moved past — and `loadInventory` would collapse its refresh into the one still running, leaving
-  /// that second action's own changes unread. Keeping the guard up closes both.
+  /// moved past. Keeping the guard up closes that. The refresh also supersedes any read already in
+  /// flight (the bootstrap or level-change read): that one was requested before this action and
+  /// would answer with the pre-action catalog.
   Future<void> _itemAction(String itemId, Future<void> Function(String) act) async {
     final token = _deviceToken;
     if (token == null || _itemInFlight != null) return;
@@ -646,13 +792,13 @@ class AppState extends ChangeNotifier {
     try {
       await act(token);
     } on JobRefusedException catch (e) {
-      _actionMessage = _itemRefusalMessage(e);
+      _setActionMessage(ActionScope.items, _itemRefusalMessage(e));
     } catch (e) {
-      _actionMessage = 'Could not do that. $e';
+      _setActionMessage(ActionScope.items, 'Could not do that. $e');
     }
 
     try {
-      await loadInventory();
+      await loadInventory(supersede: true);
     } finally {
       _itemInFlight = null;
       notifyListeners();
@@ -738,9 +884,9 @@ class AppState extends ChangeNotifier {
     try {
       await act(token);
     } on JobRefusedException catch (e) {
-      _actionMessage = _propertyRefusalMessage(e);
+      _setActionMessage(ActionScope.properties, _propertyRefusalMessage(e));
     } catch (e) {
-      _actionMessage = 'Could not do that. $e';
+      _setActionMessage(ActionScope.properties, 'Could not do that. $e');
     }
 
     try {
@@ -765,24 +911,31 @@ class AppState extends ChangeNotifier {
   // -------------------------------------------------------------------------
 
   /// Spends one skill point on [target] ('attack' or 'defense').
+  ///
+  /// One spend at a time: a second tap while the first is on its way would reach the server as a
+  /// competing request and come back as a conflict, which reads as a failure for a spend that in
+  /// fact worked.
   Future<void> allocateSkill(String target) async {
     final token = _deviceToken;
-    if (token == null) return;
+    if (token == null || _skillInFlight) return;
 
+    _skillInFlight = true;
     _actionMessage = null;
     notifyListeners();
 
     try {
       _me = await _apiClient.allocateSkill(token, target);
     } on JobRefusedException catch (e) {
-      _actionMessage = e.reason == 'noSkillPoints'
-          ? 'No skill points to spend.'
-          : e.detail;
+      _setActionMessage(
+        ActionScope.skills,
+        e.reason == 'noSkillPoints' ? 'No skill points to spend.' : e.detail,
+      );
     } catch (e) {
-      _actionMessage = 'Could not allocate that point. $e';
+      _setActionMessage(ActionScope.skills, 'Could not allocate that point. $e');
+    } finally {
+      _skillInFlight = false;
+      notifyListeners();
     }
-
-    notifyListeners();
   }
 
   @override

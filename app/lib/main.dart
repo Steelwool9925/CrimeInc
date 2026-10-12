@@ -10,6 +10,7 @@ import 'state/app_state.dart';
 import 'storage/server_address_store.dart';
 import 'storage/sound_preference_store.dart';
 import 'storage/token_store.dart';
+import 'storage/upgrade_seen_store.dart';
 import 'theme/pack_theme.dart';
 import 'widgets/app_shell.dart';
 import 'widgets/content_width_limit.dart';
@@ -50,6 +51,7 @@ class UnderworldEmpireApp extends StatefulWidget {
 class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
   final ServerAddressStore _serverAddressStore = SharedPrefsServerAddressStore();
   final TokenStore _tokenStore = SharedPrefsTokenStore();
+  final UpgradeSeenStore _seenStore = SharedPrefsUpgradeSeenStore();
   final SoundPreferenceStore _soundStore = SharedPrefsSoundPreferenceStore();
 
   // One player for the app's life: AppState is rebuilt on a server change, the speakers are not.
@@ -115,6 +117,7 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
         apiClient: widget.apiClientFactory?.call(address) ??
             HttpApiClient(client: createResilientHttpClient(), baseUrl: address),
         tokenStore: _tokenStore,
+        seenStore: _seenStore,
         revealDelay: AppState.defaultRevealDelay,
         sfx: _sfx,
         soundStore: _soundStore,

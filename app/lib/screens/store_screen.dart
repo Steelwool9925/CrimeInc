@@ -13,15 +13,26 @@ import 'inventory_screen.dart';
 /// that the server then refuses — and would be a second copy of a rule free to drift the moment
 /// either side is retuned.
 class StoreScreen extends StatefulWidget {
-  const StoreScreen({super.key, required this.appState});
+  const StoreScreen({super.key, required this.appState, this.highlightItemId});
 
   final AppState appState;
+
+  /// An item to bring to the player's attention: scrolled into view and marked "Your next
+  /// upgrade". Set when Home's upgrade prompt opens the Market, so the nudge ends at the item and
+  /// not at the top of a list.
+  final String? highlightItemId;
 
   @override
   State<StoreScreen> createState() => _StoreScreenState();
 }
 
 class _StoreScreenState extends State<StoreScreen> {
+  /// Below this width the app bar cannot hold the title, the cash and the Inventory control at once.
+  static const double _narrowWidth = 360;
+
+  final _highlightKey = GlobalKey();
+  bool _revealed = false;
+
   @override
   void initState() {
     super.initState();
@@ -38,24 +49,43 @@ class _StoreScreenState extends State<StoreScreen> {
         final state = widget.appState;
         final cashLabel = state.contentPack?.cashLabel ?? 'Cash';
 
+        // Beside the title there is room for the cash on a normal phone. On a very narrow one the
+        // title was squeezed to "MAR…" by the cash and the labelled Inventory control, so the cash
+        // moves to a line of its own under the bar and the title keeps its room.
+        final narrow = MediaQuery.sizeOf(context).width < _narrowWidth;
+        final cash = state.me == null
+            ? null
+            : Text('$cashLabel ${state.me!.cash}', key: const Key('store-cash'));
+
         return Scaffold(
           appBar: AppBar(
             title: const Text('Market'),
+            bottom: narrow && cash != null
+                ? PreferredSize(
+                    preferredSize: const Size.fromHeight(28),
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: Padding(padding: const EdgeInsets.only(right: 16, bottom: 6), child: cash),
+                    ),
+                  )
+                : null,
             actions: [
-              if (state.me != null)
+              if (!narrow && cash != null)
                 Padding(
                   padding: const EdgeInsets.only(right: 16),
-                  child: Center(
-                    child: Text(
-                      '$cashLabel ${state.me!.cash}',
-                      key: const Key('store-cash'),
-                    ),
-                  ),
+                  child: Center(child: cash),
                 ),
-              IconButton(
+              // Icon and word together: an icon-only control hides behind a tooltip a phone never
+              // shows, and this is the way from buying an item to wearing it.
+              TextButton.icon(
                 key: const Key('go-to-inventory'),
+                // The theme's accent red on the ink ground is about 3.5:1 — too faint for small
+                // text, and this label exists to be read.
+                style: TextButton.styleFrom(
+                  foregroundColor: Theme.of(context).colorScheme.onSurface,
+                ),
                 icon: const Icon(Icons.backpack_outlined),
-                tooltip: 'Inventory',
+                label: const Text('Inventory'),
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute(
                       builder: (_) => InventoryScreen(appState: widget.appState)),
@@ -96,12 +126,25 @@ class _StoreScreenState extends State<StoreScreen> {
       );
     }
 
+    // The catalog is on screen: the Market has been visited, so the dot on Home can clear. And if
+    // an item was asked for, bring it into view — once, so a later rebuild never yanks the list
+    // back from where the player has scrolled to.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      widget.appState.markUpgradeSeen();
+      final target = _highlightKey.currentContext;
+      if (!_revealed && target != null) {
+        _revealed = true;
+        Scrollable.ensureVisible(target, alignment: 0.1, duration: const Duration(milliseconds: 300));
+      }
+    });
+
     return Column(
       children: [
-        if (state.actionMessage != null)
+        if (state.actionMessageFor(ActionScope.items) != null)
           MaterialBanner(
             key: const Key('action-message'),
-            content: Text(state.actionMessage!),
+            content: Text(state.actionMessageFor(ActionScope.items)!),
             actions: [
               TextButton(
                 onPressed: state.clearActionMessage,
@@ -110,23 +153,33 @@ class _StoreScreenState extends State<StoreScreen> {
             ],
           ),
         Expanded(
-          child: ListView.builder(
+          // Every row is built up front, not lazily (ListView builds on demand even from a list of
+          // children): a highlighted item further down has to exist to be scrolled to, and a
+          // catalog is a handful of rows.
+          child: SingleChildScrollView(
             padding: const EdgeInsets.all(16),
-            itemCount: state.inventory.length,
-            itemBuilder: (context, index) {
-              final item = state.inventory[index];
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: _StoreCard(
-                  item: item,
-                  cashLabel: cashLabel,
-                  busy: state.itemInFlight == item.id,
-                  anyBusy: state.itemInFlight != null,
-                  onBuy: () => state.buyItem(item.id),
-                  onEquip: () => state.equipItem(item.id),
-                ),
-              );
-            },
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final item in state.inventory)
+                  Padding(
+                    key: item.id == widget.highlightItemId ? _highlightKey : null,
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _StoreCard(
+                      item: item,
+                      cashLabel: cashLabel,
+                      busy: state.itemInFlight == item.id,
+                      anyBusy: state.itemInFlight != null,
+                      highlighted: item.id == widget.highlightItemId && !item.isOwned,
+                      comparison: state.upgradeAdvice?.item.id == item.id
+                          ? state.upgradeAdvice?.comparisonLabel
+                          : null,
+                      onBuy: () => state.buyItem(item.id),
+                      onEquip: () => state.equipItem(item.id),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ],
@@ -140,6 +193,8 @@ class _StoreCard extends StatelessWidget {
     required this.cashLabel,
     required this.busy,
     required this.anyBusy,
+    required this.highlighted,
+    required this.comparison,
     required this.onBuy,
     required this.onEquip,
   });
@@ -148,6 +203,12 @@ class _StoreCard extends StatelessWidget {
   final String cashLabel;
   final bool busy;
   final bool anyBusy;
+
+  /// The item Home recommended. Marked in words and with the accent colour, never colour alone.
+  final bool highlighted;
+
+  /// What the highlighted item adds over what is worn, when that is not just its own stats.
+  final String? comparison;
   final VoidCallback onBuy;
   final VoidCallback onEquip;
 
@@ -158,11 +219,30 @@ class _StoreCard extends StatelessWidget {
 
     return Card(
       key: Key('store-card-${item.id}'),
+      shape: highlighted
+          ? (theme.cardTheme.shape as RoundedRectangleBorder?)
+              ?.copyWith(side: BorderSide(color: theme.colorScheme.primary, width: 3))
+          : null,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (highlighted) ...[
+              Row(
+                key: Key('store-highlight-${item.id}'),
+                children: [
+                  Icon(Icons.circle, size: 10, color: theme.colorScheme.primary),
+                  const SizedBox(width: 8),
+                  Text('Your next upgrade', style: theme.textTheme.titleSmall),
+                ],
+              ),
+              if (comparison != null) ...[
+                const SizedBox(height: 2),
+                Text(comparison!, style: theme.textTheme.bodySmall),
+              ],
+              const SizedBox(height: 8),
+            ],
             Row(
               children: [
                 Expanded(
