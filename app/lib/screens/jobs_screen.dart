@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../api/models.dart';
 import '../state/app_state.dart';
+import '../widgets/job_drama.dart';
 import '../widgets/job_result_panel.dart';
 import '../widgets/level_up_dialog.dart';
 
@@ -38,6 +39,10 @@ class _JobsScreenState extends State<JobsScreen> {
 
   /// Whether a level-up dialog is already on screen. See [_maybeShowLevelUp].
   bool _levelUpShowing = false;
+
+  /// The result whose reveal has finished playing. A level-up waits for this to match the result on
+  /// show, so the dialog arrives after the payout lands instead of covering it.
+  JobResult? _revealedResult;
 
   /// How many extra copies of each item the player has dialled in, per job: `jobId -> itemId -> n`.
   /// Held here rather than in each card so it survives the list rebuilding on every refresh, and
@@ -94,6 +99,12 @@ class _JobsScreenState extends State<JobsScreen> {
   void _maybeShowLevelUp(BuildContext context, AppState state) {
     final levelUp = state.pendingLevelUp;
     if (levelUp == null || _levelUpShowing) return;
+
+    // The level-up is the crescendo of the reveal, not a competitor to it. With no result on show
+    // (it was dismissed) there is nothing to wait for.
+    final result = state.lastJobResult;
+    if (result != null && !identical(result, _revealedResult)) return;
+
     _levelUpShowing = true;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -202,6 +213,15 @@ class _JobsScreenState extends State<JobsScreen> {
             result: state.lastJobResult,
             cashLabel: cashLabel,
             onDismiss: state.dismissJobResult,
+            drama: state.lastJobDrama ?? JobDrama.clean,
+            anticipating: state.anticipating,
+            onSkip: state.skipReveal,
+            onRevealed: (result) {
+              _revealedResult = result;
+              // Only a waiting level-up needs the screen rebuilt; otherwise the end of a reveal
+              // would redraw every job card for nothing.
+              if (state.pendingLevelUp != null) setState(() {});
+            },
           ),
         ),
         Expanded(

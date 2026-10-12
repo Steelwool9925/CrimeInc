@@ -67,6 +67,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const SizedBox(height: 16),
                 _AccountSection(appState: state),
                 const SizedBox(height: 16),
+                _SoundToggle(appState: state),
+                const SizedBox(height: 16),
                 const _ComingSoonPanel(),
               ],
             ),
@@ -223,6 +225,27 @@ class _AccountSection extends StatelessWidget {
       label: const Text('Create Account'),
       onPressed: () => Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => RegisterScreen(appState: appState)),
+      ),
+    );
+  }
+}
+
+/// The mute for job cues. Lives here because Rap Sheet is the only settings surface the app has,
+/// and game audio without an off switch is not acceptable.
+class _SoundToggle extends StatelessWidget {
+  const _SoundToggle({required this.appState});
+
+  final AppState appState;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: SwitchListTile(
+        key: const Key('profile-sound-toggle'),
+        title: const Text('Sound'),
+        subtitle: const Text('Cues when a job resolves'),
+        value: appState.soundEnabled,
+        onChanged: appState.setSoundEnabled,
       ),
     );
   }

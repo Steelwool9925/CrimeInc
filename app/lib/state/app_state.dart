@@ -1,11 +1,15 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import '../api/api_client.dart';
 import '../api/models.dart';
+import '../audio/outcome_sfx.dart';
+import '../storage/sound_preference_store.dart';
 import '../storage/token_store.dart';
 import '../storage/upgrade_seen_store.dart';
+import '../widgets/job_drama.dart';
 import '../widgets/upgrade_advice.dart';
 
 enum LoadStatus { loading, ready, error }
@@ -20,13 +24,35 @@ class AppState extends ChangeNotifier {
     required ApiClient apiClient,
     required TokenStore tokenStore,
     UpgradeSeenStore? seenStore,
+    this.revealDelay = Duration.zero,
+    OutcomeSfx? sfx,
+    SoundPreferenceStore? soundStore,
+    bool soundEnabled = true,
   })  : _apiClient = apiClient,
         _tokenStore = tokenStore,
-        _seenStore = seenStore ?? InMemoryUpgradeSeenStore();
+        _seenStore = seenStore ?? InMemoryUpgradeSeenStore(),
+        _sfx = sfx ?? const SilentOutcomeSfx(),
+        _soundStore = soundStore ?? InMemorySoundPreferenceStore(),
+        _soundEnabled = soundEnabled;
+
+  /// How long the app holds a job's outcome, already in hand, before showing it. `main.dart` passes
+  /// this; it defaults to zero so a bare [AppState] (every test) never waits.
+  static const Duration defaultRevealDelay = Duration(milliseconds: 400);
+
+  /// See [defaultRevealDelay]. Zero skips the hold entirely rather than waiting a frame.
+  final Duration revealDelay;
 
   final ApiClient _apiClient;
   final TokenStore _tokenStore;
   final UpgradeSeenStore _seenStore;
+  final OutcomeSfx _sfx;
+  final SoundPreferenceStore _soundStore;
+
+  bool _soundEnabled;
+
+  /// Whether job cues play. Starts from the stored preference, which `main.dart` reads before
+  /// building this, so the very first job already honours a mute.
+  bool get soundEnabled => _soundEnabled;
 
   bool _disposed = false;
 
@@ -56,6 +82,15 @@ class AppState extends ChangeNotifier {
 
   /// The most recent job outcome, shown in the result panel until dismissed.
   JobResult? _lastJobResult;
+
+  /// How big a win [_lastJobResult] was. Worked out once, when the result lands, and kept with it: a
+  /// level-up being acknowledged must not shrink the reveal that is still playing.
+  JobDrama? _lastJobDrama;
+
+  /// Whether a received job outcome is being held back for a beat before it is shown.
+  bool _anticipating = false;
+  Completer<void>? _revealHold;
+  Timer? _revealTimer;
 
   /// A pending level-up waiting to be shown as a dialog, cleared once acknowledged.
   LevelUp? _pendingLevelUp;
@@ -121,6 +156,11 @@ class AppState extends ChangeNotifier {
   String? get jobsError => _jobsError;
   String? get jobInFlight => _jobInFlight;
   JobResult? get lastJobResult => _lastJobResult;
+  JobDrama? get lastJobDrama => _lastJobDrama;
+
+  /// True while the outcome of a job has arrived but is deliberately not yet shown. The job is still
+  /// in flight for this whole stretch, so nothing else can be started under it.
+  bool get anticipating => _anticipating;
   LevelUp? get pendingLevelUp => _pendingLevelUp;
   String? get actionMessage => _actionMessage;
 
@@ -439,7 +479,18 @@ class AppState extends ChangeNotifier {
     try {
       final outcome = await _apiClient.doJob(token, jobId, extras: extras);
 
+      await _holdForReveal();
+      if (_disposed || _deviceToken != token) return;
+
       _lastJobResult = outcome.result;
+      final attempted = _jobs.where((j) => j.id == jobId).firstOrNull;
+      _lastJobDrama = attempted == null
+          ? JobDrama.clean
+          : JobDrama.of(outcome.result, attempted, leveledUp: outcome.levelUp != null);
+      _haptic(!outcome.result.succeeded || _lastJobDrama == JobDrama.major
+          ? HapticFeedback.heavyImpact
+          : HapticFeedback.mediumImpact);
+      _cue(SfxCue.forOutcome(succeeded: outcome.result.succeeded, drama: _lastJobDrama!));
       _me = outcome.player;
       if (outcome.levelUp != null) {
         _pendingLevelUp = outcome.levelUp;
@@ -469,6 +520,61 @@ class AppState extends ChangeNotifier {
     } finally {
       _jobInFlight = null;
       notifyListeners();
+    }
+  }
+
+  /// Holds the outcome of the job just done for [revealDelay], so the reveal has a moment of
+  /// suspense to resolve. The server has already decided the result; this only delays showing it,
+  /// and [skipReveal] ends it early.
+  Future<void> _holdForReveal() async {
+    if (revealDelay <= Duration.zero || _disposed) return;
+
+    final hold = Completer<void>();
+    _revealHold = hold;
+    _anticipating = true;
+    _haptic(HapticFeedback.selectionClick);
+    _cue(SfxCue.riser);
+    notifyListeners();
+
+    _revealTimer = Timer(revealDelay, () {
+      if (!hold.isCompleted) hold.complete();
+    });
+    await hold.future;
+
+    _revealTimer?.cancel();
+    _revealTimer = null;
+    _revealHold = null;
+    _anticipating = false;
+  }
+
+  /// Ends the anticipation hold now, so a player who taps is not made to wait.
+  void skipReveal() {
+    final hold = _revealHold;
+    if (hold != null && !hold.isCompleted) hold.complete();
+  }
+
+  /// Fires a haptic without letting it affect the job: it is a no-op on web and in tests, and a
+  /// device without a vibration motor may refuse it.
+  void _haptic(Future<void> Function() cue) {
+    unawaited(cue().catchError((Object _) {}));
+  }
+
+  /// Plays [cue] unless sound is off. The first cue only ever follows a tap on a job, so nothing
+  /// sounds before the player has touched the page.
+  void _cue(SfxCue cue) {
+    if (_soundEnabled) _sfx.play(cue);
+  }
+
+  /// Turns job cues on or off and remembers the choice. Muting cuts off a cue already sounding.
+  Future<void> setSoundEnabled(bool enabled) async {
+    if (_soundEnabled == enabled) return;
+    _soundEnabled = enabled;
+    if (!enabled) _sfx.stop();
+    notifyListeners();
+    try {
+      await _soundStore.write(enabled);
+    } catch (_) {
+      // The choice still holds for this session; failing to save it is not worth an error screen.
     }
   }
 
@@ -554,12 +660,16 @@ class AppState extends ChangeNotifier {
   /// Clears the result panel.
   void dismissJobResult() {
     _lastJobResult = null;
+    _lastJobDrama = null;
     notifyListeners();
   }
 
   /// Drops the result without notifying, for a screen being torn down: it is the only thing showing
   /// the result, and notifying mid-dispose would rebuild listeners while the tree is locked.
-  void forgetJobResult() => _lastJobResult = null;
+  void forgetJobResult() {
+    _lastJobResult = null;
+    _lastJobDrama = null;
+  }
 
   /// Acknowledges the level-up dialog.
   void acknowledgeLevelUp() {
@@ -831,6 +941,9 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _revealTimer?.cancel();
+    skipReveal();
+    _sfx.stop();
     stopPolling();
     super.dispose();
   }

@@ -1,8 +1,10 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:underworld_empire/api/models.dart';
 import 'package:underworld_empire/state/app_state.dart';
+import 'package:underworld_empire/widgets/job_drama.dart';
 
 import 'fakes.dart';
 
@@ -529,6 +531,230 @@ void main() {
 
       expect(mastery.rankProgress, 0.0);
       expect(mastery.isMaxRank, isFalse);
+    });
+  });
+
+  group('AppState.doJob() — the reveal hold', () {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final haptics = <String>[];
+
+    const failed = DoJobResult(result: kFailedJobResult, player: kFakeMe);
+
+    setUp(() {
+      haptics.clear();
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'HapticFeedback.vibrate') haptics.add(call.arguments as String);
+        return null;
+      });
+    });
+    tearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
+
+    Future<AppState> withDelay(FakeApiClient api, Duration revealDelay) async {
+      final state = AppState(
+        apiClient: api,
+        tokenStore: InMemoryTokenStore(),
+        revealDelay: revealDelay,
+      );
+      await state.bootstrap();
+      await state.loadJobs();
+      return state;
+    }
+
+    Future<void> untilAnticipating(AppState state) async {
+      for (var i = 0; i < 100 && !state.anticipating; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(state.anticipating, isTrue);
+    }
+
+    Future<void> settleHaptics() => Future<void>.delayed(Duration.zero);
+
+    test('withholds the result for the delay, then publishes it', () async {
+      final state = await withDelay(FakeApiClient(), const Duration(milliseconds: 30));
+
+      final done = state.doJob('shake-down-corner-store');
+      await untilAnticipating(state);
+
+      expect(state.lastJobResult, isNull);
+      expect(state.jobInFlight, 'shake-down-corner-store');
+
+      await done;
+      expect(state.lastJobResult, isNotNull);
+      expect(state.anticipating, isFalse);
+      expect(state.jobInFlight, isNull);
+    });
+
+    test('skipReveal ends the hold at once', () async {
+      final state = await withDelay(FakeApiClient(), const Duration(hours: 1));
+
+      final done = state.doJob('shake-down-corner-store');
+      await untilAnticipating(state);
+      state.skipReveal();
+
+      await done.timeout(const Duration(seconds: 5));
+      expect(state.lastJobResult, isNotNull);
+      expect(state.anticipating, isFalse);
+    });
+
+    test('a second job cannot start while the first outcome is held', () async {
+      final api = FakeApiClient();
+      final state = await withDelay(api, const Duration(hours: 1));
+
+      final done = state.doJob('shake-down-corner-store');
+      await untilAnticipating(state);
+      await state.doJob('shake-down-corner-store');
+      state.skipReveal();
+      await done;
+
+      expect(api.doJobCalls, hasLength(1));
+    });
+
+    test('a zero delay never enters the anticipating phase', () async {
+      final state = await withDelay(FakeApiClient(), Duration.zero);
+      final seen = <bool>[];
+      state.addListener(() => seen.add(state.anticipating));
+
+      await state.doJob('shake-down-corner-store');
+
+      expect(seen, isNotEmpty);
+      expect(seen, isNot(contains(true)));
+      expect(state.lastJobResult, isNotNull);
+    });
+
+    test('disposing mid-hold publishes nothing and does not throw', () async {
+      final state = await withDelay(FakeApiClient(), const Duration(hours: 1));
+
+      final done = state.doJob('shake-down-corner-store');
+      await untilAnticipating(state);
+      state.dispose();
+
+      await done.timeout(const Duration(seconds: 5));
+      expect(state.lastJobResult, isNull);
+    });
+
+    test('a held success ticks, then lands with a medium impact', () async {
+      final state = await withDelay(FakeApiClient(), const Duration(milliseconds: 10));
+
+      await state.doJob('shake-down-corner-store');
+      await settleHaptics();
+
+      expect(haptics, ['HapticFeedbackType.selectionClick', 'HapticFeedbackType.mediumImpact']);
+    });
+
+    test('a held failure ticks, then lands with a heavy impact', () async {
+      final state = await withDelay(
+        FakeApiClient(doJobResult: failed),
+        const Duration(milliseconds: 10),
+      );
+
+      await state.doJob('shake-down-corner-store');
+      await settleHaptics();
+
+      expect(haptics, ['HapticFeedbackType.selectionClick', 'HapticFeedbackType.heavyImpact']);
+    });
+
+    test('with no hold the tick is skipped and only the landing is felt', () async {
+      final state = await withDelay(FakeApiClient(), Duration.zero);
+
+      await state.doJob('shake-down-corner-store');
+      await settleHaptics();
+
+      expect(haptics, ['HapticFeedbackType.mediumImpact']);
+    });
+
+    test('a refused job is felt as nothing', () async {
+      final state = await withDelay(
+        FakeApiClient(refuseDoJobWith: 'energy'),
+        const Duration(milliseconds: 10),
+      );
+
+      await state.doJob('shake-down-corner-store');
+      await settleHaptics();
+
+      expect(haptics, isEmpty);
+      expect(state.lastJobResult, isNull);
+    });
+
+    test('a haptic the device refuses cannot fail the job', () async {
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        throw PlatformException(code: 'no-motor');
+      });
+      final state = await withDelay(FakeApiClient(), const Duration(milliseconds: 10));
+
+      await state.doJob('shake-down-corner-store');
+      await settleHaptics();
+
+      expect(state.lastJobResult, isNotNull);
+      expect(state.actionMessage, isNull);
+    });
+  });
+
+  group('AppState.doJob() — how big a win it was', () {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final haptics = <String>[];
+
+    // The fake job pays 15-30: 15 is a scrape, 25 a good roll, 30 the top of the range.
+    DoJobResult winPaying(int cash) => DoJobResult(
+          result: JobResult(
+            jobId: 'shake-down-corner-store',
+            succeeded: true,
+            energySpent: 1,
+            cashEarned: cash,
+            xpEarned: 10,
+            healthLost: 0,
+            mastery: kFakeMastery,
+            masteryRankedUp: false,
+          ),
+          player: kFakeMe,
+        );
+
+    setUp(() {
+      haptics.clear();
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'HapticFeedback.vibrate') haptics.add(call.arguments as String);
+        return null;
+      });
+    });
+    tearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
+
+    Future<AppState> attempt(DoJobResult outcome) async {
+      final state = await bootstrapped(FakeApiClient(doJobResult: outcome));
+      await state.loadJobs();
+      await state.doJob('shake-down-corner-store');
+      await Future<void>.delayed(Duration.zero);
+      return state;
+    }
+
+    test('records a tier for the result it holds', () async {
+      expect((await attempt(winPaying(15))).lastJobDrama, JobDrama.clean);
+      expect((await attempt(winPaying(25))).lastJobDrama, JobDrama.strong);
+      expect((await attempt(winPaying(30))).lastJobDrama, JobDrama.major);
+    });
+
+    test('a failure is recorded as clean', () async {
+      final state = await attempt(const DoJobResult(result: kFailedJobResult, player: kFakeMe));
+      expect(state.lastJobDrama, JobDrama.clean);
+    });
+
+    test('a major win lands heavier than an ordinary one', () async {
+      await attempt(winPaying(25));
+      expect(haptics, ['HapticFeedbackType.mediumImpact']);
+
+      haptics.clear();
+      await attempt(winPaying(30));
+      expect(haptics, ['HapticFeedbackType.heavyImpact']);
+    });
+
+    test('the tier goes when the result does', () async {
+      final state = await attempt(winPaying(30));
+      state.dismissJobResult();
+      expect(state.lastJobDrama, isNull);
+
+      final again = await attempt(winPaying(30));
+      again.forgetJobResult();
+      expect(again.lastJobDrama, isNull);
     });
   });
 }

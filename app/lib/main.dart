@@ -3,10 +3,12 @@ import 'package:flutter/semantics.dart';
 
 import 'api/api_client.dart';
 import 'api/resilient_http_client.dart';
+import 'audio/outcome_sfx.dart';
 import 'screens/server_address_screen.dart';
 import 'screens/welcome_screen.dart';
 import 'state/app_state.dart';
 import 'storage/server_address_store.dart';
+import 'storage/sound_preference_store.dart';
 import 'storage/token_store.dart';
 import 'storage/upgrade_seen_store.dart';
 import 'theme/pack_theme.dart';
@@ -36,7 +38,11 @@ void main() {
 }
 
 class UnderworldEmpireApp extends StatefulWidget {
-  const UnderworldEmpireApp({super.key});
+  const UnderworldEmpireApp({super.key, this.apiClientFactory});
+
+  /// Builds the client for a server address. Null in the shipped app (a real [HttpApiClient]);
+  /// tests inject a fake so the whole startup flow can run without a network.
+  final ApiClient Function(String address)? apiClientFactory;
 
   @override
   State<UnderworldEmpireApp> createState() => _UnderworldEmpireAppState();
@@ -46,6 +52,11 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
   final ServerAddressStore _serverAddressStore = SharedPrefsServerAddressStore();
   final TokenStore _tokenStore = SharedPrefsTokenStore();
   final UpgradeSeenStore _seenStore = SharedPrefsUpgradeSeenStore();
+  final SoundPreferenceStore _soundStore = SharedPrefsSoundPreferenceStore();
+
+  // One player for the app's life: AppState is rebuilt on a server change, the speakers are not.
+  final OutcomeSfx _sfx = AudioPlayersOutcomeSfx();
+  bool _soundEnabled = true;
 
   // Null until a server address is known — either read from storage at startup, or entered on
   // ServerAddressScreen just now. AppState/HttpApiClient cannot be constructed before then: the
@@ -68,6 +79,7 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
   }
 
   Future<void> _resolveStartup() async {
+    _soundEnabled = await _soundStore.read() ?? true;
     final storedAddress = await _serverAddressStore.read();
     final String address;
     if (storedAddress == null || storedAddress.isEmpty) {
@@ -102,9 +114,14 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
   }
 
   AppState _buildAppState(String address) => AppState(
-        apiClient: HttpApiClient(client: createResilientHttpClient(), baseUrl: address),
+        apiClient: widget.apiClientFactory?.call(address) ??
+            HttpApiClient(client: createResilientHttpClient(), baseUrl: address),
         tokenStore: _tokenStore,
         seenStore: _seenStore,
+        revealDelay: AppState.defaultRevealDelay,
+        sfx: _sfx,
+        soundStore: _soundStore,
+        soundEnabled: _soundEnabled,
       );
 
   /// Builds [AppState] against [address] and bootstraps it immediately — matching exactly what
@@ -145,6 +162,8 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
   Future<void> _changeServer() async {
     await _serverAddressStore.clear();
     await _tokenStore.clear();
+    // The toggle on AppState is the live truth; _soundEnabled only holds what was read at startup.
+    _soundEnabled = _appState?.soundEnabled ?? _soundEnabled;
     _appState?.dispose();
     setState(() {
       _appState = null;
@@ -163,6 +182,7 @@ class _UnderworldEmpireAppState extends State<UnderworldEmpireApp> {
   @override
   void dispose() {
     _appState?.dispose();
+    _sfx.dispose();
     super.dispose();
   }
 

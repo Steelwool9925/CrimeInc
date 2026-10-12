@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:underworld_empire/api/models.dart';
 import 'package:underworld_empire/screens/jobs_screen.dart';
 import 'package:underworld_empire/state/app_state.dart';
+import 'package:underworld_empire/theme/pack_theme.dart';
+import 'package:underworld_empire/widgets/job_reveal.dart';
 
 import 'fakes.dart';
 
@@ -17,6 +19,7 @@ Future<AppState> pumpJobs(
   WidgetTester tester,
   FakeApiClient api, {
   Duration refreshInterval = const Duration(hours: 1),
+  Duration revealDelay = Duration.zero,
 }) async {
   // Tall enough to build every card. The list is lazy and the result panel above it is always
   // present (a placeholder before the first attempt), so the default 800x600 surface no longer
@@ -25,7 +28,11 @@ Future<AppState> pumpJobs(
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
 
-  final state = AppState(apiClient: api, tokenStore: InMemoryTokenStore());
+  final state = AppState(
+    apiClient: api,
+    tokenStore: InMemoryTokenStore(),
+    revealDelay: revealDelay,
+  );
   await state.bootstrap();
 
   await tester.pumpWidget(MaterialApp(
@@ -950,6 +957,344 @@ void main() {
 
       api.doJobGate!.complete();
       await tester.pumpAndSettle();
+    });
+  });
+
+  group('JobsScreen — the reveal', () {
+    const skipKey = Key('job-result-skip');
+    const levelUp = LevelUp(
+      levelsGained: 1,
+      newLevel: 2,
+      skillPointsGranted: 1,
+      metersRefilled: true,
+    );
+    const won = DoJobResult(result: kSucceededJobResult, player: kFakeMe);
+    const lost = DoJobResult(result: kFailedJobResult, player: kFakeMe);
+    const wonAndLevelled = DoJobResult(
+      result: kSucceededJobResult,
+      player: kFakeMe,
+      levelUp: levelUp,
+    );
+
+    /// Taps the job, lets the request resolve, and builds the first frame after it.
+    Future<void> tapJob(WidgetTester tester) async {
+      await tester.tap(find.byKey(const Key('do-job-shake-down-corner-store')));
+      await tester.pump();
+      await tester.pump();
+    }
+
+    testWidgets('holds the outcome back, showing suspense instead of the result', (tester) async {
+      await pumpJobs(tester, FakeApiClient(doJobResult: won),
+          revealDelay: const Duration(milliseconds: 300));
+
+      await tapJob(tester);
+
+      expect(find.byKey(const Key('job-result-anticipating')), findsOneWidget);
+      expect(find.text('Moment of truth'), findsOneWidget);
+      expect(find.byKey(const Key('job-result-panel')), findsNothing);
+
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump();
+      expect(find.byKey(const Key('job-result-panel')), findsOneWidget);
+      expect(find.byKey(const Key('job-result-anticipating')), findsNothing);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('a tap during the suspense skips straight to the result', (tester) async {
+      await pumpJobs(tester, FakeApiClient(doJobResult: won),
+          revealDelay: const Duration(hours: 1));
+      await tapJob(tester);
+      expect(find.byKey(const Key('job-result-panel')), findsNothing);
+
+      await tester.tap(find.byKey(skipKey));
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.byKey(const Key('job-result-panel')), findsOneWidget);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('the panel keeps its height through suspense and reveal', (tester) async {
+      await pumpJobs(tester, FakeApiClient(doJobResult: won),
+          revealDelay: const Duration(hours: 1));
+      final resting = tester.getSize(find.byKey(const Key('job-result-placeholder')));
+
+      await tapJob(tester);
+      expect(tester.getSize(find.byKey(const Key('job-result-anticipating'))), resting);
+
+      await tester.tap(find.byKey(skipKey));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(tester.getSize(find.byKey(const Key('job-result-panel'))), resting);
+      await tester.pumpAndSettle();
+      expect(tester.getSize(find.byKey(const Key('job-result-panel'))), resting);
+    });
+
+    testWidgets('the numbers count up from zero rather than appearing at once', (tester) async {
+      await pumpJobs(tester, FakeApiClient(doJobResult: won));
+
+      await tapJob(tester);
+      expect(find.text('+25'), findsNothing);
+
+      await tester.pumpAndSettle();
+      expect(find.text('+25'), findsOneWidget);
+    });
+
+    testWidgets('a tile does not change width while its number counts up', (tester) async {
+      await pumpJobs(tester, FakeApiClient(doJobResult: lost));
+      const health = Key('job-result-health');
+
+      await tapJob(tester);
+      await tester.pump(const Duration(milliseconds: 300));
+      final midReveal = tester.getSize(find.byKey(health)).width;
+
+      await tester.pumpAndSettle();
+      expect(tester.getSize(find.byKey(health)).width, midReveal);
+    });
+
+    testWidgets('a level-up waits for the reveal to finish, then crowns it', (tester) async {
+      final state = await pumpJobs(tester, FakeApiClient(doJobResult: wonAndLevelled));
+
+      await tapJob(tester);
+      expect(find.byKey(const Key('job-result-panel')), findsOneWidget);
+      expect(find.byKey(const Key('level-up-dialog')), findsNothing);
+
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byKey(const Key('level-up-dialog')), findsNothing);
+
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('level-up-dialog')), findsOneWidget);
+      expect(state.lastJobResult, isNotNull);
+    });
+
+    testWidgets('a level-up is not held back when the result was dismissed first', (tester) async {
+      await pumpJobs(tester, FakeApiClient(doJobResult: wonAndLevelled));
+
+      await tapJob(tester);
+      await tester.tap(find.byKey(const Key('dismiss-job-result')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('level-up-dialog')), findsOneWidget);
+    });
+
+    testWidgets('with animations disabled the result and level-up land without animation time',
+        (tester) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+      await pumpJobs(tester, FakeApiClient(doJobResult: wonAndLevelled));
+
+      await tapJob(tester);
+      expect(find.text('+25'), findsOneWidget);
+
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const Key('level-up-dialog')), findsOneWidget);
+    });
+
+    group('success and failure differ without colour', () {
+      /// How far the verdict sits from its resting place a moment into the reveal: positive is
+      /// below it, negative is above.
+      Future<double> verdictOffsetEarly(WidgetTester tester, DoJobResult outcome) async {
+        await pumpJobs(tester, FakeApiClient(doJobResult: outcome));
+        await tapJob(tester);
+        await tester.pump(const Duration(milliseconds: 40));
+        final early = tester.getTopLeft(find.byKey(const Key('job-result-title'))).dy;
+        await tester.pumpAndSettle();
+        return early - tester.getTopLeft(find.byKey(const Key('job-result-title'))).dy;
+      }
+
+      testWidgets('a success rises into place', (tester) async {
+        expect(await verdictOffsetEarly(tester, won), greaterThan(0));
+      });
+
+      testWidgets('a failure drops into place', (tester) async {
+        expect(await verdictOffsetEarly(tester, lost), lessThan(0));
+      });
+
+      testWidgets('speedlines fire on a success only', (tester) async {
+        await pumpJobs(tester, FakeApiClient(doJobResult: won));
+        await tapJob(tester);
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('job-result-speedlines')), findsOneWidget);
+        expect(find.byKey(const Key('job-result-halftone')), findsNothing);
+      });
+
+      testWidgets('a failure darkens the halftone and fires no speedlines', (tester) async {
+        await pumpJobs(tester, FakeApiClient(doJobResult: lost));
+        await tapJob(tester);
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('job-result-halftone')), findsOneWidget);
+        expect(find.byKey(const Key('job-result-speedlines')), findsNothing);
+      });
+
+      testWidgets('both keep their written verdict', (tester) async {
+        await pumpJobs(tester, FakeApiClient(doJobResult: won));
+        await tapJob(tester);
+        await tester.pumpAndSettle();
+        expect(find.text('Job complete'), findsOneWidget);
+      });
+    });
+  });
+
+  group('JobsScreen — a bigger win is staged bigger', () {
+    const lost = DoJobResult(result: kFailedJobResult, player: kFakeMe);
+
+    // The fake job pays 15-30: 15 is a scrape, 25 a good roll, 30 the top of the range.
+    DoJobResult winPaying(int cash, {LevelUp? levelUp}) => DoJobResult(
+          result: JobResult(
+            jobId: 'shake-down-corner-store',
+            succeeded: true,
+            energySpent: 1,
+            cashEarned: cash,
+            xpEarned: 10,
+            healthLost: 0,
+            mastery: kFakeMastery,
+            masteryRankedUp: false,
+          ),
+          player: kFakeMe,
+          levelUp: levelUp,
+        );
+
+    Future<void> tapJob(WidgetTester tester) async {
+      await tester.tap(find.byKey(const Key('do-job-shake-down-corner-store')));
+      await tester.pump();
+      await tester.pump();
+    }
+
+    const speedlines = Key('job-result-speedlines');
+    const flash = Key('job-result-flash');
+
+    testWidgets('a scrape is the verdict alone: numbers already there, no speedlines, no flash',
+        (tester) async {
+      await pumpJobs(tester, FakeApiClient(doJobResult: winPaying(15)));
+
+      await tapJob(tester);
+
+      expect(find.text('Job complete'), findsOneWidget);
+      expect(find.text('+15'), findsOneWidget);
+      expect(find.byKey(speedlines), findsNothing);
+      expect(find.byKey(flash), findsNothing);
+
+      // The whole reveal is the stamp, so it is over well before a staged one would be.
+      final reveal = tester.widget<JobReveal<JobResult>>(find.byType(JobReveal<JobResult>));
+      expect(reveal.duration, PackMotion.standard.successDuration);
+    });
+
+    testWidgets('a good roll adds speedlines and counts its numbers up, with no flash',
+        (tester) async {
+      await pumpJobs(tester, FakeApiClient(doJobResult: winPaying(25)));
+
+      await tapJob(tester);
+      expect(find.text('+25'), findsNothing);
+
+      await tester.pumpAndSettle();
+      expect(find.text('+25'), findsOneWidget);
+      expect(find.byKey(speedlines), findsOneWidget);
+      expect(find.byKey(flash), findsNothing);
+    });
+
+    testWidgets('a top-of-the-range roll adds the halftone flash to everything a good one has',
+        (tester) async {
+      await pumpJobs(tester, FakeApiClient(doJobResult: winPaying(30)));
+
+      await tapJob(tester);
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byKey(flash), findsOneWidget);
+
+      await tester.pumpAndSettle();
+      expect(find.byKey(speedlines), findsOneWidget);
+      expect(find.byKey(flash), findsOneWidget);
+    });
+
+    testWidgets('a failure gets no win staging, however much it paid', (tester) async {
+      await pumpJobs(tester, FakeApiClient(doJobResult: lost));
+
+      await tapJob(tester);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(flash), findsNothing);
+      expect(find.byKey(speedlines), findsNothing);
+    });
+
+    testWidgets('acknowledging the level-up does not shrink the reveal already on screen',
+        (tester) async {
+      await pumpJobs(
+        tester,
+        FakeApiClient(
+          doJobResult: winPaying(30,
+              levelUp: const LevelUp(
+                levelsGained: 1,
+                newLevel: 2,
+                skillPointsGranted: 1,
+                metersRefilled: true,
+              )),
+        ),
+      );
+
+      await tapJob(tester);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('level-up-dialog')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('level-up-ok')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(flash), findsOneWidget);
+    });
+
+    testWidgets('a scrape that levels the player up is lifted, so the level-up is not undersold',
+        (tester) async {
+      await pumpJobs(
+        tester,
+        FakeApiClient(
+          doJobResult: winPaying(15,
+              levelUp: const LevelUp(
+                levelsGained: 1,
+                newLevel: 2,
+                skillPointsGranted: 1,
+                metersRefilled: true,
+              )),
+        ),
+      );
+
+      await tapJob(tester);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(speedlines), findsOneWidget);
+    });
+  });
+
+  group('JobsScreen — the reveal is contained', () {
+    testWidgets('a full reveal rebuilds the panel but never a job card', (tester) async {
+      await pumpJobs(
+        tester,
+        FakeApiClient(doJobResult: const DoJobResult(result: kSucceededJobResult, player: kFakeMe)),
+      );
+      await tester.tap(find.byKey(const Key('do-job-shake-down-corner-store')));
+      await tester.pump();
+      await tester.pump();
+
+      // The result has just landed, so the cards have rebuilt for it. From here only the animation
+      // is ticking; counting rebuilds across the whole reveal shows who it disturbs.
+      var cards = 0;
+      var ticks = 0;
+      final previous = debugOnRebuildDirtyWidget;
+      debugOnRebuildDirtyWidget = (element, builtOnce) {
+        final type = element.widget.runtimeType.toString();
+        if (type == '_JobCard') cards++;
+        if (type == 'AnimatedBuilder') ticks++;
+      };
+      addTearDown(() => debugOnRebuildDirtyWidget = previous);
+
+      for (var i = 0; i < 60; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+
+      expect(ticks, greaterThan(20), reason: 'the reveal should really have been animating');
+      expect(cards, 0);
     });
   });
 }
