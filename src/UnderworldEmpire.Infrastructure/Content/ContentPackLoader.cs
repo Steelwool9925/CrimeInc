@@ -157,6 +157,8 @@ public sealed class ContentPackLoader
             jobs,
             file.Mastery.CompletionsPerRank,
             file.Mastery.MaxRank,
+            file.Mastery.PayoutBonusPerRank,
+            file.Levels.PayoutBonusPerLevel,
             file.Risk!.MaxSuccessChance,
             file.Risk.ConsolationCashFraction,
             file.Risk.ConsolationXpFraction);
@@ -326,6 +328,10 @@ public sealed class ContentPackLoader
                 $"Content pack '{expectedId}' failed validation: {string.Join("; ", errors)}.");
     }
 
+    // +100% per step is already generous; a bigger number is a typo (1000 for 0.1), and an unbounded one
+    // saturates the payout arithmetic.
+    private const double MaxPayoutBonusPerStep = 1.0;
+
     private static void ValidateJobs(JobCatalogFile file, string expectedPackId, ItemCatalog? itemCatalog)
     {
         var errors = new List<string>();
@@ -335,12 +341,29 @@ public sealed class ContentPackLoader
         else if (!string.Equals(file.PackId, expectedPackId, StringComparison.Ordinal))
             errors.Add($"'packId' mismatch: expected '{expectedPackId}', found '{file.PackId}'");
 
-        // Mastery thresholds are pack-wide. maxRank 0 is legal and disables mastery entirely;
-        // completionsPerRank is a divisor and can never be 0.
-        if (file.Mastery.CompletionsPerRank < 1)
-            errors.Add($"'mastery.completionsPerRank' must be >= 1, found {file.Mastery.CompletionsPerRank}");
-        if (file.Mastery.MaxRank < 0)
-            errors.Add($"'mastery.maxRank' must be >= 0, found {file.Mastery.MaxRank}");
+        // A JSON null overwrites the non-nullable default these blocks carry, so name it here rather
+        // than let the checks below throw a bare NullReferenceException. An absent block is fine.
+        if (file.Mastery is null)
+        {
+            errors.Add("'mastery' must be an object — omit it for the defaults, not null");
+        }
+        else
+        {
+            // Mastery thresholds are pack-wide. maxRank 0 is legal and disables mastery entirely;
+            // completionsPerRank is a divisor and can never be 0.
+            if (file.Mastery.CompletionsPerRank < 1)
+                errors.Add($"'mastery.completionsPerRank' must be >= 1, found {file.Mastery.CompletionsPerRank}");
+            if (file.Mastery.MaxRank < 0)
+                errors.Add($"'mastery.maxRank' must be >= 0, found {file.Mastery.MaxRank}");
+            // NaN fails every comparison, so test for the valid range rather than the invalid one.
+            if (!(file.Mastery.PayoutBonusPerRank is >= 0 and <= MaxPayoutBonusPerStep))
+                errors.Add($"'mastery.payoutBonusPerRank' must be between 0 and {MaxPayoutBonusPerStep}, found {file.Mastery.PayoutBonusPerRank}");
+        }
+
+        if (file.Levels is null)
+            errors.Add("'levels' must be an object — omit it for the defaults, not null");
+        else if (!(file.Levels.PayoutBonusPerLevel is >= 0 and <= MaxPayoutBonusPerStep))
+            errors.Add($"'levels.payoutBonusPerLevel' must be between 0 and {MaxPayoutBonusPerStep}, found {file.Levels.PayoutBonusPerLevel}");
 
         // Risk rules are pack-wide and required. A missing block is reported rather than defaulted:
         // zeros would read as a ceiling of zero, making every job in the pack impossible.

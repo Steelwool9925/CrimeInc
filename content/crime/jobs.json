@@ -3,7 +3,11 @@
   "version": 2,
   "mastery": {
     "completionsPerRank": 6,
-    "maxRank": 5
+    "maxRank": 5,
+    "payoutBonusPerRank": 0.10
+  },
+  "levels": {
+    "payoutBonusPerLevel": 0.02
   },
   "risk": {
     "maxSuccessChance": 0.95,

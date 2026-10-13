@@ -174,7 +174,9 @@ public class JobActionService
                 catalog.ConsolationXpFraction),
             nowUtc,
             heldItemQuantities,
-            extraItems);
+            extraItems,
+            catalog.MasteryPayoutBonusPerRank,
+            catalog.LevelPayoutBonusPerLevel);
 
         if (!result.WasApplied)
         {

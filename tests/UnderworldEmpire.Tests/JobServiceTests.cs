@@ -1153,4 +1153,251 @@ public class JobServiceTests
         Assert.Equal(50, player.Health.CurrentAt(Now, MeterRates.Health));
         Assert.Equal(2, random.RollCount);
     }
+
+    // -------------------------------------------------------------------------
+    // Mastery pays
+    // -------------------------------------------------------------------------
+
+    /// <summary>A mastery row that has earned exactly <paramref name="rank"/> ranks.</summary>
+    private static PlayerJobMastery MasteryAtRank(Guid playerId, int rank)
+    {
+        var mastery = TestMastery(playerId);
+        for (int i = 0; i < rank * PerRank; i++)
+            mastery.RecordCompletion(PerRank, MaxRank);
+        Assert.Equal(rank, mastery.Rank);
+        return mastery;
+    }
+
+    private static JobAttemptResult AttemptWithBonus(
+        JobService service, Player player, Job job, PlayerJobMastery mastery, double bonusPerRank) =>
+        service.Attempt(
+            player, job, mastery, Bare(player), PerRank, MaxRank, Rules, Now,
+            masteryPayoutBonusPerRank: bonusPerRank);
+
+    [Fact]
+    public void An_unranked_job_pays_the_base_even_when_the_pack_configures_a_bonus()
+    {
+        var player = TestPlayer();
+        var service = new JobService(FakeRandomSource.Sequence(1, 20));
+
+        var result = AttemptWithBonus(service, player,
+            TestJob(cashMin: 0, cashMax: 100, xp: 10), TestMastery(player.Id), bonusPerRank: 0.10);
+
+        Assert.Equal(20, result.Outcome!.CashEarned);
+        Assert.Equal(10, result.Outcome.XpEarned);
+    }
+
+    [Fact]
+    public void A_max_rank_job_pays_the_per_rank_bonus_times_its_rank_on_cash_and_xp()
+    {
+        // Rank 5 at 10% per rank is +50%: a rolled 20 cash pays 30 and 10 XP pays 15.
+        var player = TestPlayer();
+        var service = new JobService(FakeRandomSource.Sequence(1, 20));
+
+        var result = AttemptWithBonus(service, player,
+            TestJob(cashMin: 0, cashMax: 100, xp: 10), MasteryAtRank(player.Id, MaxRank), bonusPerRank: 0.10);
+
+        Assert.Equal(30, result.Outcome!.CashEarned);
+        Assert.Equal(15, result.Outcome.XpEarned);
+        Assert.Equal(30, player.Cash - 100);
+        Assert.Equal(15, player.Xp);
+    }
+
+    [Fact]
+    public void The_bonus_scales_with_rank_not_just_with_being_ranked()
+    {
+        var rank2 = TestPlayer();
+        var rank4 = TestPlayer();
+
+        var at2 = AttemptWithBonus(new JobService(FakeRandomSource.Sequence(1, 100)), rank2,
+            TestJob(cashMin: 0, cashMax: 200, xp: 10), MasteryAtRank(rank2.Id, 2), bonusPerRank: 0.10);
+        var at4 = AttemptWithBonus(new JobService(FakeRandomSource.Sequence(1, 100)), rank4,
+            TestJob(cashMin: 0, cashMax: 200, xp: 10), MasteryAtRank(rank4.Id, 4), bonusPerRank: 0.10);
+
+        Assert.Equal(120, at2.Outcome!.CashEarned);
+        Assert.Equal(140, at4.Outcome!.CashEarned);
+    }
+
+    [Fact]
+    public void A_zero_bonus_pays_the_base_at_every_rank()
+    {
+        var player = TestPlayer();
+        var service = new JobService(FakeRandomSource.Sequence(1, 20));
+
+        var result = AttemptWithBonus(service, player,
+            TestJob(cashMin: 0, cashMax: 100, xp: 10), MasteryAtRank(player.Id, MaxRank), bonusPerRank: 0);
+
+        Assert.Equal(20, result.Outcome!.CashEarned);
+        Assert.Equal(10, result.Outcome.XpEarned);
+    }
+
+    [Fact]
+    public void The_rank_that_pays_is_the_one_held_before_the_attempt()
+    {
+        // The attempt that earns rank 1 is paid at rank 0; the bonus starts with the next one.
+        var player = TestPlayer();
+        var mastery = TestMastery(player.Id);
+        for (int i = 0; i < PerRank - 1; i++)
+            mastery.RecordCompletion(PerRank, MaxRank);
+        var service = new JobService(FakeRandomSource.Sequence(1, 20));
+
+        var result = AttemptWithBonus(service, player,
+            TestJob(cashMin: 0, cashMax: 100, xp: 10), mastery, bonusPerRank: 0.10);
+
+        Assert.True(result.Outcome!.MasteryRankedUp);
+        Assert.Equal(20, result.Outcome.CashEarned);
+        Assert.Equal(10, result.Outcome.XpEarned);
+    }
+
+    [Fact]
+    public void A_failed_attempt_consolation_is_a_fraction_of_the_boosted_amounts()
+    {
+        // Rolled 2000 cash is boosted to 3000 at rank 5, then 1% consolation is 30 (base would be 20);
+        // 10 XP is boosted to 15, then 10% consolation is 1.5 rounded up to 2 (base would be 1).
+        var player = TestPlayer(cash: 0);
+        var service = new JobService(ScriptedFailure(cash: 2000));
+
+        var result = AttemptWithBonus(service, player,
+            TestJob(cashMin: 0, cashMax: 5000, xp: 10, baseSuccessChance: 0.5, healthLossMax: 5),
+            MasteryAtRank(player.Id, MaxRank), bonusPerRank: 0.10);
+
+        Assert.False(result.Outcome!.Succeeded);
+        Assert.Equal(30, result.Outcome.CashEarned);
+        Assert.Equal(2, result.Outcome.XpEarned);
+    }
+
+    [Fact]
+    public void A_negative_bonus_is_rejected()
+    {
+        var player = TestPlayer();
+        var service = new JobService(FakeRandomSource.Sequence(1, 20));
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            AttemptWithBonus(service, player, TestJob(), TestMastery(player.Id), bonusPerRank: -0.1));
+    }
+
+    // -------------------------------------------------------------------------
+    // Level pays
+    // -------------------------------------------------------------------------
+
+    private static JobAttemptResult AttemptWithBonuses(
+        JobService service, Player player, Job job, PlayerJobMastery mastery,
+        double bonusPerRank, double bonusPerLevel) =>
+        service.Attempt(
+            player, job, mastery, Bare(player), PerRank, MaxRank, Rules, Now,
+            masteryPayoutBonusPerRank: bonusPerRank,
+            levelPayoutBonusPerLevel: bonusPerLevel);
+
+    [Fact]
+    public void A_level_one_player_earns_no_level_bonus()
+    {
+        var player = TestPlayer(level: 1);
+        var service = new JobService(FakeRandomSource.Sequence(1, 20));
+
+        var result = AttemptWithBonuses(service, player,
+            TestJob(cashMin: 0, cashMax: 100, xp: 10), TestMastery(player.Id), 0, bonusPerLevel: 0.02);
+
+        Assert.Equal(20, result.Outcome!.CashEarned);
+        Assert.Equal(10, result.Outcome.XpEarned);
+    }
+
+    [Fact]
+    public void A_higher_level_pays_its_bonus_on_cash_and_xp()
+    {
+        // Level 11 at 2% per level past the first is +20%: 20 cash pays 24, 10 XP pays 12.
+        var player = TestPlayer(level: 11);
+        var service = new JobService(FakeRandomSource.Sequence(1, 20));
+
+        var result = AttemptWithBonuses(service, player,
+            TestJob(cashMin: 0, cashMax: 100, xp: 10), TestMastery(player.Id), 0, bonusPerLevel: 0.02);
+
+        Assert.Equal(24, result.Outcome!.CashEarned);
+        Assert.Equal(12, result.Outcome.XpEarned);
+    }
+
+    [Fact]
+    public void A_fractional_boosted_payout_rounds_to_nearest_rather_than_down()
+    {
+        // Level 4 at 2% per level is +6%: 10 XP becomes 10.6, which must pay 11 (flooring would pay 10).
+        var player = TestPlayer(level: 4);
+        var service = new JobService(FakeRandomSource.Sequence(1, 20));
+
+        var result = AttemptWithBonuses(service, player,
+            TestJob(cashMin: 0, cashMax: 100, xp: 10), TestMastery(player.Id), 0, bonusPerLevel: 0.02);
+
+        Assert.Equal(11, result.Outcome!.XpEarned);
+        Assert.Equal(21, result.Outcome.CashEarned);
+    }
+
+    [Fact]
+    public void A_boosted_payout_exactly_halfway_rounds_away_from_zero()
+    {
+        // Level 2 at 5% per level: 10 XP becomes 10.5 and 30 cash becomes 31.5. Away-from-zero pays 11 and 32;
+        // banker's rounding would pay 10 and 32, flooring 10 and 31.
+        var player = TestPlayer(level: 2);
+        var service = new JobService(FakeRandomSource.Sequence(1, 30));
+
+        var result = AttemptWithBonuses(service, player,
+            TestJob(cashMin: 0, cashMax: 100, xp: 10), TestMastery(player.Id), 0, bonusPerLevel: 0.05);
+
+        Assert.Equal(11, result.Outcome!.XpEarned);
+        Assert.Equal(32, result.Outcome.CashEarned);
+    }
+
+    [Fact]
+    public void The_level_bonus_adds_to_the_mastery_bonus_rather_than_compounding_it()
+    {
+        // Rank 5 at 10% is +50% and level 11 at 2% is +20%: x1.7, not x1.5 x 1.2 = x1.8.
+        var player = TestPlayer(level: 11);
+        var service = new JobService(FakeRandomSource.Sequence(1, 20));
+
+        var result = AttemptWithBonuses(service, player,
+            TestJob(cashMin: 0, cashMax: 100, xp: 10), MasteryAtRank(player.Id, MaxRank),
+            bonusPerRank: 0.10, bonusPerLevel: 0.02);
+
+        Assert.Equal(34, result.Outcome!.CashEarned);
+        Assert.Equal(17, result.Outcome.XpEarned);
+    }
+
+    [Fact]
+    public void The_attempt_that_levels_the_player_up_is_paid_at_the_level_they_held()
+    {
+        // 95 XP plus a 10 XP job crosses the level-2 threshold (100), but that attempt is paid at level 1.
+        var player = TestPlayer(level: 1, xp: 95);
+        var service = new JobService(FakeRandomSource.Sequence(1, 20));
+
+        var result = AttemptWithBonuses(service, player,
+            TestJob(cashMin: 0, cashMax: 100, xp: 10), TestMastery(player.Id), 0, bonusPerLevel: 0.5);
+
+        Assert.True(result.LevelUp!.LeveledUp);
+        Assert.Equal(20, result.Outcome!.CashEarned);
+        Assert.Equal(10, result.Outcome.XpEarned);
+    }
+
+    [Fact]
+    public void A_failed_attempt_consolation_is_a_fraction_of_the_level_boosted_amounts()
+    {
+        // Level 11, +20%: a rolled 2000 becomes 2400, 1% of which is 24; 10 XP becomes 12, 10% of which
+        // is 1.2 rounded up to 2 (the base 1.0 would be 1).
+        var player = TestPlayer(level: 11, cash: 0);
+        var service = new JobService(ScriptedFailure(cash: 2000));
+
+        var result = AttemptWithBonuses(service, player,
+            TestJob(cashMin: 0, cashMax: 5000, xp: 10, baseSuccessChance: 0.5, healthLossMax: 5),
+            TestMastery(player.Id), 0, bonusPerLevel: 0.02);
+
+        Assert.False(result.Outcome!.Succeeded);
+        Assert.Equal(24, result.Outcome.CashEarned);
+        Assert.Equal(2, result.Outcome.XpEarned);
+    }
+
+    [Fact]
+    public void A_negative_level_bonus_is_rejected()
+    {
+        var player = TestPlayer();
+        var service = new JobService(FakeRandomSource.Sequence(1, 20));
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            AttemptWithBonuses(service, player, TestJob(), TestMastery(player.Id), 0, bonusPerLevel: -0.01));
+    }
 }

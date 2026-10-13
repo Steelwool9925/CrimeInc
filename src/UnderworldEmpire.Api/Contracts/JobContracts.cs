@@ -10,7 +10,13 @@ namespace UnderworldEmpire.Api.Contracts;
 ///     Completions still needed for the next rank, or <see langword="null"/> at max rank. Drives the
 ///     client's mastery bar without the client needing to know the threshold rule.
 /// </param>
-public record JobMasteryState(int Completions, int Rank, int MaxRank, int? CompletionsUntilNextRank);
+/// <param name="PayoutBonus">
+///     The extra share of cash and XP the player's <em>next</em> attempt at this job pays for the rank
+///     held: 0.3 is +30%. Zero at rank 0. Sent as a fraction so the client formats it and never
+///     re-derives the rule from the rank.
+/// </param>
+public record JobMasteryState(
+    int Completions, int Rank, int MaxRank, int? CompletionsUntilNextRank, double PayoutBonus);
 
 /// <summary>
 /// One item-quantity gate on a job, from the calling player's point of view — content plus this
@@ -151,7 +157,8 @@ public record ItemConsumptionDto(string ItemId, int QuantityConsumed, int Quanti
 ///     without a second call to /me.
 /// </param>
 /// <param name="Level">The player's level at request time, for the same reason.</param>
-public record JobListResponse(IReadOnlyList<JobDto> Jobs, int CurrentEnergy, int Level);
+public record JobListResponse(
+    IReadOnlyList<JobDto> Jobs, int CurrentEnergy, int Level, double LevelPayoutBonus);
 
 /// <summary>Response body for POST /jobs/{id}/do.</summary>
 /// <remarks>

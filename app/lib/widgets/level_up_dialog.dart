@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../api/models.dart';
 
-/// The level-up celebration. Reports what the level actually granted, since the meter refill and the
-/// skill point are the mechanical rewards a player needs to know about.
+/// The level-up celebration. Reports what the level actually granted, since the skill point, the
+/// meter refill and the pay bonus on every job are the mechanical rewards a player needs to know about.
 class LevelUpDialog extends StatelessWidget {
   const LevelUpDialog({
     super.key,
@@ -35,6 +35,15 @@ class LevelUpDialog extends StatelessWidget {
           if (levelUp.metersRefilled) ...[
             const SizedBox(height: 8),
             const Text('Energy, stamina and health refilled.'),
+          ],
+          if (levelUp.payoutGainedPercent > 0) ...[
+            const SizedBox(height: 8),
+            Text(
+              levelUp.payoutGainedPercent == levelUp.payoutPercent
+                  ? 'Every job now pays +${levelUp.payoutPercent}%.'
+                  : 'Every job now pays +${levelUp.payoutGainedPercent}% (+${levelUp.payoutPercent}% in all).',
+              key: const Key('level-up-pay'),
+            ),
           ],
         ],
       ),

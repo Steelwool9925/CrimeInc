@@ -53,6 +53,36 @@ public class EconomyTests
     }
 
     [Fact]
+    public void AddCash_stops_at_the_ceiling_instead_of_wrapping_negative()
+    {
+        var player = new Player { CreatedAtUtc = DateTimeOffset.UtcNow, Cash = long.MaxValue - 5 };
+
+        player.AddCash(20);
+
+        Assert.Equal(long.MaxValue, player.Cash);
+    }
+
+    [Fact]
+    public void AddXp_stops_at_the_ceiling_instead_of_wrapping_negative()
+    {
+        var player = new Player { CreatedAtUtc = DateTimeOffset.UtcNow, Xp = long.MaxValue - 5 };
+
+        player.AddXp(20);
+
+        Assert.Equal(long.MaxValue, player.Xp);
+    }
+
+    [Fact]
+    public void AddCash_exactly_reaching_the_ceiling_is_not_clamped_early()
+    {
+        var player = new Player { CreatedAtUtc = DateTimeOffset.UtcNow, Cash = long.MaxValue - 5 };
+
+        player.AddCash(5);
+
+        Assert.Equal(long.MaxValue, player.Cash);
+    }
+
+    [Fact]
     public void AddCash_negative_amount_throws_ArgumentOutOfRangeException()
     {
         var player = new Player { CreatedAtUtc = DateTimeOffset.UtcNow };

@@ -7,6 +7,7 @@ using UnderworldEmpire.Api.Contracts;
 using UnderworldEmpire.Domain;
 using UnderworldEmpire.Domain.Items;
 using UnderworldEmpire.Domain.Jobs;
+using UnderworldEmpire.Domain.Progression;
 using UnderworldEmpire.Infrastructure;
 using UnderworldEmpire.Infrastructure.Content;
 
@@ -15,6 +16,9 @@ namespace UnderworldEmpire.Api.Endpoints;
 /// <summary>Minimal-API endpoints for the job catalog and job execution (T2.1 / T2.2).</summary>
 public static class JobEndpoints
 {
+    // Float arithmetic leaves noise (0.1 x 3 is 0.30000000000000004) that would otherwise reach the wire.
+    private static double Tidy(double bonus) => Math.Round(bonus, 6);
+
     /// <summary>Registers the job endpoints on the provided <paramref name="app"/>.</summary>
     public static IEndpointRouteBuilder MapJobEndpoints(this IEndpointRouteBuilder app)
     {
@@ -129,12 +133,15 @@ public static class JobEndpoints
                         Completions: completions,
                         Rank: rank,
                         MaxRank: catalog.MaxRank,
-                        CompletionsUntilNextRank: untilNext),
+                        CompletionsUntilNextRank: untilNext,
+                        PayoutBonus: Tidy(rank * catalog.MasteryPayoutBonusPerRank)),
                     CanAttempt: unavailableReason is null,
                     UnavailableReason: unavailableReason));
             }
 
-            return Results.Ok(new JobListResponse(jobs, currentEnergy, player.Level));
+            return Results.Ok(new JobListResponse(
+                jobs, currentEnergy, player.Level,
+                Tidy(LevelPayout.BonusFor(player.Level, catalog.LevelPayoutBonusPerLevel))));
         })
         .WithName("GetJobs")
         .WithTags("Jobs");
@@ -207,7 +214,11 @@ public static class JobEndpoints
             var catalog = content.JobCatalog;
 
             var levelUp = result.LevelUp is { LeveledUp: true } lvl
-                ? new LevelUpDto(lvl.LevelsGained, lvl.NewLevel, lvl.SkillPointsGranted, lvl.MetersRefilled)
+                ? new LevelUpDto(
+                    lvl.LevelsGained, lvl.NewLevel, lvl.SkillPointsGranted, lvl.MetersRefilled,
+                    PayoutBonusGained: Tidy(LevelPayout.BonusFor(lvl.NewLevel, catalog.LevelPayoutBonusPerLevel)
+                        - LevelPayout.BonusFor(lvl.NewLevel - lvl.LevelsGained, catalog.LevelPayoutBonusPerLevel)),
+                    PayoutBonus: Tidy(LevelPayout.BonusFor(lvl.NewLevel, catalog.LevelPayoutBonusPerLevel)))
                 : null;
 
             return Results.Ok(new DoJobResponse(
@@ -222,7 +233,8 @@ public static class JobEndpoints
                         Completions: outcome.Completions,
                         Rank: outcome.MasteryRank,
                         MaxRank: catalog.MaxRank,
-                        CompletionsUntilNextRank: outcome.CompletionsUntilNextRank),
+                        CompletionsUntilNextRank: outcome.CompletionsUntilNextRank,
+                        PayoutBonus: Tidy(outcome.MasteryRank * catalog.MasteryPayoutBonusPerRank)),
                     MasteryRankedUp: outcome.MasteryRankedUp,
                     ItemsConsumed: outcome.ItemsConsumed
                         .Select(c => new ItemConsumptionDto(c.ItemId, c.QuantityConsumed, c.QuantityRemaining))

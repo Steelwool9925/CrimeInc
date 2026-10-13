@@ -23,6 +23,14 @@ version  schema version of this file
 mastery  pack-wide mastery rules, applied to every job
   completionsPerRank  completions needed per mastery rank (>= 1)
   maxRank             rank ceiling (0 disables mastery entirely)
+  payoutBonusPerRank  optional (default 0, between 0 and 1): extra share of a job's cash and XP paid per
+                      rank held — 0.10 is +10% per rank, so rank 5 pays +50%. Read from the rank held
+                      *before* the attempt, applied before the failure consolation fraction
+levels   optional pack-wide level rules, applied to every job
+  payoutBonusPerLevel  optional (default 0, between 0 and 1): extra share of a job's cash and XP paid for
+                       each level held past the first — 0.02 is +2% per level, so level 20 pays +38%.
+                       Adds to the mastery bonus rather than compounding it; the level read is the one
+                       held before the attempt, and is capped at the game's level cap
 risk     pack-wide risk rules, applied to every job — required, not optional
   maxSuccessChance         ceiling on any job's success chance (0..1); no job is ever certain
   consolationCashFraction  fraction of the rolled cash paid on a failed attempt (0..1)
@@ -126,8 +134,18 @@ All numbers here are tunable without touching code. Two properties are load-bear
   mastery rank *even allowing for failures*, so "watch the mastery bar tick up" is observable in a
   single sitting.
 
-One full starting energy bar buys **ten** runs of *Shake Down a Corner Store*. Since M3R those runs
-can fail, so what a bar yields is now a distribution rather than a guarantee:
+The **level cap** is a property of the content even though it lives in code
+(`PlayerDefaults.MaxLevel`): it must be at least the highest `levelRequirement` anywhere in the pack
+— jobs, items *and* properties — and no more than ten levels above it. `LevelCapTests` pins both
+directions against this folder, so adding a content tier means raising the cap with it, and leaving
+the cap alone fails the build. It was 100 while the content ended at level 12, which left 98.4% of the
+XP curve unlocking nothing.
+
+One full starting energy bar buys **twenty** runs of *Shake Down a Corner Store*
+(`PlayerDefaults.EnergyMax` 20, one energy each). The table below is the history of how the opening
+bar was tuned when it was **ten** energy and the job's first-run chance fell to 0.65; it has not been
+recomputed for the 20-energy, 0.80 start. Since M3R those runs can fail, so what a bar yields is a
+distribution rather than a guarantee:
 
 | | before M3R | M3R | since the 1/1 start |
 |---|---|---|---|
@@ -249,7 +267,7 @@ rather than a negative number here.
 
 A player may equip **one item per slot**, so the catalog needs at least one item in every slot or
 the inventory UI renders a dead section. Prices are absolute cash, to be read against
-`jobs.json` payouts and `PlayerDefaults.StartingCash` (100).
+`jobs.json` payouts and `PlayerDefaults.StartingCash` (0).
 
 Two properties are load-bearing for the **CP3** checkpoint and are pinned by tests in
 `ItemCatalogLoaderTests`:

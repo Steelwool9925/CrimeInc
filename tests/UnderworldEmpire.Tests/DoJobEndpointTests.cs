@@ -5,8 +5,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using UnderworldEmpire.Domain;
 using UnderworldEmpire.Domain.Items;
+using UnderworldEmpire.Domain.Jobs;
 using UnderworldEmpire.Domain.Progression;
 using UnderworldEmpire.Infrastructure;
+using UnderworldEmpire.Infrastructure.Content;
 
 namespace UnderworldEmpire.Tests;
 
@@ -100,6 +102,16 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
         player.Level = level;
         player.Attack = attack;
         player.Defense = defense;
+        await db.SaveChangesAsync();
+    }
+
+    private async Task SetLevelAndXpAsync(Guid playerId, int level, long xp)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<GameDbContext>();
+        var player = await db.Players.FirstAsync(p => p.Id == playerId);
+        player.Level = level;
+        player.Xp = xp;
         await db.SaveChangesAsync();
     }
 
@@ -329,9 +341,9 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
     [Fact]
     public async Task Ten_runs_of_the_cheap_job_level_the_player_and_refill_meters()
     {
-        // Ten successful runs of the cheapest job are exactly the level-2 threshold (10 XP each),
-        // and cross a mastery rank along the way. Both instants are checked: the sixth run for the
-        // rank, the tenth for the level.
+        // Ten successful runs of the cheapest job reach the level-2 threshold (10 XP each, more once
+        // the rank earned on the sixth run starts paying) and cross a mastery rank along the way.
+        // Both instants are checked: the sixth run for the rank, the tenth for the level.
         //
         // Outcomes are forced, not rolled — CustomWebApplicationFactory swaps IRandomSource for a
         // deterministic SwitchableRandomSource so "ten jobs" really means "ten completions". The
@@ -348,9 +360,11 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
 
         JsonDocument? sixth = null;
         JsonDocument? tenth = null;
+        long xpPaid = 0;
         for (int i = 1; i <= 10; i++)
         {
             var body = await BodyAsync(await DoJobAsync(token, CheapJob));
+            xpPaid += body.RootElement.GetProperty("result").GetProperty("xpEarned").GetInt64();
             if (i == 6) sixth = body;
             else if (i == 10) tenth = body;
             else body.Dispose();
@@ -374,11 +388,20 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Equal(PlayerDefaults.SkillPointsPerLevel, levelUp.GetProperty("skillPointsGranted").GetInt32());
         Assert.True(levelUp.GetProperty("metersRefilled").GetBoolean());
 
+        // The second grant: this level, and every one after it, pays more on every job. Level 2 is one
+        // step above level 1, so the gain and the new total are the same single step.
+        double perLevel = new ContentPackLoader(RepoContent.FindRoot()).LoadJobs("crime").LevelPayoutBonusPerLevel;
+        Assert.True(perLevel > 0);
+        Assert.Equal(perLevel, levelUp.GetProperty("payoutBonusGained").GetDouble(), 9);
+        Assert.Equal(perLevel, levelUp.GetProperty("payoutBonus").GetDouble(), 9);
+
         // Meters refilled, so energy is back to full despite ten spends.
         var player = root.GetProperty("player");
         Assert.Equal(2, player.GetProperty("level").GetInt32());
         Assert.Equal(PlayerDefaults.EnergyMax, player.GetProperty("energy").GetProperty("current").GetInt32());
-        Assert.Equal(LevelCurve.XpToReach(2), player.GetProperty("xp").GetInt64());
+        // Stored XP is exactly what the ten runs reported paying, and that clears the level-2 bar.
+        Assert.Equal(xpPaid, player.GetProperty("xp").GetInt64());
+        Assert.True(xpPaid >= LevelCurve.XpToReach(2));
         Assert.Equal(PlayerDefaults.SkillPointsPerLevel, player.GetProperty("skillPoints").GetInt32());
 
         // And the tenth run is four completions past that rank, not a second rank-up.
@@ -386,6 +409,143 @@ public class DoJobEndpointTests : IClassFixture<CustomWebApplicationFactory>
         Assert.Equal(10, mastery.GetProperty("completions").GetInt32());
         Assert.Equal(1, mastery.GetProperty("rank").GetInt32());
         Assert.False(root.GetProperty("result").GetProperty("masteryRankedUp").GetBoolean());
+    }
+
+    // -------------------------------------------------------------------------
+    // Mastery pays
+    // -------------------------------------------------------------------------
+
+    private async Task<JsonElement> JobEntryAsync(string token, string jobId)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/jobs");
+        request.Headers.Add("Authorization", $"Bearer {token}");
+        var response = await _client.SendAsync(request);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return doc.RootElement.GetProperty("jobs").EnumerateArray()
+            .Single(j => j.GetProperty("id").GetString() == jobId).Clone();
+    }
+
+    [Fact]
+    public async Task A_job_pays_more_once_it_has_a_mastery_rank_and_says_so()
+    {
+        // The shipped bonus, read from the pack rather than restated, so retuning it does not break
+        // this test: what it pins is that the rank earned on the sixth run reaches the seventh payout
+        // and the job list. The cheap job pays 10 XP at rank 0.
+        double bonus = new ContentPackLoader(RepoContent.FindRoot()).LoadJobs("crime").MasteryPayoutBonusPerRank;
+        var token = await NewGuestTokenAsync();
+
+        Assert.Equal(0, (await JobEntryAsync(token, CheapJob)).GetProperty("mastery")
+            .GetProperty("payoutBonus").GetDouble());
+
+        long firstXp = 0;
+        for (int i = 1; i <= 6; i++)
+        {
+            using var body = await BodyAsync(await DoJobAsync(token, CheapJob));
+            var result = body.RootElement.GetProperty("result");
+            if (i == 1) firstXp = result.GetProperty("xpEarned").GetInt64();
+            if (i < 6)
+                Assert.Equal(0, result.GetProperty("mastery").GetProperty("payoutBonus").GetDouble());
+            else
+                Assert.Equal(bonus, result.GetProperty("mastery").GetProperty("payoutBonus").GetDouble(), 9);
+        }
+
+        Assert.Equal(bonus, (await JobEntryAsync(token, CheapJob)).GetProperty("mastery")
+            .GetProperty("payoutBonus").GetDouble(), 9);
+
+        using var seventh = await BodyAsync(await DoJobAsync(token, CheapJob));
+        long seventhXp = seventh.RootElement.GetProperty("result").GetProperty("xpEarned").GetInt64();
+        Assert.Equal((long)Math.Round(firstXp * (1 + bonus), MidpointRounding.AwayFromZero), seventhXp);
+        Assert.True(seventhXp > firstXp, "A ranked job should pay more XP than the same job unranked.");
+    }
+
+    [Fact]
+    public async Task A_higher_level_player_is_paid_the_level_bonus_and_the_job_list_says_so()
+    {
+        double perLevel = new ContentPackLoader(RepoContent.FindRoot()).LoadJobs("crime").LevelPayoutBonusPerLevel;
+        var token = await NewGuestTokenAsync();
+
+        Assert.Equal(0, await LevelPayoutBonusOnJobListAsync(token));
+
+        var playerId = await PlayerIdForAsync(token);
+        await SetLevelAndStatsAsync(playerId, level: 11, attack: 5, defense: 5);
+        Assert.Equal(10 * perLevel, await LevelPayoutBonusOnJobListAsync(token), 9);
+
+        using var body = await BodyAsync(await DoJobAsync(token, CheapJob));
+        long xp = body.RootElement.GetProperty("result").GetProperty("xpEarned").GetInt64();
+        Assert.Equal((long)Math.Round(10 * (1 + 10 * perLevel), MidpointRounding.AwayFromZero), xp);
+        Assert.True(xp > 10, "A level-11 player should be paid more than the base 10 XP.");
+    }
+
+    [Theory]
+    [InlineData(5, 6)]   // a level-up from mid-curve: the gain is one step, the total is five
+    [InlineData(1, 6)]   // a multi-level jump: the gain and the total are both five steps
+    [InlineData(19, 20)] // onto the cap: the gain is one step, the total is nineteen
+    public async Task A_level_up_announces_the_bonus_gained_and_the_new_total(int startLevel, int targetLevel)
+    {
+        double perLevel = new ContentPackLoader(RepoContent.FindRoot()).LoadJobs("crime").LevelPayoutBonusPerLevel;
+        var token = await NewGuestTokenAsync();
+        var playerId = await PlayerIdForAsync(token);
+
+        // One XP short of the target level, so any outcome (even a failure's consolation) crosses it.
+        await SetLevelAndXpAsync(playerId, startLevel, LevelCurve.XpToReach(targetLevel) - 1);
+
+        using var body = await BodyAsync(await DoJobAsync(token, CheapJob));
+        var levelUp = body.RootElement.GetProperty("levelUp");
+
+        Assert.Equal(targetLevel, levelUp.GetProperty("newLevel").GetInt32());
+        Assert.Equal((targetLevel - startLevel) * perLevel, levelUp.GetProperty("payoutBonusGained").GetDouble(), 9);
+        Assert.Equal((targetLevel - 1) * perLevel, levelUp.GetProperty("payoutBonus").GetDouble(), 9);
+    }
+
+    [Fact]
+    public async Task Bonus_figures_go_out_as_tidy_fractions_not_float_noise()
+    {
+        // 3 x 0.1 is 0.30000000000000004 and 0.38 - 0.36 is 0.020000000000000018 in doubles. Every bonus
+        // the API sends must carry at most six decimals, whatever the shipped rates are.
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadJobs("crime");
+        var token = await NewGuestTokenAsync();
+        var playerId = await PlayerIdForAsync(token);
+
+        // Rank 3 on the cheap job, and one XP short of level 20 from level 19.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<GameDbContext>();
+            var mastery = new PlayerJobMastery { PlayerId = playerId, JobId = CheapJob };
+            for (int i = 0; i < 3 * catalog.CompletionsPerRank; i++)
+                mastery.RecordCompletion(catalog.CompletionsPerRank, catalog.MaxRank);
+            db.PlayerJobMasteries.Add(mastery);
+            await db.SaveChangesAsync();
+        }
+        await SetLevelAndXpAsync(playerId, level: 19, xp: LevelCurve.XpToReach(20) - 1);
+
+        var doResponse = await DoJobAsync(token, CheapJob);
+        string doJson = await doResponse.Content.ReadAsStringAsync();
+
+        using var listRequest = new HttpRequestMessage(HttpMethod.Get, "/jobs");
+        listRequest.Headers.Add("Authorization", $"Bearer {token}");
+        string listJson = await (await _client.SendAsync(listRequest)).Content.ReadAsStringAsync();
+
+        var figure = new System.Text.RegularExpressions.Regex(
+            "\"(payoutBonusGained|payoutBonus|levelPayoutBonus)\":(?<n>-?[0-9.eE+-]+)");
+        var figures = figure.Matches(doJson).Concat(figure.Matches(listJson)).ToList();
+        Assert.Contains(figures, m => m.Groups[1].Value == "payoutBonusGained");
+        Assert.Contains(figures, m => m.Groups[1].Value == "levelPayoutBonus");
+        foreach (var m in figures)
+        {
+            string number = m.Groups["n"].Value;
+            Assert.DoesNotContain('e', number.ToLowerInvariant());
+            int decimals = number.Contains('.') ? number.Length - number.IndexOf('.') - 1 : 0;
+            Assert.True(decimals <= 6, $"{m.Groups[1].Value} was sent as {number}");
+        }
+    }
+
+    private async Task<double> LevelPayoutBonusOnJobListAsync(string token)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/jobs");
+        request.Headers.Add("Authorization", $"Bearer {token}");
+        var response = await _client.SendAsync(request);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return doc.RootElement.GetProperty("levelPayoutBonus").GetDouble();
     }
 
     [Fact]
