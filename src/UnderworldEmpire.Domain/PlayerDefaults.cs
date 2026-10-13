@@ -85,7 +85,29 @@ public static class PlayerDefaults
     /// Highest attainable level. Bounds the level-up loop so a pathological XP grant cannot spin,
     /// and gives <see cref="Progression.LevelCurve"/> a defined ceiling. Tunable balance value.
     /// </summary>
-    public const int MaxLevel = 100;
+    /// <remarks>
+    /// <para>
+    /// <b>Set a few levels past the content on purpose.</b> The shipped pack's last job unlocks at
+    /// level 8, its last item at 10 and its last property at 12, so everything the game offers is
+    /// reachable by level 12. This was 100, which meant the 2026-10-02 audit's finding: 98.4% of the XP
+    /// curve unlocked nothing, and a player who had seen every job, item and property faced a wall of
+    /// levels that each paid a skill point and little else.
+    /// </para>
+    /// <para>
+    /// Twenty leaves eight levels of headroom, so the last unlock arrives as an arrival rather than the
+    /// end of the game, without pretending there is a hundred levels of game. <c>LevelCapTests</c> pins
+    /// the relationship to the real pack in both directions: the cap may not fall below the highest
+    /// level any content requires, and may not drift more than ten levels above it. <b>When a content
+    /// tier is added, move this with it.</b>
+    /// </para>
+    /// <para>
+    /// Lowering the cap does not demote anyone. <c>Player.ApplyXpAndLevelUp</c> never takes a level
+    /// away, so a stored level above this value (only possible for an account made under the old cap)
+    /// is simply kept, and <see cref="Progression.LevelCurve.LevelForXp"/> clamps what the curve
+    /// itself reports.
+    /// </para>
+    /// </remarks>
+    public const int MaxLevel = 20;
 
     /// <summary>Skill points granted per level gained. Tunable balance value.</summary>
     public const int SkillPointsPerLevel = 1;

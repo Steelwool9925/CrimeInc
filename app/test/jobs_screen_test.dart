@@ -77,6 +77,93 @@ void main() {
       expect(find.byKey(const Key('mastery-bar-shake-down-corner-store')), findsOneWidget);
     });
 
+    testWidgets('a ranked job says what its rank pays, and an unranked one stays quiet',
+        (tester) async {
+      final semantics = tester.ensureSemantics();
+      const ranked = Job(
+        id: 'shake-down-corner-store',
+        name: 'Shake Down a Corner Store',
+        description: 'Lean on the owner for a cut of the register.',
+        area: 'downtown',
+        energyCost: 1,
+        levelRequirement: 1,
+        cashMin: 15,
+        cashMax: 30,
+        xp: 10,
+        attackRequirement: 1,
+        defenseRequirement: 1,
+        successChance: 0.65,
+        mastery: JobMastery(
+          completions: 12,
+          rank: 2,
+          maxRank: 5,
+          completionsUntilNextRank: 6,
+          payoutBonus: 0.2,
+        ),
+        canAttempt: true,
+      );
+      await pumpJobs(
+        tester,
+        FakeApiClient(
+          jobsResult: const JobList(jobs: [ranked, kUnaffordableJob], currentEnergy: 7, level: 1),
+        ),
+      );
+
+      expect(find.byKey(const Key('mastery-pay-shake-down-corner-store')), findsOneWidget);
+      expect(find.text('+20% pay'), findsOneWidget);
+      expect(find.byKey(Key('mastery-pay-${kUnaffordableJob.id}')), findsNothing);
+      // Unanchored: the widget-test tree folds a whole card into one node (see accessibility_test).
+      expect(find.bySemanticsLabel(RegExp(r'Mastery rank 2 of 5, pays 20% more')), findsWidgets);
+      expect(find.bySemanticsLabel(RegExp(r'Mastery rank 0 of 5, pays')), findsNothing);
+      semantics.dispose();
+    });
+
+    testWidgets('says what the level adds to every job, once it adds anything',
+        (tester) async {
+      await pumpJobs(
+        tester,
+        FakeApiClient(
+          jobsResult: const JobList(
+            jobs: [kCheapJob],
+            currentEnergy: 7,
+            level: 5,
+            levelPayoutBonus: 0.08,
+          ),
+        ),
+      );
+
+      expect(find.byKey(const Key('level-pay-bonus')), findsOneWidget);
+      expect(find.text('Level bonus: +8% pay on every job'), findsOneWidget);
+    });
+
+    testWidgets('says nothing about a level bonus when there is none', (tester) async {
+      await pumpJobs(tester, FakeApiClient());
+
+      expect(find.byKey(const Key('level-pay-bonus')), findsNothing);
+    });
+
+    testWidgets('does not move the job list when the first level bonus appears', (tester) async {
+      await pumpJobs(tester, FakeApiClient());
+      final before = tester.getTopLeft(find.text(kCheapJob.name)).dy;
+
+      // A fresh tree: the screen keeps the AppState it was first built with.
+      await tester.pumpWidget(const SizedBox.shrink());
+      await pumpJobs(
+        tester,
+        FakeApiClient(
+          jobsResult: const JobList(
+            jobs: [kCheapJob],
+            currentEnergy: 7,
+            level: 2,
+            levelPayoutBonus: 0.02,
+          ),
+        ),
+      );
+      final after = tester.getTopLeft(find.text(kCheapJob.name)).dy;
+
+      expect(after, before);
+    });
+
     testWidgets('shows the current energy in the app bar', (tester) async {
       await pumpJobs(tester, FakeApiClient());
 
@@ -248,6 +335,103 @@ void main() {
       expect(find.text('Level 2!'), findsOneWidget);
       expect(find.text('You earned 1 skill point.'), findsOneWidget);
       expect(find.text('Energy, stamina and health refilled.'), findsOneWidget);
+    });
+
+    testWidgets('a level-up announces the pay it grants, in whole percents', (tester) async {
+      final api = FakeApiClient(
+        doJobResult: const DoJobResult(
+          result: JobResult(
+            jobId: 'shake-down-corner-store',
+            succeeded: true,
+            energySpent: 1,
+            cashEarned: 25,
+            xpEarned: 10,
+            healthLost: 0,
+            mastery: kFakeMastery,
+            masteryRankedUp: false,
+          ),
+          player: kFakeMe,
+          levelUp: LevelUp(
+            levelsGained: 1,
+            newLevel: 4,
+            skillPointsGranted: 1,
+            metersRefilled: true,
+            payoutBonusGained: 0.02,
+            payoutBonus: 0.06,
+          ),
+        ),
+      );
+      await pumpJobs(tester, api);
+
+      await tester.tap(find.byKey(const Key('do-job-shake-down-corner-store')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('level-up-pay')), findsOneWidget);
+      expect(find.text('Every job now pays +2% (+6% in all).'), findsOneWidget);
+    });
+
+    testWidgets('the first level-up states the pay once, without a redundant total', (tester) async {
+      final api = FakeApiClient(
+        doJobResult: const DoJobResult(
+          result: JobResult(
+            jobId: 'shake-down-corner-store',
+            succeeded: true,
+            energySpent: 1,
+            cashEarned: 25,
+            xpEarned: 10,
+            healthLost: 0,
+            mastery: kFakeMastery,
+            masteryRankedUp: false,
+          ),
+          player: kFakeMe,
+          levelUp: LevelUp(
+            levelsGained: 1,
+            newLevel: 2,
+            skillPointsGranted: 1,
+            metersRefilled: true,
+            payoutBonusGained: 0.02,
+            payoutBonus: 0.02,
+          ),
+        ),
+      );
+      await pumpJobs(tester, api);
+
+      await tester.tap(find.byKey(const Key('do-job-shake-down-corner-store')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Every job now pays +2%.'), findsOneWidget);
+      expect(find.textContaining('in all'), findsNothing);
+    });
+
+    testWidgets('a level-up from a pack with no level bonus says nothing about pay', (tester) async {
+      final api = FakeApiClient(
+        doJobResult: const DoJobResult(
+          result: JobResult(
+            jobId: 'shake-down-corner-store',
+            succeeded: true,
+            energySpent: 1,
+            cashEarned: 25,
+            xpEarned: 10,
+            healthLost: 0,
+            mastery: kFakeMastery,
+            masteryRankedUp: false,
+          ),
+          player: kFakeMe,
+          levelUp: LevelUp(
+            levelsGained: 1,
+            newLevel: 2,
+            skillPointsGranted: 1,
+            metersRefilled: true,
+          ),
+        ),
+      );
+      await pumpJobs(tester, api);
+
+      await tester.tap(find.byKey(const Key('do-job-shake-down-corner-store')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('level-up-dialog')), findsOneWidget);
+      expect(find.byKey(const Key('level-up-pay')), findsNothing);
     });
 
     testWidgets('acknowledging the dialog closes it', (tester) async {

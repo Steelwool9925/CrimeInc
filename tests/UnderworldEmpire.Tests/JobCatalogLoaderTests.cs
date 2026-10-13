@@ -352,6 +352,126 @@ public class JobCatalogLoaderTests : IDisposable
     }
 
     [Fact]
+    public void A_pack_with_no_payout_bonus_loads_with_mastery_paying_nothing_extra()
+    {
+        WriteJobs("crime", CatalogWith(mastery: new { completionsPerRank = 10, maxRank = 5 }));
+
+        Assert.Equal(0, Loader().LoadJobs("crime").MasteryPayoutBonusPerRank);
+    }
+
+    [Fact]
+    public void A_configured_payout_bonus_reaches_the_catalog()
+    {
+        WriteJobs("crime", CatalogWith(mastery: new { completionsPerRank = 10, maxRank = 5, payoutBonusPerRank = 0.1 }));
+
+        Assert.Equal(0.1, Loader().LoadJobs("crime").MasteryPayoutBonusPerRank);
+    }
+
+    [Fact]
+    public void A_negative_payout_bonus_throws_ContentPackException()
+    {
+        // A negative bonus would make a mastered job pay less than a fresh one.
+        WriteJobs("crime", CatalogWith(mastery: new { completionsPerRank = 10, maxRank = 5, payoutBonusPerRank = -0.05 }));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+        Assert.Contains("'mastery.payoutBonusPerRank' must be between 0 and 1", ex.Message);
+    }
+
+    [Fact]
+    public void A_pack_with_no_levels_block_loads_with_level_paying_nothing_extra()
+    {
+        WriteJobs("crime", ValidCatalog(ValidJob()));
+
+        Assert.Equal(0, Loader().LoadJobs("crime").LevelPayoutBonusPerLevel);
+    }
+
+    [Fact]
+    public void A_configured_level_bonus_reaches_the_catalog()
+    {
+        var catalog = CatalogWith();
+        catalog["levels"] = new { payoutBonusPerLevel = 0.02 };
+        WriteJobs("crime", catalog);
+
+        Assert.Equal(0.02, Loader().LoadJobs("crime").LevelPayoutBonusPerLevel);
+    }
+
+    [Fact]
+    public void A_negative_level_bonus_throws_ContentPackException()
+    {
+        var catalog = CatalogWith();
+        catalog["levels"] = new { payoutBonusPerLevel = -0.01 };
+        WriteJobs("crime", catalog);
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+        Assert.Contains("'levels.payoutBonusPerLevel' must be between 0 and 1", ex.Message);
+    }
+
+    [Theory]
+    [InlineData(1.5)]
+    [InlineData(1000)]
+    [InlineData(1e300)]
+    public void A_mastery_bonus_above_the_ceiling_throws_ContentPackException(double bonus)
+    {
+        // 1e9 here saturated (long)Math.Round(...) and wrapped a balance negative on the next AddCash.
+        WriteJobs("crime", CatalogWith(mastery: new { completionsPerRank = 10, maxRank = 5, payoutBonusPerRank = bonus }));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+        Assert.Contains("'mastery.payoutBonusPerRank' must be between 0 and 1", ex.Message);
+    }
+
+    [Theory]
+    [InlineData(1.5)]
+    [InlineData(100)]
+    [InlineData(1e300)]
+    public void A_level_bonus_above_the_ceiling_throws_ContentPackException(double bonus)
+    {
+        var catalog = CatalogWith();
+        catalog["levels"] = new { payoutBonusPerLevel = bonus };
+        WriteJobs("crime", catalog);
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+        Assert.Contains("'levels.payoutBonusPerLevel' must be between 0 and 1", ex.Message);
+    }
+
+    [Fact]
+    public void A_bonus_exactly_at_the_ceiling_loads()
+    {
+        var catalog = CatalogWith(mastery: new { completionsPerRank = 10, maxRank = 5, payoutBonusPerRank = 1.0 });
+        catalog["levels"] = new { payoutBonusPerLevel = 1.0 };
+        WriteJobs("crime", catalog);
+
+        var loaded = Loader().LoadJobs("crime");
+
+        Assert.Equal(1.0, loaded.MasteryPayoutBonusPerRank);
+        Assert.Equal(1.0, loaded.LevelPayoutBonusPerLevel);
+    }
+
+    [Theory]
+    [InlineData("mastery")]
+    [InlineData("levels")]
+    public void A_null_rules_block_throws_a_named_ContentPackException_not_a_NullReferenceException(string block)
+    {
+        var catalog = CatalogWith();
+        catalog[block] = null;
+        WriteJobs("crime", catalog);
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+        Assert.Contains($"'{block}' must be an object", ex.Message);
+    }
+
+    [Fact]
+    public void The_shipped_pack_makes_mastery_pay()
+    {
+        // The audit's complaint was that mastery was a counter with no effect. Pin the property, not
+        // a number: the shipped pack must give a maxed job strictly more than a fresh one.
+        var catalog = new ContentPackLoader(RepoContent.FindRoot()).LoadJobs("crime");
+
+        Assert.True(catalog.MaxRank >= 1, "The shipped pack has no mastery ranks to pay for.");
+        Assert.True(catalog.MasteryPayoutBonusPerRank > 0,
+            "The shipped pack sets no mastery payout bonus, so a maxed job pays the same as a fresh one.");
+    }
+
+    [Fact]
     public void All_validation_errors_are_reported_together()
     {
         // The loader must not stop at the first problem — a pack author fixing content should see

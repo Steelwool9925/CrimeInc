@@ -120,6 +120,9 @@ public class JobEndpointTests : IClassFixture<CustomWebApplicationFactory>
             Assert.Equal(0, mastery.GetProperty("rank").GetInt32());
             Assert.True(mastery.GetProperty("maxRank").GetInt32() >= 0);
 
+            // No rank, no bonus: a fresh job pays the base.
+            Assert.Equal(0, mastery.GetProperty("payoutBonus").GetDouble());
+
             // A never-attempted job still reports a countdown, so the client needs no null branch.
             Assert.Equal(JsonValueKind.Number, mastery.GetProperty("completionsUntilNextRank").ValueKind);
         }

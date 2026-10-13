@@ -152,11 +152,24 @@ class JobMastery {
     required this.rank,
     required this.maxRank,
     this.completionsUntilNextRank,
+    this.payoutBonus = 0,
   });
 
   final int completions;
   final int rank;
   final int maxRank;
+
+  /// The extra share of cash and XP the next attempt pays for the rank held: 0.3 is +30%.
+  final double payoutBonus;
+
+  /// [payoutBonus] as a whole percent.
+  ///
+  /// Rounded because the server multiplies in binary floating point: three ranks of 10% arrive as
+  /// 0.30000000000000004, which must still read as 30.
+  int get payoutPercent => (payoutBonus * 100).round();
+
+  /// "+30% pay", or null when there is no bonus to announce (rank 0, or a pack that sets none).
+  String? get payoutLabel => payoutPercent > 0 ? '+$payoutPercent% pay' : null;
 
   /// Null once [maxRank] is reached.
   final int? completionsUntilNextRank;
@@ -197,6 +210,9 @@ class JobMastery {
         rank: json['rank'] as int,
         maxRank: json['maxRank'] as int,
         completionsUntilNextRank: json['completionsUntilNextRank'] as int?,
+        // `as num`, not `as double`: System.Text.Json writes 0.0 as `0`. Absent reads as no bonus so a
+        // newer app still works against a server that predates the field.
+        payoutBonus: (json['payoutBonus'] as num?)?.toDouble() ?? 0,
       );
 }
 
@@ -354,11 +370,15 @@ class JobList {
     required this.jobs,
     required this.currentEnergy,
     required this.level,
+    this.levelPayoutBonus = 0,
   });
 
   final List<Job> jobs;
   final int currentEnergy;
   final int level;
+
+  /// The extra share of cash and XP the player's level adds to every job: 0.08 is +8%.
+  final double levelPayoutBonus;
 
   factory JobList.fromJson(Map<String, dynamic> json) => JobList(
         jobs: (json['jobs'] as List<dynamic>)
@@ -366,6 +386,9 @@ class JobList {
             .toList(growable: false),
         currentEnergy: json['currentEnergy'] as int,
         level: json['level'] as int,
+        // `as num`: System.Text.Json writes 0.0 as `0`. Absent reads as no bonus, for a server that
+        // predates the field.
+        levelPayoutBonus: (json['levelPayoutBonus'] as num?)?.toDouble() ?? 0,
       );
 }
 
@@ -376,6 +399,8 @@ class LevelUp {
     required this.newLevel,
     required this.skillPointsGranted,
     required this.metersRefilled,
+    this.payoutBonusGained = 0,
+    this.payoutBonus = 0,
   });
 
   final int levelsGained;
@@ -383,11 +408,27 @@ class LevelUp {
   final int skillPointsGranted;
   final bool metersRefilled;
 
+  /// The extra share of cash and XP every job now pays because of the levels just gained: 0.02 is +2%.
+  /// The grant beyond the skill point; zero when the pack sets no level bonus.
+  final double payoutBonusGained;
+
+  /// The player's total level pay bonus at [newLevel].
+  final double payoutBonus;
+
+  /// [payoutBonusGained] as a whole percent. Rounded because the server multiplies in binary floating
+  /// point, so three levels of 2% arrive as 0.06 only approximately.
+  int get payoutGainedPercent => (payoutBonusGained * 100).round();
+
+  /// [payoutBonus] as a whole percent.
+  int get payoutPercent => (payoutBonus * 100).round();
+
   factory LevelUp.fromJson(Map<String, dynamic> json) => LevelUp(
         levelsGained: json['levelsGained'] as int,
         newLevel: json['newLevel'] as int,
         skillPointsGranted: json['skillPointsGranted'] as int,
         metersRefilled: json['metersRefilled'] as bool,
+        payoutBonusGained: (json['payoutBonusGained'] as num?)?.toDouble() ?? 0,
+        payoutBonus: (json['payoutBonus'] as num?)?.toDouble() ?? 0,
       );
 }
 

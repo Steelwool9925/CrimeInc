@@ -23,6 +23,14 @@ public sealed record JobCatalogFile
     public MasteryRulesJson Mastery { get; init; } = new();
 
     /// <summary>
+    /// Pack-wide level rules. Optional: an absent block reads as a fresh instance, whose zero bonus
+    /// means level pays nothing — the safe reading, unlike <see cref="Risk"/>, where zero would make
+    /// every job impossible.
+    /// </summary>
+    [JsonPropertyName("levels")]
+    public LevelRulesJson Levels { get; init; } = new();
+
+    /// <summary>
     /// Pack-wide risk rules. <see langword="null"/> when the block is absent — deliberately not
     /// defaulted.
     /// </summary>
@@ -110,6 +118,25 @@ public sealed record MasteryRulesJson
 
     [JsonPropertyName("maxRank")]
     public int MaxRank { get; init; }
+
+    /// <summary>
+    /// Fraction added to a job's cash and XP for each mastery rank held: 0.10 pays +10% per rank, so
+    /// rank 5 pays +50%. Optional: absent means 0, which keeps every pack written before this field
+    /// valid and leaves mastery cosmetic. Must not be negative.
+    /// </summary>
+    [JsonPropertyName("payoutBonusPerRank")]
+    public double PayoutBonusPerRank { get; init; }
+}
+
+/// <summary>Pack-wide rules for what a level earns, applied to every job.</summary>
+public sealed record LevelRulesJson
+{
+    /// <summary>
+    /// Fraction added to a job's cash and XP for each level the player holds past the first: 0.02 is
+    /// +2% per level, so level 20 pays +38%. Optional: absent means 0. Must not be negative.
+    /// </summary>
+    [JsonPropertyName("payoutBonusPerLevel")]
+    public double PayoutBonusPerLevel { get; init; }
 }
 
 /// <summary>One entry in the <c>jobs</c> array.</summary>

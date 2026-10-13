@@ -225,6 +225,23 @@ class _JobsScreenState extends State<JobsScreen> {
             },
           ),
         ),
+        // Always mounted, blank until the first level bonus: reaching level 2 would otherwise insert
+        // a line and shift every card down by one row.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: state.levelPayoutBonus > 0
+                ? Text(
+                    'Level bonus: +${(state.levelPayoutBonus * 100).round()}% pay on every job',
+                    key: const Key('level-pay-bonus'),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  )
+                : ExcludeSemantics(
+                    child: Text(' ', style: Theme.of(context).textTheme.bodySmall),
+                  ),
+          ),
+        ),
         Expanded(
           child: ListView.builder(
             padding: const EdgeInsets.all(16),
@@ -396,7 +413,8 @@ class _JobCard extends StatelessWidget {
               // and excluding the caption it duplicates replaces that with the one short phrase
               // a sighted player reads off it.
               Semantics(
-                label: 'Mastery rank ${job.mastery.rank} of ${job.mastery.maxRank}',
+                label: 'Mastery rank ${job.mastery.rank} of ${job.mastery.maxRank}'
+                    '${job.mastery.payoutLabel == null ? '' : ', pays ${job.mastery.payoutPercent}% more'}',
                 excludeSemantics: true,
                 child: Row(
                   children: [
@@ -411,6 +429,17 @@ class _JobCard extends StatelessWidget {
                       'Rank ${job.mastery.rank}/${job.mastery.maxRank}',
                       style: theme.textTheme.bodySmall,
                     ),
+                    if (job.mastery.payoutLabel != null) ...[
+                      const SizedBox(width: 8),
+                      Text(
+                        job.mastery.payoutLabel!,
+                        key: Key('mastery-pay-${job.id}'),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),

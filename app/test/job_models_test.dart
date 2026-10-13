@@ -56,6 +56,107 @@ Map<String, dynamic> jobResultJson({
     };
 
 void main() {
+  group('LevelUp.fromJson — the pay grant', () {
+    Map<String, dynamic> levelUpJson({Object? gained, Object? total, int levels = 1, int newLevel = 4}) => {
+          'levelsGained': levels,
+          'newLevel': newLevel,
+          'skillPointsGranted': levels,
+          'metersRefilled': true,
+          if (gained != null) 'payoutBonusGained': gained,
+          if (total != null) 'payoutBonus': total,
+        };
+
+    test('reads the bonus gained and the new total', () {
+      final levelUp = LevelUp.fromJson(levelUpJson(gained: 0.02, total: 0.06));
+
+      expect(levelUp.payoutBonusGained, closeTo(0.02, 1e-9));
+      expect(levelUp.payoutBonus, closeTo(0.06, 1e-9));
+    });
+
+    test('reads whole-number bonuses that arrive as ints', () {
+      final levelUp = LevelUp.fromJson(levelUpJson(gained: 0, total: 0));
+
+      expect(levelUp.payoutBonusGained, 0.0);
+      expect(levelUp.payoutBonus, 0.0);
+    });
+
+    test('an older server that sends no grant reads as granting no pay', () {
+      final levelUp = LevelUp.fromJson(levelUpJson());
+
+      expect(levelUp.payoutGainedPercent, 0);
+      expect(levelUp.payoutPercent, 0);
+    });
+
+    test('rounds both figures to whole percents', () {
+      // 3 * 0.02 is 0.06 and 5 * 0.02 is 0.1 in binary floating point only approximately.
+      final levelUp = LevelUp.fromJson(levelUpJson(gained: 3 * 0.02, total: 7 * 0.02));
+
+      expect(levelUp.payoutGainedPercent, 6);
+      expect(levelUp.payoutPercent, 14);
+    });
+  });
+
+  group('JobList.fromJson — the level bonus', () {
+    Map<String, dynamic> listJson({Object? bonus}) => {
+          'jobs': <Map<String, dynamic>>[],
+          'currentEnergy': 7,
+          'level': 5,
+          if (bonus != null) 'levelPayoutBonus': bonus,
+        };
+
+    test('reads the bonus the level earns on every job', () {
+      expect(JobList.fromJson(listJson(bonus: 0.08)).levelPayoutBonus, closeTo(0.08, 1e-9));
+    });
+
+    test('reads a whole-number zero that arrives as an int', () {
+      expect(JobList.fromJson(listJson(bonus: 0)).levelPayoutBonus, 0.0);
+    });
+
+    test('an older server that sends none reads as no bonus', () {
+      expect(JobList.fromJson(listJson()).levelPayoutBonus, 0.0);
+    });
+  });
+
+  group('JobMastery.fromJson — payout bonus', () {
+    Map<String, dynamic> masteryJson({Object? payoutBonus}) => {
+          'completions': 12,
+          'rank': 2,
+          'maxRank': 5,
+          'completionsUntilNextRank': 6,
+          if (payoutBonus != null) 'payoutBonus': payoutBonus,
+        };
+
+    test('reads the bonus the next attempt pays', () {
+      final mastery = JobMastery.fromJson(masteryJson(payoutBonus: 0.2));
+
+      expect(mastery.payoutBonus, closeTo(0.2, 1e-9));
+    });
+
+    test('reads a whole-number bonus that arrives as an int', () {
+      // System.Text.Json writes 0.0 as `0`, and `as double` on an int is a runtime failure in Dart.
+      final mastery = JobMastery.fromJson(masteryJson(payoutBonus: 0));
+
+      expect(mastery.payoutBonus, 0.0);
+    });
+
+    test('an older server that sends no bonus reads as paying the base', () {
+      final mastery = JobMastery.fromJson(masteryJson());
+
+      expect(mastery.payoutBonus, 0.0);
+      expect(mastery.payoutLabel, isNull);
+    });
+
+    test('labels the bonus as a whole percent', () {
+      expect(JobMastery.fromJson(masteryJson(payoutBonus: 0.5)).payoutLabel, '+50% pay');
+      // 3 * 0.1 is 0.30000000000000004 in binary floating point; it must still read 30.
+      expect(JobMastery.fromJson(masteryJson(payoutBonus: 3 * 0.1)).payoutLabel, '+30% pay');
+    });
+
+    test('says nothing at rank 0, where there is no bonus', () {
+      expect(JobMastery.fromJson(masteryJson(payoutBonus: 0.0)).payoutLabel, isNull);
+    });
+  });
+
   group('Job.fromJson — risk fields', () {
     test('reads the stat requirements', () {
       final job = Job.fromJson(jobJson());

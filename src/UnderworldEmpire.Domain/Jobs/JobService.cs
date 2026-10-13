@@ -58,6 +58,15 @@ public sealed class JobService
     ///     with no <see cref="Job.ItemRequirements"/>, which every job shipped before this parameter
     ///     existed is.
     /// </param>
+    /// <param name="masteryPayoutBonusPerRank">
+    ///     Content-supplied fraction added to a job's cash and XP for each mastery rank held: 0.10 pays
+    ///     +10% per rank. Zero (the default) pays the base at every rank. Must not be negative.
+    /// </param>
+    /// <param name="levelPayoutBonusPerLevel">
+    ///     Content-supplied fraction added to a job's cash and XP for each level the player holds past
+    ///     the first (see <see cref="LevelPayout"/>). Adds to the mastery bonus rather than compounding
+    ///     it. Zero (the default) means level pays nothing. Must not be negative.
+    /// </param>
     public JobAttemptResult Attempt(
         Player player,
         Job job,
@@ -68,11 +77,19 @@ public sealed class JobService
         JobRiskRules risk,
         DateTimeOffset nowUtc,
         IReadOnlyDictionary<string, int>? heldItemQuantities = null,
-        IReadOnlyDictionary<string, int>? extraItems = null)
+        IReadOnlyDictionary<string, int>? extraItems = null,
+        double masteryPayoutBonusPerRank = 0,
+        double levelPayoutBonusPerLevel = 0)
     {
         ArgumentNullException.ThrowIfNull(player);
         ArgumentNullException.ThrowIfNull(job);
         ArgumentNullException.ThrowIfNull(mastery);
+        if (masteryPayoutBonusPerRank < 0)
+            throw new ArgumentOutOfRangeException(nameof(masteryPayoutBonusPerRank), masteryPayoutBonusPerRank,
+                "The mastery payout bonus must not be negative.");
+        if (levelPayoutBonusPerLevel < 0)
+            throw new ArgumentOutOfRangeException(nameof(levelPayoutBonusPerLevel), levelPayoutBonusPerLevel,
+                "The level payout bonus must not be negative.");
         ArgumentNullException.ThrowIfNull(loadout);
 
         var held = heldItemQuantities ?? Job.EmptyHeldItems;
@@ -118,8 +135,19 @@ public sealed class JobService
         // later roll in the stream.
         long rolledCash = _random.NextInclusive(job.CashMin, job.CashMax);
 
-        long cashEarned = succeeded ? rolledCash : Fraction(rolledCash, risk.ConsolationCashFraction);
-        long xpEarned = succeeded ? job.Xp : Fraction(job.Xp, risk.ConsolationXpFraction);
+        // Mastery scales the amount the attempt would earn, and the consolation is a fraction of that
+        // scaled amount — a maxed job's failure is still worth more than a fresh one's. The rank and
+        // level read here are the ones held *before* this attempt: RecordCompletion and
+        // ApplyXpAndLevelUp run after payout, so the attempt that earns either is paid at the
+        // previous one. The two bonuses add rather than compound, so "+50% and +20%" reads as +70%.
+        double payoutMultiplier = 1
+            + mastery.Rank * masteryPayoutBonusPerRank
+            + LevelPayout.BonusFor(player.Level, levelPayoutBonusPerLevel);
+        long wouldEarnCash = Scale(rolledCash, payoutMultiplier);
+        long wouldEarnXp = Scale(job.Xp, payoutMultiplier);
+
+        long cashEarned = succeeded ? wouldEarnCash : Fraction(wouldEarnCash, risk.ConsolationCashFraction);
+        long xpEarned = succeeded ? wouldEarnXp : Fraction(wouldEarnXp, risk.ConsolationXpFraction);
 
         int healthLost = 0;
         if (!succeeded)
@@ -210,6 +238,14 @@ public sealed class JobService
     /// </remarks>
     private static long Fraction(long amount, double fraction) =>
         (long)Math.Ceiling(amount * fraction);
+
+    /// <summary>
+    /// <paramref name="amount"/> multiplied by a payout multiplier, rounded to the nearest whole
+    /// number (halves away from zero) so a binary-float product such as 130.00000000000003 cannot
+    /// pay an extra point.
+    /// </summary>
+    private static long Scale(long amount, double multiplier) =>
+        (long)Math.Round(amount * multiplier, MidpointRounding.AwayFromZero);
 
     /// <summary>One hundred percent, expressed in basis points.</summary>
     private const int BasisPoints = 10_000;

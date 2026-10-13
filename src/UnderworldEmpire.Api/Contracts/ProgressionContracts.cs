@@ -7,7 +7,14 @@ namespace UnderworldEmpire.Api.Contracts;
 /// <param name="NewLevel">The level afterwards.</param>
 /// <param name="SkillPointsGranted">Skill points awarded.</param>
 /// <param name="MetersRefilled">Whether energy, stamina and health were refilled as the level-up reward.</param>
-public record LevelUpDto(int LevelsGained, int NewLevel, int SkillPointsGranted, bool MetersRefilled);
+/// <param name="PayoutBonusGained">
+///     The extra share of cash and XP that every job now pays because of the levels just gained: 0.02 is
+///     +2%. This is the grant beyond the skill point; zero only when the pack sets no level bonus.
+/// </param>
+/// <param name="PayoutBonus">The player's total level pay bonus at <paramref name="NewLevel"/>.</param>
+public record LevelUpDto(
+    int LevelsGained, int NewLevel, int SkillPointsGranted, bool MetersRefilled,
+    double PayoutBonusGained, double PayoutBonus);
 
 /// <summary>Request body for POST /skills/allocate.</summary>
 /// <param name="Target">

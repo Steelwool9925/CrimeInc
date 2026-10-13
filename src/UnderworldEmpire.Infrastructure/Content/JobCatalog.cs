@@ -21,6 +21,8 @@ public sealed class JobCatalog
     /// <param name="jobs">Validated jobs, in the order content declared them.</param>
     /// <param name="completionsPerRank">Completions required per mastery rank.</param>
     /// <param name="maxRank">Mastery rank ceiling.</param>
+    /// <param name="masteryPayoutBonusPerRank">Fraction added to cash and XP per mastery rank held.</param>
+    /// <param name="levelPayoutBonusPerLevel">Fraction added to cash and XP per level held past the first.</param>
     /// <param name="maxSuccessChance">Pack-wide ceiling on any job's success chance.</param>
     /// <param name="consolationCashFraction">Fraction of the rolled cash paid on a failed attempt.</param>
     /// <param name="consolationXpFraction">Fraction of the job's XP granted on a failed attempt.</param>
@@ -28,6 +30,8 @@ public sealed class JobCatalog
         IReadOnlyList<Job> jobs,
         int completionsPerRank,
         int maxRank,
+        double masteryPayoutBonusPerRank,
+        double levelPayoutBonusPerLevel,
         double maxSuccessChance,
         double consolationCashFraction,
         double consolationXpFraction)
@@ -35,6 +39,8 @@ public sealed class JobCatalog
         Jobs = jobs;
         CompletionsPerRank = completionsPerRank;
         MaxRank = maxRank;
+        MasteryPayoutBonusPerRank = masteryPayoutBonusPerRank;
+        LevelPayoutBonusPerLevel = levelPayoutBonusPerLevel;
         MaxSuccessChance = maxSuccessChance;
         ConsolationCashFraction = consolationCashFraction;
         ConsolationXpFraction = consolationXpFraction;
@@ -49,6 +55,12 @@ public sealed class JobCatalog
 
     /// <summary>Highest attainable mastery rank.</summary>
     public int MaxRank { get; }
+
+    /// <summary>Fraction added to a job's cash and XP for each mastery rank held; 0 when the pack sets none.</summary>
+    public double MasteryPayoutBonusPerRank { get; }
+
+    /// <summary>Fraction added to a job's cash and XP per level held past the first; 0 when the pack sets none.</summary>
+    public double LevelPayoutBonusPerLevel { get; }
 
     /// <summary>
     /// Ceiling on any job's success chance. No job is ever a certainty, however much gear is worn.

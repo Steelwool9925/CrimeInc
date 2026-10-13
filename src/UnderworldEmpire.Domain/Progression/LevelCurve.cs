@@ -39,10 +39,14 @@ namespace UnderworldEmpire.Domain.Progression;
 /// reachable in one sitting and <see cref="XpPerLevelStep"/> did not have to move.
 /// </para>
 /// <para>
-/// <b>Retuning the curve itself is deliberately out of scope here</b> and belongs with
-/// <see cref="PlayerDefaults.MaxLevel"/> and the mastery payout — see the <c>progression-depth</c>
-/// roadmap item. Note the curve is pinned in two places by <c>ProgressionTests</c>, so any change
-/// to it is test-visible by design. See <c>content/crime/README.md</c>.
+/// <b>The cap moved; the curve did not.</b> <see cref="PlayerDefaults.MaxLevel"/> was cut from 100 to
+/// 20 so it sits just past the content (the last unlock is level 12), which is what turned the
+/// audit's "98.4% of the curve unlocks nothing" into roughly 59%. The formula is untouched, so level
+/// 20 costs <c>XpPerLevelStep × 19 × 20</c> = 19,000 XP cumulatively and the last step, 19 to 20, is
+/// 1,900. Whether the quadratic's constant should itself be re-derived against the real earn rate is
+/// a separate, measurement-dependent question deliberately left for later: the curve is pinned in two
+/// places by <c>ProgressionTests</c>, so changing it is test-visible by design. See
+/// <c>content/crime/README.md</c>.
 /// </para>
 /// </remarks>
 public static class LevelCurve
@@ -59,7 +63,8 @@ public static class LevelCurve
         if (level < 1)
             throw new ArgumentOutOfRangeException(nameof(level), level, "Level must be >= 1.");
 
-        // Widen before multiplying: at the max level this product comfortably exceeds int range.
+        // Widen before multiplying so a large level cannot overflow int. (At today's cap of 20 the
+        // product is small, but the cap is a tunable and this stays correct if it is ever raised.)
         long l = level;
         return XpPerLevelStep * (l - 1) * l;
     }

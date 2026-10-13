@@ -66,7 +66,7 @@ public class Player
     public int Defense { get; set; } = PlayerDefaults.BaseDefense;
 
     /// <summary>
-    /// Adds <paramref name="amount"/> to <see cref="Xp"/> without applying the level curve.
+    /// Adds <paramref name="amount"/> to <see cref="Xp"/> (stopping at <see cref="long.MaxValue"/>) without applying the level curve.
     /// </summary>
     /// <remarks>
     /// The raw accumulator. Callers that want levelling behaviour use
@@ -78,7 +78,7 @@ public class Player
     {
         if (amount < 0)
             throw new ArgumentOutOfRangeException(nameof(amount), amount, "Amount must be non-negative.");
-        Xp += amount;
+        Xp = SaturatingAdd(Xp, amount);
     }
 
     /// <summary>
@@ -163,14 +163,18 @@ public class Player
     /// <summary>Hard premium currency. Display label supplied by the content pack.</summary>
     public long PremiumCurrency { get; set; } = PlayerDefaults.StartingPremiumCurrency;
 
-    /// <summary>Increases <see cref="Cash"/> by <paramref name="amount"/>.</summary>
+    /// <summary>Increases <see cref="Cash"/> by <paramref name="amount"/>, stopping at <see cref="long.MaxValue"/>.</summary>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="amount"/> is negative.</exception>
     public void AddCash(long amount)
     {
         if (amount < 0)
             throw new ArgumentOutOfRangeException(nameof(amount), amount, "Amount must be non-negative.");
-        Cash += amount;
+        Cash = SaturatingAdd(Cash, amount);
     }
+
+    // A corrupt row or a runaway content value must pin a balance at the ceiling, not wrap it negative.
+    private static long SaturatingAdd(long balance, long amount) =>
+        balance > long.MaxValue - amount ? long.MaxValue : balance + amount;
 
     /// <summary>Decreases <see cref="Cash"/> by <paramref name="amount"/>.</summary>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="amount"/> is negative.</exception>

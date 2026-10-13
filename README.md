@@ -68,7 +68,7 @@ docker compose up -d postgres
 #    recreated — compose gives you a database, not a schema. Safe to re-run.
 ./scripts/migrate.ps1
 
-# 3. Build + test everything (755 .NET tests, 677 Flutter tests)
+# 3. Build + test everything (791 .NET tests, 694 Flutter tests)
 ./scripts/test.ps1
 
 # 4. Run the API — Swagger at http://localhost:5080/swagger
@@ -138,6 +138,19 @@ Content is fully data-driven: `content/<pack>/pack.json` plus `jobs.json`, `prop
 `items.json`, `strings.json`. The engine references abstract ids; packs supply concrete content
 and art paths. **The MVP ships only the `crime` pack.** The architecture keeps other packs
 possible (a separate future app can reuse the engine), but no other theme is built here.
+
+## Progression
+
+Levels run 1 to 20 (`LevelCurve.MaxLevel`); 19,000 cumulative XP reaches the cap, and further jobs at
+the cap still grant XP without a level-up. Two bonuses scale a job's cash and XP, both tuned in
+`content/crime/jobs.json` and applied server-side:
+
+- **Mastery:** each rank earned on a job adds `mastery.payoutBonusPerRank` (10%) to that job.
+- **Level:** each level above 1 adds `levels.payoutBonusPerLevel` (2%) to every job, so level 20 is +38%.
+  The level read is the one held *before* the attempt and is clamped to the cap.
+
+The two add rather than multiply. `GET /jobs` reports each job's `payoutBonus` and the player's
+`levelPayoutBonus`; the level-up dialog and the Jobs screen show the bonus in play.
 
 ## Job reveal and sound
 

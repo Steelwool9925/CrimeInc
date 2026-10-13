@@ -95,6 +95,7 @@ class AppState extends ChangeNotifier {
 
   // ---- Jobs ----
   List<Job> _jobs = const [];
+  double _levelPayoutBonus = 0;
   bool _jobsLoading = false;
   int _jobsRequest = 0;
   String? _jobsError;
@@ -167,6 +168,9 @@ class AppState extends ChangeNotifier {
   String assetUrl(String key) => _apiClient.assetUrl(key);
 
   List<Job> get jobs => _jobs;
+
+  /// The extra share of cash and XP the player's level adds to every job, as of the last jobs read.
+  double get levelPayoutBonus => _levelPayoutBonus;
 
   /// Total completions across every job, for the Rap Sheet's "Jobs Done" stat. A pure fold over
   /// [jobs] — no new endpoint: `GET /jobs` already returns each job's `mastery.completions`.
@@ -472,6 +476,7 @@ class AppState extends ChangeNotifier {
       final list = await _apiClient.jobs(token);
       if (request != _jobsRequest) return;
       _jobs = list.jobs;
+      _levelPayoutBonus = list.levelPayoutBonus;
     } catch (e) {
       if (request == _jobsRequest) _jobsError = e.toString();
     } finally {
