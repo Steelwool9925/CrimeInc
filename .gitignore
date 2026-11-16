@@ -51,6 +51,9 @@ gru-ledger.md
 .claude/worktrees/
 .worktrees/
 
+# ---- Pigeon pipeline run folders (scratch handoffs) ----
+.claude/pigeon/
+
 # Stray artifact from a PowerShell "2>$null" redirect reaching a non-PowerShell shell,
 # which creates a literal file named $null. Junk; never intentional.
 $null

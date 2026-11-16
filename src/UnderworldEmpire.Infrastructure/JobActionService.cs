@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using UnderworldEmpire.Domain;
+using UnderworldEmpire.Domain.Daily;
 using UnderworldEmpire.Domain.Items;
 using UnderworldEmpire.Domain.Jobs;
 using UnderworldEmpire.Domain.Progression;
@@ -42,12 +43,17 @@ public enum JobActionError
 ///     What the XP grant did to the player's level. Null unless the action was applied — and a
 ///     failed attempt still grants consolation XP, so it can still level a player.
 /// </param>
+/// <param name="Objectives">
+///     Today's objectives after this attempt was counted, so the client needs no extra round trip.
+///     Null unless the action was applied.
+/// </param>
 public record JobActionResult(
     JobActionError Error,
     JobFailure Failure,
     JobOutcome? Outcome,
     Player? Player = null,
-    LevelUpOutcome? LevelUp = null)
+    LevelUpOutcome? LevelUp = null,
+    IReadOnlyList<ObjectiveState>? Objectives = null)
 {
     /// <summary>
     /// Whether the attempt was applied and persisted — as opposed to refused at a gate.
@@ -82,9 +88,10 @@ public record JobActionResult(
 /// re-reads state.
 /// </para>
 /// <para>
-/// <b>Query count.</b> Two reads per attempt — the player, and that player's single mastery row for
-/// this job by its composite primary key. The mastery read is a primary-key seek, not a scan, and
-/// the count does not grow with the size of the catalog or the player's history.
+/// <b>Query count.</b> Three reads per attempt — the player, that player's single mastery row for
+/// this job by its composite primary key, and today's objective rows (a prefix of their composite
+/// key). Neither is a scan, and the count does not grow with the size of the catalog or the player's
+/// history.
 /// </para>
 /// </remarks>
 public class JobActionService
@@ -92,12 +99,15 @@ public class JobActionService
     private readonly GameDbContext _db;
     private readonly JobService _jobs;
     private readonly IContentPackProvider _content;
+    private readonly DailyObjectiveActionService _objectives;
 
-    public JobActionService(GameDbContext db, JobService jobs, IContentPackProvider content)
+    public JobActionService(
+        GameDbContext db, JobService jobs, IContentPackProvider content, DailyObjectiveActionService objectives)
     {
         _db = db;
         _jobs = jobs;
         _content = content;
+        _objectives = objectives;
     }
 
     /// <summary>Performs <paramref name="jobId"/> on behalf of <paramref name="playerId"/>.</summary>
@@ -161,6 +171,10 @@ public class JobActionService
             heldItemQuantities = trackedHoldings.ToDictionary(h => h.ItemId, h => h.SpareQuantity);
         }
 
+        // Objectives are credited against the set the player was working from, which a level-up
+        // caused by this very attempt would otherwise change under them.
+        int levelBefore = player.Level;
+
         var result = _jobs.Attempt(
             player,
             job,
@@ -196,6 +210,15 @@ public class JobActionService
             holding.Consume(consumption.QuantityConsumed);
         }
 
+        // Staged on the same context, so the objective row commits with the payout or not at all. A
+        // failed attempt advances nothing (the null event) but still returns the current view.
+        var objectives = await _objectives.CreditAsync(
+            player,
+            levelBefore,
+            nowUtc,
+            result.Outcome!.Succeeded ? ObjectiveEvent.JobWon(jobId, result.Outcome.CashEarned) : null,
+            cancellationToken);
+
         try
         {
             // No new transaction and no new concurrency handling: this decrement rides in the same
@@ -224,7 +247,8 @@ public class JobActionService
             JobFailure.None,
             result.Outcome,
             player,
-            result.LevelUp);
+            result.LevelUp,
+            objectives);
     }
 
     /// <summary>Reads the player's equipped holdings and aggregates them into a <see cref="Loadout"/>.</summary>

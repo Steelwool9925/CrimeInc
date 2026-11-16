@@ -11,6 +11,7 @@ import '../widgets/speedline_divider.dart';
 import '../widgets/upgrade_advice.dart';
 import 'inventory_screen.dart';
 import 'jobs_screen.dart';
+import 'objectives_screen.dart';
 import 'profile_screen.dart';
 import 'properties_screen.dart';
 import 'skills_screen.dart';
@@ -155,7 +156,7 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-/// The 7-tile dashboard: every place Home can send the player, one tile each. Two of the seven
+/// The 8-tile dashboard: every place Home can send the player, one tile each. Two of the eight
 /// (Crew, Territory) route to [ComingSoonScreen] because those features don't exist yet — the
 /// tile still gets a subtitle saying so, rather than pretending they're live or hiding them.
 ///
@@ -167,6 +168,8 @@ class HomeScreen extends StatelessWidget {
 ///
 /// Market leads the second column and Inventory sits under it: equipping is the step that makes
 /// shopping pay, so it is a destination of its own rather than an unlabelled icon inside the shop.
+/// Objectives takes the left of the second row, beside Inventory: it is the daily reason to come back,
+/// so its "N ready to claim" has to be on the first screen, not under Properties.
 class _DashboardGrid extends StatelessWidget {
   const _DashboardGrid({required this.appState});
 
@@ -202,13 +205,15 @@ class _DashboardGrid extends StatelessWidget {
           ),
         ),
         _DashboardTile(
-          tileKey: const Key('go-to-properties'),
-          icon: Icons.location_city_outlined,
-          title: 'Properties',
+          tileKey: const Key('go-to-objectives'),
+          icon: Icons.task_alt_outlined,
+          title: 'Objectives',
+          // Words as well as the dot: colour is never the only carrier.
+          subtitle: _objectivesSubtitle(appState),
+          badge: appState.objectivesToClaim > 0,
+          badgeKey: const Key('go-to-objectives-badge'),
           onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => PropertiesScreen(appState: appState),
-            ),
+            MaterialPageRoute(builder: (_) => ObjectivesScreen(appState: appState)),
           ),
         ),
         _DashboardTile(
@@ -218,6 +223,16 @@ class _DashboardGrid extends StatelessWidget {
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute(
               builder: (_) => InventoryScreen(appState: appState),
+            ),
+          ),
+        ),
+        _DashboardTile(
+          tileKey: const Key('go-to-properties'),
+          icon: Icons.location_city_outlined,
+          title: 'Properties',
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => PropertiesScreen(appState: appState),
             ),
           ),
         ),
@@ -262,6 +277,16 @@ class _DashboardGrid extends StatelessWidget {
   }
 }
 
+/// What the Objectives tile says about today, or null before the first read (or with nothing on
+/// offer), so a tile never reports a count it does not have.
+String? _objectivesSubtitle(AppState state) {
+  if (!state.objectivesLoaded || state.objectives.isEmpty) return null;
+  final ready = state.objectivesToClaim;
+  if (ready > 0) return '$ready ready to claim';
+  final left = state.objectivesOutstanding;
+  return left > 0 ? '$left left today' : 'All done today';
+}
+
 class _DashboardTile extends StatelessWidget {
   const _DashboardTile({
     required this.tileKey,
@@ -271,6 +296,7 @@ class _DashboardTile extends StatelessWidget {
     this.subtitle,
     this.comingSoon = false,
     this.badge = false,
+    this.badgeKey = const Key('go-to-store-badge'),
   });
 
   final Key tileKey;
@@ -286,6 +312,9 @@ class _DashboardTile extends StatelessWidget {
   /// A small accent dot in the corner: "there is something here for you". The tile's [subtitle]
   /// must say the same in words.
   final bool badge;
+
+  /// The dot's key, so a test can tell which tile is flagging.
+  final Key badgeKey;
 
   bool get _isComingSoon => comingSoon;
 
@@ -356,7 +385,7 @@ class _DashboardTile extends StatelessWidget {
               right: 10,
               child: ExcludeSemantics(
                 child: _AttentionDot(
-                  key: const Key('go-to-store-badge'),
+                  key: badgeKey,
                   color: theme.colorScheme.primary,
                 ),
               ),

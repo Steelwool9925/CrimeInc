@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using UnderworldEmpire.Domain;
+using UnderworldEmpire.Domain.Daily;
 using UnderworldEmpire.Domain.Properties;
 using UnderworldEmpire.Infrastructure.Content;
 
@@ -45,10 +46,12 @@ public record PropertyPurchaseActionResult(
 /// <param name="Error">Transport/lookup level problem, or <see cref="PropertyActionError.None"/>.</param>
 /// <param name="Result">The domain's answer — what was paid out, or why nothing was.</param>
 /// <param name="Player">The player after the collection. Null unless it succeeded.</param>
+/// <param name="Objectives">Today's objectives after this collection was counted. Null unless it succeeded.</param>
 public record PropertyCollectActionResult(
     PropertyActionError Error,
     PropertyCollectResult? Result,
-    Player? Player = null)
+    Player? Player = null,
+    IReadOnlyList<ObjectiveState>? Objectives = null)
 {
     /// <summary>Whether the collection was applied and persisted.</summary>
     public bool Succeeded => Error == PropertyActionError.None && Result is { Succeeded: true };
@@ -90,12 +93,16 @@ public class PropertyActionService
     private readonly GameDbContext _db;
     private readonly PropertyService _properties;
     private readonly IContentPackProvider _content;
+    private readonly DailyObjectiveActionService _objectives;
 
-    public PropertyActionService(GameDbContext db, PropertyService properties, IContentPackProvider content)
+    public PropertyActionService(
+        GameDbContext db, PropertyService properties, IContentPackProvider content,
+        DailyObjectiveActionService objectives)
     {
         _db = db;
         _properties = properties;
         _content = content;
+        _objectives = objectives;
     }
 
     /// <summary>Buys one unit of <paramref name="propertyId"/> for <paramref name="playerId"/>.</summary>
@@ -178,10 +185,14 @@ public class PropertyActionService
         if (!result.Succeeded)
             return new PropertyCollectActionResult(PropertyActionError.None, result);
 
+        // Staged on the same context, so the objective row commits with the payout or not at all.
+        var objectives = await _objectives.CreditAsync(
+            player, player.Level, nowUtc, ObjectiveEvent.PropertyCollected(), cancellationToken);
+
         if (!await TrySaveAsync(cancellationToken))
             return new PropertyCollectActionResult(PropertyActionError.ConcurrencyConflict, null);
 
-        return new PropertyCollectActionResult(PropertyActionError.None, result, player);
+        return new PropertyCollectActionResult(PropertyActionError.None, result, player, objectives);
     }
 
     // -------------------------------------------------------------------------

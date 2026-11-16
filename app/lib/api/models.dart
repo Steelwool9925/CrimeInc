@@ -703,11 +703,15 @@ class DoJobResult {
     required this.result,
     required this.player,
     this.levelUp,
+    this.objectives,
   });
 
   final JobResult result;
   final Me player;
   final LevelUp? levelUp;
+
+  /// Today's daily objectives after this attempt was counted; null from a server that predates them.
+  final List<DailyObjective>? objectives;
 
   factory DoJobResult.fromJson(Map<String, dynamic> json) => DoJobResult(
         result: JobResult.fromJson(json['result'] as Map<String, dynamic>),
@@ -715,6 +719,7 @@ class DoJobResult {
         levelUp: json['levelUp'] == null
             ? null
             : LevelUp.fromJson(json['levelUp'] as Map<String, dynamic>),
+        objectives: DailyObjective.listFromJson(json['objectives']),
       );
 }
 
@@ -910,6 +915,7 @@ class CollectPropertyResult {
     required this.pending,
     required this.cap,
     required this.player,
+    this.objectives,
   });
 
   final String propertyId;
@@ -923,6 +929,9 @@ class CollectPropertyResult {
 
   final Me player;
 
+  /// Today's daily objectives after this collection was counted; null from a server that predates them.
+  final List<DailyObjective>? objectives;
+
   factory CollectPropertyResult.fromJson(Map<String, dynamic> json) =>
       CollectPropertyResult(
         propertyId: json['propertyId'] as String,
@@ -930,5 +939,126 @@ class CollectPropertyResult {
         pending: json['pending'] as int,
         cap: json['cap'] as int,
         player: Me.fromJson(json['player'] as Map<String, dynamic>),
+        objectives: DailyObjective.listFromJson(json['objectives']),
+      );
+}
+
+/// Where a daily objective is worked on, so an unfinished one can send the player straight there.
+enum ObjectiveDestination { jobs, properties }
+
+/// One of today's objectives as GET /objectives offers it: the content definition plus this player's
+/// progress. Every figure is the server's; the client only draws it.
+@immutable
+class DailyObjective {
+  const DailyObjective({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.type,
+    required this.target,
+    this.jobId,
+    required this.progress,
+    required this.complete,
+    required this.claimed,
+    required this.rewardCash,
+    required this.rewardXp,
+  });
+
+  final String id;
+  final String name;
+  final String description;
+
+  /// What is counted: `completeDistinctJobs`, `completeJobTimes`, `earnCash` or `collectProperties`.
+  final String type;
+
+  /// The count (or cash amount) that completes it.
+  final int target;
+
+  /// The job it is about, or null when any job counts.
+  final String? jobId;
+
+  final int progress;
+  final bool complete;
+  final bool claimed;
+  final int rewardCash;
+  final int rewardXp;
+
+  /// The bar's fill, 0..1.
+  double get fraction => target <= 0 ? 0 : (progress / target).clamp(0.0, 1.0);
+
+  /// Finished and not yet paid out.
+  bool get claimable => complete && !claimed;
+
+  /// The screen where progress on this objective is made.
+  ObjectiveDestination get destination =>
+      type == 'collectProperties' ? ObjectiveDestination.properties : ObjectiveDestination.jobs;
+
+  factory DailyObjective.fromJson(Map<String, dynamic> json) => DailyObjective(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        description: json['description'] as String? ?? '',
+        type: json['type'] as String,
+        target: (json['target'] as num).toInt(),
+        jobId: json['jobId'] as String?,
+        progress: (json['progress'] as num).toInt(),
+        complete: json['complete'] as bool,
+        claimed: json['claimed'] as bool,
+        rewardCash: (json['rewardCash'] as num).toInt(),
+        rewardXp: (json['rewardXp'] as num).toInt(),
+      );
+
+  static List<DailyObjective>? listFromJson(Object? json) => json == null
+      ? null
+      : (json as List<dynamic>)
+          .map((o) => DailyObjective.fromJson(o as Map<String, dynamic>))
+          .toList(growable: false);
+}
+
+/// Response to GET /objectives.
+@immutable
+class ObjectiveList {
+  const ObjectiveList({required this.date, required this.resetsAtUtc, required this.objectives});
+
+  /// The UTC date these belong to, `yyyy-MM-dd`.
+  final String date;
+
+  /// When the next set is offered.
+  final DateTime resetsAtUtc;
+
+  final List<DailyObjective> objectives;
+
+  factory ObjectiveList.fromJson(Map<String, dynamic> json) => ObjectiveList(
+        date: json['date'] as String,
+        resetsAtUtc: DateTime.parse(json['resetsAtUtc'] as String).toUtc(),
+        objectives: DailyObjective.listFromJson(json['objectives'])!,
+      );
+}
+
+/// Response to claiming an objective. [player] carries the paid cash and XP.
+@immutable
+class ClaimObjectiveResult {
+  const ClaimObjectiveResult({
+    required this.claimed,
+    required this.player,
+    this.levelUp,
+    required this.objectives,
+  });
+
+  final DailyObjective claimed;
+  final Me player;
+
+  /// Set when the XP reward crossed a level.
+  final LevelUp? levelUp;
+
+  /// Today's objectives after the claim.
+  final List<DailyObjective> objectives;
+
+  factory ClaimObjectiveResult.fromJson(Map<String, dynamic> json) => ClaimObjectiveResult(
+        claimed: DailyObjective.fromJson(json['claimed'] as Map<String, dynamic>),
+        player: Me.fromJson(json['player'] as Map<String, dynamic>),
+        levelUp: json['levelUp'] == null
+            ? null
+            : LevelUp.fromJson(json['levelUp'] as Map<String, dynamic>),
+        objectives: DailyObjective.listFromJson(json['objectives'])!,
       );
 }

@@ -144,7 +144,8 @@ public static class PropertyEndpoints
                 CashCollected: collection.CashCollected,
                 Pending: collection.PendingAfter,
                 Cap: collection.Cap,
-                Player: PlayerProjection.ToMeDto(result.Player!, nowUtc)));
+                Player: PlayerProjection.ToMeDto(result.Player!, nowUtc),
+                Objectives: ObjectiveEndpoints.ToDtos(result.Objectives)));
         })
         .WithName("CollectProperty")
         .WithTags("Properties");

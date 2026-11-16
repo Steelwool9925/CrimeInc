@@ -23,6 +23,40 @@ namespace UnderworldEmpire.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("UnderworldEmpire.Domain.Daily.PlayerDailyObjective", b =>
+                {
+                    b.Property<Guid>("PlayerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("UtcDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("ObjectiveId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<bool>("Claimed")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("JobsWon")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.Property<long>("Progress")
+                        .HasColumnType("bigint");
+
+                    b.Property<uint>("xmin")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("PlayerId", "UtcDate", "ObjectiveId");
+
+                    b.ToTable("PlayerDailyObjectives");
+                });
+
             modelBuilder.Entity("UnderworldEmpire.Domain.Items.PlayerItem", b =>
                 {
                     b.Property<Guid>("PlayerId")
@@ -196,6 +230,15 @@ namespace UnderworldEmpire.Infrastructure.Migrations
                     b.HasKey("PlayerId", "PropertyId");
 
                     b.ToTable("PlayerProperties");
+                });
+
+            modelBuilder.Entity("UnderworldEmpire.Domain.Daily.PlayerDailyObjective", b =>
+                {
+                    b.HasOne("UnderworldEmpire.Domain.Player", null)
+                        .WithMany()
+                        .HasForeignKey("PlayerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("UnderworldEmpire.Domain.Items.PlayerItem", b =>

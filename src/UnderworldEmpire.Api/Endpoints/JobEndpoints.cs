@@ -16,8 +16,7 @@ namespace UnderworldEmpire.Api.Endpoints;
 /// <summary>Minimal-API endpoints for the job catalog and job execution (T2.1 / T2.2).</summary>
 public static class JobEndpoints
 {
-    // Float arithmetic leaves noise (0.1 x 3 is 0.30000000000000004) that would otherwise reach the wire.
-    private static double Tidy(double bonus) => Math.Round(bonus, 6);
+    private static double Tidy(double bonus) => LevelUpProjection.Tidy(bonus);
 
     /// <summary>Registers the job endpoints on the provided <paramref name="app"/>.</summary>
     public static IEndpointRouteBuilder MapJobEndpoints(this IEndpointRouteBuilder app)
@@ -213,13 +212,7 @@ public static class JobEndpoints
             var outcome = result.Outcome!;
             var catalog = content.JobCatalog;
 
-            var levelUp = result.LevelUp is { LeveledUp: true } lvl
-                ? new LevelUpDto(
-                    lvl.LevelsGained, lvl.NewLevel, lvl.SkillPointsGranted, lvl.MetersRefilled,
-                    PayoutBonusGained: Tidy(LevelPayout.BonusFor(lvl.NewLevel, catalog.LevelPayoutBonusPerLevel)
-                        - LevelPayout.BonusFor(lvl.NewLevel - lvl.LevelsGained, catalog.LevelPayoutBonusPerLevel)),
-                    PayoutBonus: Tidy(LevelPayout.BonusFor(lvl.NewLevel, catalog.LevelPayoutBonusPerLevel)))
-                : null;
+            var levelUp = LevelUpProjection.ToDto(result.LevelUp, catalog);
 
             return Results.Ok(new DoJobResponse(
                 Result: new JobResultDto(
@@ -240,7 +233,8 @@ public static class JobEndpoints
                         .Select(c => new ItemConsumptionDto(c.ItemId, c.QuantityConsumed, c.QuantityRemaining))
                         .ToList()),
                 Player: PlayerProjection.ToMeDto(result.Player!, DateTimeOffset.UtcNow),
-                LevelUp: levelUp));
+                LevelUp: levelUp,
+                Objectives: ObjectiveEndpoints.ToDtos(result.Objectives)));
         })
         .WithName("DoJob")
         .WithTags("Jobs");
