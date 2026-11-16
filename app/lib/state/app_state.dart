@@ -20,7 +20,7 @@ enum LoadStatus { loading, ready, error }
 /// The part of the game an [AppState.actionMessage] came from. A refusal is about one thing the
 /// player just did, so only the screens for that thing show it: an error from spending a skill point
 /// has no business on the Market.
-enum ActionScope { jobs, items, properties, skills }
+enum ActionScope { jobs, items, properties, skills, objectives }
 
 class AppState extends ChangeNotifier {
   AppState({
@@ -159,6 +159,17 @@ class AppState extends ChangeNotifier {
   /// that row.
   String? _propertyInFlight;
 
+  // ---- Daily objectives ----
+  List<DailyObjective> _objectives = const [];
+  DateTime? _objectivesResetsAt;
+  bool _objectivesLoaded = false;
+  bool _objectivesLoading = false;
+  int _objectivesRequest = 0;
+  String? _objectivesError;
+
+  /// The id of the objective currently being claimed, so the UI can disable just that row.
+  String? _objectiveInFlight;
+
   LoadStatus get status => _status;
   Me? get me => _me;
   ContentPack? get contentPack => _contentPack;
@@ -267,6 +278,24 @@ class AppState extends ChangeNotifier {
   List<InventoryItem> get ownedItems =>
       _inventory.where((i) => i.isOwned).toList(growable: false);
 
+  /// Today's objectives as last read or folded from an action. Empty until [objectivesLoaded].
+  List<DailyObjective> get objectives => _objectives;
+
+  /// When the next set is offered, as of the last read; null before one.
+  DateTime? get objectivesResetsAt => _objectivesResetsAt;
+
+  /// Whether a set has arrived at all — so Home can tell "none today" from "not read yet".
+  bool get objectivesLoaded => _objectivesLoaded;
+  bool get objectivesLoading => _objectivesLoading;
+  String? get objectivesError => _objectivesError;
+  String? get objectiveInFlight => _objectiveInFlight;
+
+  /// Objectives finished but not yet paid out: the number worth a dot on Home.
+  int get objectivesToClaim => _objectives.where((o) => o.claimable).length;
+
+  /// Objectives whose reward has not been taken, finished or not.
+  int get objectivesOutstanding => _objectives.where((o) => !o.claimed).length;
+
   List<Property> get properties => _properties;
   bool get propertiesLoading => _propertiesLoading;
   String? get propertiesError => _propertiesError;
@@ -328,6 +357,9 @@ class AppState extends ChangeNotifier {
     // costs nothing but the nudge (the Market re-reads when opened).
     unawaited(loadInventory());
     unawaited(_loadSeen(_me!.playerId));
+    // Same reasoning: the Home tile says how many objectives are outstanding, and a failure here
+    // costs only that line.
+    unawaited(loadObjectives());
   }
 
   /// Reads which advised upgrade this player has already been shown. Off the path to Home like the
@@ -440,6 +472,12 @@ class AppState extends ChangeNotifier {
         _status = LoadStatus.ready;
       }
       _reloadInventoryIfLevelChanged();
+
+      // A new UTC day offers a new set. Nothing pushes that to the client, so notice it here.
+      final resets = _objectivesResetsAt;
+      if (_objectivesLoaded && resets != null && !_clock().toUtc().isBefore(resets)) {
+        unawaited(loadObjectives());
+      }
     } catch (e) {
       // silent on poll failure — keep last known state
     }
@@ -527,6 +565,7 @@ class AppState extends ChangeNotifier {
 
       // The catalog carries per-job mastery and affordability, both of which just changed.
       _applyOutcomeToCatalog(outcome);
+      _foldObjectives(outcome.objectives);
 
       // A level-up can unlock jobs, and the client does not work out which (see below). Ask now
       // rather than leaving the list locked until the screen's next periodic read.
@@ -889,6 +928,7 @@ class AppState extends ChangeNotifier {
         (token) async {
           final result = await _apiClient.collectProperty(token, propertyId);
           _me = result.player;
+          _foldObjectives(result.objectives);
         },
       );
 
@@ -937,6 +977,94 @@ class AppState extends ChangeNotifier {
         'nothingToCollect' => 'That property has not earned anything yet.',
         _ => e.detail,
       };
+
+  // -------------------------------------------------------------------------
+  // Daily objectives
+  // -------------------------------------------------------------------------
+
+  /// Reads today's objectives. Safe to call repeatedly; concurrent calls are collapsed. The read
+  /// writes nothing server-side, so the Objectives screen can poll it.
+  Future<void> loadObjectives() async {
+    final token = _deviceToken;
+    if (token == null || _objectivesLoading) return;
+
+    final request = ++_objectivesRequest;
+    _objectivesLoading = true;
+    _objectivesError = null;
+    notifyListeners();
+
+    try {
+      final list = await _apiClient.objectives(token);
+      // A newer answer (an action's response) landed while this was in flight; it is fresher.
+      if (request != _objectivesRequest || _deviceToken != token) return;
+      _objectives = list.objectives;
+      _objectivesResetsAt = list.resetsAtUtc;
+      _objectivesLoaded = true;
+    } catch (e) {
+      if (request == _objectivesRequest) _objectivesError = e.toString();
+    } finally {
+      if (request == _objectivesRequest) _objectivesLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Adopts the objectives an action's response carried. The server counted them in the same
+  /// transaction as the action, so this is newer than any read still in flight, which it retires.
+  void _foldObjectives(List<DailyObjective>? fresh) {
+    if (fresh == null) return;
+    _objectives = fresh;
+    _objectivesLoaded = true;
+    _objectivesError = null;
+    _objectivesRequest++;
+    _objectivesLoading = false;
+  }
+
+  /// Takes the reward for [objectiveId]. One claim at a time: a second tap while the first is on its
+  /// way would reach the server as a double-claim, which it refuses, but the player would see an error
+  /// for a thing that worked.
+  Future<void> claimObjective(String objectiveId) async {
+    final token = _deviceToken;
+    if (token == null || _objectiveInFlight != null) return;
+
+    _objectiveInFlight = objectiveId;
+    _actionMessage = null;
+    notifyListeners();
+
+    var refused = false;
+    try {
+      final result = await _apiClient.claimObjective(token, objectiveId);
+      if (_disposed || _deviceToken != token) return;
+
+      _me = result.player;
+      _foldObjectives(result.objectives);
+      _haptic(HapticFeedback.mediumImpact);
+      if (result.levelUp != null) {
+        _pendingLevelUp = result.levelUp;
+        _reloadInventoryIfLevelChanged();
+        // A level-up can unlock jobs; ask now rather than waiting for the Jobs screen's next read.
+        unawaited(loadJobs(supersede: true));
+      }
+    } on JobRefusedException catch (e) {
+      refused = true;
+      _setActionMessage(
+        ActionScope.objectives,
+        switch (e.reason) {
+          'notComplete' => 'That objective is not finished yet.',
+          'alreadyClaimed' => 'You already took that reward.',
+          'notToday' => 'That objective is not one of yours today.',
+          _ => e.detail,
+        },
+      );
+    } catch (e) {
+      _setActionMessage(ActionScope.objectives, 'Could not claim that. $e');
+    } finally {
+      _objectiveInFlight = null;
+      notifyListeners();
+    }
+
+    // A refusal means the screen was showing something the server disagrees with. Re-read it.
+    if (refused) unawaited(loadObjectives());
+  }
 
   // -------------------------------------------------------------------------
   // Skills

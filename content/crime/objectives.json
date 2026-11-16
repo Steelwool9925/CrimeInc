@@ -1,0 +1,147 @@
+{
+  "packId": "crime",
+  "version": 1,
+  "objectives": [
+    {
+      "id": "two-different-jobs",
+      "name": "Two Different Jobs",
+      "description": "Win two different jobs today. Variety keeps the cops guessing.",
+      "type": "completeDistinctJobs",
+      "target": 2,
+      "minLevel": 1,
+      "reward": { "cash": 60, "xp": 15 }
+    },
+    {
+      "id": "three-different-jobs",
+      "name": "Three Different Jobs",
+      "description": "Win three different jobs today. Don't get comfortable with one score.",
+      "type": "completeDistinctJobs",
+      "target": 3,
+      "minLevel": 2,
+      "reward": { "cash": 160, "xp": 30 }
+    },
+    {
+      "id": "four-different-jobs",
+      "name": "Four Different Jobs",
+      "description": "Win four different jobs today. A real crook has range.",
+      "type": "completeDistinctJobs",
+      "target": 4,
+      "minLevel": 3,
+      "reward": { "cash": 450, "xp": 60 }
+    },
+    {
+      "id": "five-different-jobs",
+      "name": "Five Different Jobs",
+      "description": "Win five different jobs today, the dangerous ones included.",
+      "type": "completeDistinctJobs",
+      "target": 5,
+      "minLevel": 5,
+      "reward": { "cash": 1200, "xp": 130 }
+    },
+    {
+      "id": "corner-store-regular",
+      "name": "Corner Store Regular",
+      "description": "Shake down corner stores five times today.",
+      "type": "completeJobTimes",
+      "jobId": "shake-down-corner-store",
+      "target": 5,
+      "minLevel": 1,
+      "reward": { "cash": 110, "xp": 25 }
+    },
+    {
+      "id": "grand-theft-hat-trick",
+      "name": "Grand Theft Hat Trick",
+      "description": "Boost three parked cars today.",
+      "type": "completeJobTimes",
+      "jobId": "boost-a-parked-car",
+      "target": 3,
+      "minLevel": 1,
+      "reward": { "cash": 260, "xp": 35 }
+    },
+    {
+      "id": "bookie-runner",
+      "name": "Bookie's Runner",
+      "description": "Run numbers for the bookie three times today.",
+      "type": "completeJobTimes",
+      "jobId": "run-numbers-for-the-bookie",
+      "target": 3,
+      "minLevel": 2,
+      "reward": { "cash": 300, "xp": 40 }
+    },
+    {
+      "id": "truck-stop",
+      "name": "Truck Stop",
+      "description": "Hijack two delivery trucks today.",
+      "type": "completeJobTimes",
+      "jobId": "hijack-a-delivery-truck",
+      "target": 2,
+      "minLevel": 3,
+      "reward": { "cash": 650, "xp": 70 }
+    },
+    {
+      "id": "warehouse-fire-sale",
+      "name": "Warehouse Fire Sale",
+      "description": "Torch two rival warehouses today.",
+      "type": "completeJobTimes",
+      "jobId": "torch-a-rival-warehouse",
+      "target": 2,
+      "minLevel": 5,
+      "reward": { "cash": 1100, "xp": 140 }
+    },
+    {
+      "id": "armored-score",
+      "name": "The Armored Score",
+      "description": "Take down an armored transport today.",
+      "type": "completeJobTimes",
+      "jobId": "rob-an-armored-transport",
+      "target": 1,
+      "minLevel": 8,
+      "reward": { "cash": 1500, "xp": 200 }
+    },
+    {
+      "id": "busy-day",
+      "name": "Busy Day",
+      "description": "Win any six jobs today.",
+      "type": "completeJobTimes",
+      "target": 6,
+      "minLevel": 1,
+      "reward": { "cash": 150, "xp": 40 }
+    },
+    {
+      "id": "earn-small",
+      "name": "Pocket Money",
+      "description": "Earn $200 from jobs today.",
+      "type": "earnCash",
+      "target": 200,
+      "minLevel": 2,
+      "reward": { "cash": 120, "xp": 30 }
+    },
+    {
+      "id": "earn-big",
+      "name": "Big Earner",
+      "description": "Earn $1,500 from jobs today.",
+      "type": "earnCash",
+      "target": 1500,
+      "minLevel": 5,
+      "reward": { "cash": 900, "xp": 120 }
+    },
+    {
+      "id": "collect-rent",
+      "name": "Collect the Rent",
+      "description": "Collect your take from a property today.",
+      "type": "collectProperties",
+      "target": 1,
+      "minLevel": 3,
+      "reward": { "cash": 100, "xp": 20 }
+    },
+    {
+      "id": "collect-the-round",
+      "name": "Make the Rounds",
+      "description": "Collect from your properties three times today.",
+      "type": "collectProperties",
+      "target": 3,
+      "minLevel": 4,
+      "reward": { "cash": 400, "xp": 60 }
+    }
+  ]
+}

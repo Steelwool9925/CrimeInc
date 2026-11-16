@@ -223,6 +223,7 @@ void main() {
 
       const live = [
         Key('go-to-jobs'),
+        Key('go-to-objectives'),
         Key('go-to-properties'),
         Key('go-to-store'),
         Key('go-to-inventory'),
@@ -257,7 +258,9 @@ void main() {
       expect(at('go-to-store').dx, greaterThan(at('go-to-jobs').dx));
       expect(at('go-to-inventory').dx, at('go-to-store').dx);
       expect(at('go-to-inventory').dy, greaterThan(at('go-to-store').dy));
-      expect(at('go-to-properties').dy, at('go-to-inventory').dy);
+      // Objectives takes the left of the second row, so the daily hook is on the first screen.
+      expect(at('go-to-objectives').dy, at('go-to-inventory').dy);
+      expect(at('go-to-objectives').dx, lessThan(at('go-to-inventory').dx));
     });
 
     testWidgets('the Inventory tile is labelled and opens the Inventory', (tester) async {

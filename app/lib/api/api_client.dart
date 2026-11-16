@@ -97,6 +97,13 @@ abstract class ApiClient {
   Future<CollectPropertyResult> collectProperty(
       String deviceToken, String propertyId);
 
+  /// Today's daily objectives with this player's progress. Reading it writes nothing server-side.
+  Future<ObjectiveList> objectives(String deviceToken);
+
+  /// Takes the reward for a finished objective. Throws [JobRefusedException] on a refusal
+  /// ('notToday', 'notComplete', 'alreadyClaimed').
+  Future<ClaimObjectiveResult> claimObjective(String deviceToken, String objectiveId);
+
   /// Absolute URL for a pack art asset, by logical key ('logo', 'icon').
   ///
   /// Synchronous and unauthenticated: the server resolves the key against the manifest, so the
@@ -298,6 +305,25 @@ class HttpApiClient implements ApiClient {
       String deviceToken, String propertyId) async {
     final response = await _post(deviceToken, '/properties/$propertyId/collect');
     return CollectPropertyResult.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  @override
+  Future<ObjectiveList> objectives(String deviceToken) async {
+    final response = await _client.get(
+      Uri.parse('$_baseUrl/objectives'),
+      headers: {'Authorization': 'Bearer $deviceToken'},
+    );
+    _checkStatus(response);
+    return ObjectiveList.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  @override
+  Future<ClaimObjectiveResult> claimObjective(
+      String deviceToken, String objectiveId) async {
+    final response = await _post(deviceToken, '/objectives/$objectiveId/claim');
+    return ClaimObjectiveResult.fromJson(
         jsonDecode(response.body) as Map<String, dynamic>);
   }
 

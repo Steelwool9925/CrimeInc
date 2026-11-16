@@ -6,6 +6,7 @@ The MVP theme pack. Populated from M1 onward with the data-driven content schema
 - `jobs.json` — job catalog ✅ *live since M2*
 - `items.json` — item catalog ✅ *live since M3*
 - `properties.json` — property catalog ✅ *live since M3*
+- `objectives.json` — the daily-objective pool ✅ *live since daily-objectives*
 - `strings.json` — localizable UI text — not yet present
 
 The engine references abstract ids; this pack supplies concrete content + art paths. Swapping
@@ -378,3 +379,45 @@ Two properties are load-bearing for the **CP3** checkpoint and are pinned by tes
 
 Every property is also pinned to repay its own price within 200 full collections, so none of them is
 a trap rather than a choice.
+
+## `objectives.json`
+
+The pool daily objectives are drawn from. Every player is offered three a UTC day, chosen by a hash of
+`(playerId, date, objectiveId)` among the objectives whose `minLevel` they have reached, and the
+choice is fixed by their first action of that day (see the root README's *Daily objectives*).
+Loaded and validated like the other catalogs: every problem is reported at once and an invalid file
+stops the host.
+
+```
+packId                  must equal the pack's id
+version                 int
+objectives[]
+  id                    unique, at most 64 characters; the claim route's value
+  name, description     player-facing text
+  type                  completeDistinctJobs | completeJobTimes | earnCash | collectProperties
+  target                >= 1: wins, distinct jobs, cash earned from jobs, or collections
+  jobId                 optional, completeJobTimes only: count wins of this job (must exist in jobs.json)
+  minLevel              >= 1, and not below that job's own levelRequirement
+  reward { cash, xp }   both >= 0, at least one > 0
+```
+
+### Balance notes
+
+`ObjectivePoolInvariantTests` pins what the pool is for, against these files, so an edit that breaks
+it fails a test instead of a player:
+
+- **Every job is named by at least one objective.** From level 8 one job beat the other five on both
+  axes, so four of six had no reason to be played. A named-job objective is what gives each one a
+  purpose; remove one and the first invariant fails.
+- **Nothing asks for more than a full energy bar** (`PlayerDefaults.EnergyMax`), counting only wins,
+  at the best guaranteed rate (`cashMin`) a player of that `minLevel` could get. This is why
+  *Big Earner* is $1,500 rather than $3,000: at level 5 the best guaranteed rate needs 30 energy for
+  the larger figure.
+- **The reward is at least the pack's floor rate for the energy it demands**: the lowest
+  `cashMin` per energy of any job (15) times the energy needed. This is why *Pocket Money* is $200.
+- **A named job's attack and defense requirements are attainable at `minLevel`** from skill points
+  plus the best gear each slot offers. Gear costs money, so a level-1 player cannot finish
+  *Two Different Jobs* until they have bought Brass Knuckles for the second job.
+- **Every level is offered at least three objectives**, and a pool of at least twelve keeps the
+  selection varied (`ObjectiveSelectionTests` measures the spread).
+- Item-gated jobs count as available: the item is for sale, so it is a cost, not a wall.

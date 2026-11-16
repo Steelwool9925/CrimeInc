@@ -319,6 +319,15 @@ public class JobCatalogLoaderTests : IDisposable
     }
 
     [Fact]
+    public void A_job_id_containing_a_comma_throws_ContentPackException()
+    {
+        WriteJobs("crime", ValidCatalog(ValidJob(id: "shake,down")));
+
+        var ex = Assert.Throws<ContentPackException>(() => Loader().LoadJobs("crime"));
+        Assert.Contains("must not contain a comma", ex.Message);
+    }
+
+    [Fact]
     public void Zero_energy_cost_throws_ContentPackException()
     {
         WriteJobs("crime", ValidCatalog(ValidJob(energyCost: 0)));

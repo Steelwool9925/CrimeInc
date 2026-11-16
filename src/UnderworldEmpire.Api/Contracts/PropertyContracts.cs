@@ -104,9 +104,11 @@ public record BuyPropertyResponse(
 /// </param>
 /// <param name="Cap">The ceiling that bar is filling toward.</param>
 /// <param name="Player">The player's full state after the collection — the figure CP3 watches rise.</param>
+/// <param name="Objectives">Today's daily objectives after this collection was counted.</param>
 public record CollectPropertyResponse(
     string PropertyId,
     long CashCollected,
     long Pending,
     long Cap,
-    MeDto Player);
+    MeDto Player,
+    IReadOnlyList<ObjectiveDto>? Objectives = null);

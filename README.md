@@ -68,7 +68,7 @@ docker compose up -d postgres
 #    recreated — compose gives you a database, not a schema. Safe to re-run.
 ./scripts/migrate.ps1
 
-# 3. Build + test everything (791 .NET tests, 694 Flutter tests)
+# 3. Build + test everything (886 .NET tests, 760 Flutter tests)
 ./scripts/test.ps1
 
 # 4. Run the API — Swagger at http://localhost:5080/swagger
@@ -151,6 +151,22 @@ the cap still grant XP without a level-up. Two bonuses scale a job's cash and XP
 
 The two add rather than multiply. `GET /jobs` reports each job's `payoutBonus` and the player's
 `levelPayoutBonus`; the level-up dialog and the Jobs screen show the bonus in play.
+
+## Daily objectives
+
+Each UTC day a player is offered three objectives from the pool in `content/crime/objectives.json`
+(win N different jobs, win a job N times, earn cash, collect from properties). Finishing one and
+claiming it pays cash and XP, once.
+
+- **Nothing is stored until the player acts.** The offer is computed from `(player, UTC date, level)`,
+  so `GET /objectives` writes nothing and there is no midnight job. The first action of the day (a
+  job, won or lost, or a property collection) stores one zero-progress row per offered objective, which
+  fixes that day's set: levelling up later cannot change it.
+- **Progress is counted in the action's own transaction.** The do-job and collect responses carry the
+  updated objectives, so the client needs no extra request. A claim is guarded twice (the player row and
+  the objective row each carry an `xmin` token), so simultaneous claims pay once.
+- **The client** shows the set on the Objectives screen (Home tile, "N ready to claim"), with a one-tap
+  link to Jobs or Properties for anything unfinished.
 
 ## Job reveal and sound
 

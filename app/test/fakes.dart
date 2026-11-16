@@ -546,6 +546,80 @@ const kPropertyCollectedMe = Me(
   defense: 10,
 );
 
+const kObjectiveOpen = DailyObjective(
+  id: 'corner-store-regular',
+  name: 'Corner Store Regular',
+  description: 'Shake down corner stores five times today.',
+  type: 'completeJobTimes',
+  target: 5,
+  jobId: 'shake-down-corner-store',
+  progress: 2,
+  complete: false,
+  claimed: false,
+  rewardCash: 110,
+  rewardXp: 25,
+);
+
+const kObjectiveDone = DailyObjective(
+  id: 'two-different-jobs',
+  name: 'Two Different Jobs',
+  description: 'Win two different jobs today.',
+  type: 'completeDistinctJobs',
+  target: 2,
+  progress: 2,
+  complete: true,
+  claimed: false,
+  rewardCash: 60,
+  rewardXp: 15,
+);
+
+const kObjectiveClaimed = DailyObjective(
+  id: 'busy-day',
+  name: 'Busy Day',
+  description: 'Win any six jobs today.',
+  type: 'completeJobTimes',
+  target: 6,
+  progress: 6,
+  complete: true,
+  claimed: true,
+  rewardCash: 150,
+  rewardXp: 40,
+);
+
+const kObjectiveProperty = DailyObjective(
+  id: 'collect-rent',
+  name: 'Collect the Rent',
+  description: 'Collect your take from a property today.',
+  type: 'collectProperties',
+  target: 1,
+  progress: 0,
+  complete: false,
+  claimed: false,
+  rewardCash: 100,
+  rewardXp: 20,
+);
+
+final kObjectiveList = ObjectiveList(
+  date: '2026-10-13',
+  resetsAtUtc: DateTime.utc(2026, 10, 14),
+  objectives: const [kObjectiveOpen, kObjectiveDone, kObjectiveClaimed],
+);
+
+/// The player after claiming [kObjectiveDone]: its 60 cash on top of [kFakeMe]'s.
+final kObjectiveClaimedMe = Me(
+  playerId: kFakeMe.playerId,
+  energy: kFakeMe.energy,
+  stamina: kFakeMe.stamina,
+  health: kFakeMe.health,
+  cash: kFakeMe.cash + 60,
+  premiumCurrency: kFakeMe.premiumCurrency,
+  level: kFakeMe.level,
+  xp: kFakeMe.xp + 15,
+  skillPoints: kFakeMe.skillPoints,
+  attack: kFakeMe.attack,
+  defense: kFakeMe.defense,
+);
+
 class FakeApiClient implements ApiClient {
   FakeApiClient({
     SessionResult? sessionResult,
@@ -575,7 +649,14 @@ class FakeApiClient implements ApiClient {
     SessionResult? loginResult,
     this.refuseRegisterWith,
     Me? registerResult,
-  })  : _loginResult = loginResult ??
+    ObjectiveList? objectivesResult,
+    ClaimObjectiveResult? claimObjectiveResult,
+    bool throwOnObjectives = false,
+    this.refuseClaimWith,
+  })  : objectivesResult = objectivesResult ?? kObjectiveList,
+        _claimObjectiveResult = claimObjectiveResult,
+        _throwOnObjectives = throwOnObjectives,
+        _loginResult = loginResult ??
             const SessionResult(
               deviceToken: 'fake-token-abc',
               playerId: 'player-guid-123',
@@ -934,6 +1015,68 @@ class FakeApiClient implements ApiClient {
     if (_throwOnProperties) throw const ApiException(500, 'properties error');
     if (propertiesGate != null) await propertiesGate!.future;
     return _propertiesResult;
+  }
+
+  /// What GET /objectives returns. Public and mutable: a test changes it to simulate the server's
+  /// state moving (a new day, progress made elsewhere).
+  ObjectiveList objectivesResult;
+  final ClaimObjectiveResult? _claimObjectiveResult;
+  final bool _throwOnObjectives;
+
+  /// When set, claiming is refused with this reason token.
+  final String? refuseClaimWith;
+
+  int objectivesCalls = 0;
+  final List<String> claimObjectiveCalls = [];
+
+  /// When set, every GET /objectives waits on this before returning.
+  Completer<void>? objectivesGate;
+
+  /// When set, claiming waits on this before returning, holding the claim in flight.
+  Completer<void>? claimGate;
+
+  @override
+  Future<ObjectiveList> objectives(String deviceToken) async {
+    objectivesCalls++;
+    if (_throwOnObjectives) throw const ApiException(500, 'objectives error');
+    if (objectivesGate != null) await objectivesGate!.future;
+    return objectivesResult;
+  }
+
+  @override
+  Future<ClaimObjectiveResult> claimObjective(
+      String deviceToken, String objectiveId) async {
+    claimObjectiveCalls.add(objectiveId);
+    if (claimGate != null) await claimGate!.future;
+    if (refuseClaimWith != null) {
+      throw JobRefusedException(refuseClaimWith!, 'refused: $refuseClaimWith');
+    }
+
+    final claimed = objectivesResult.objectives.firstWhere((o) => o.id == objectiveId);
+    final paid = DailyObjective(
+      id: claimed.id,
+      name: claimed.name,
+      description: claimed.description,
+      type: claimed.type,
+      target: claimed.target,
+      jobId: claimed.jobId,
+      progress: claimed.target,
+      complete: true,
+      claimed: true,
+      rewardCash: claimed.rewardCash,
+      rewardXp: claimed.rewardXp,
+    );
+    final after = [
+      for (final o in objectivesResult.objectives) o.id == objectiveId ? paid : o,
+    ];
+    objectivesResult = ObjectiveList(
+      date: objectivesResult.date,
+      resetsAtUtc: objectivesResult.resetsAtUtc,
+      objectives: after,
+    );
+
+    return _claimObjectiveResult ??
+        ClaimObjectiveResult(claimed: paid, player: kObjectiveClaimedMe, objectives: after);
   }
 
   @override

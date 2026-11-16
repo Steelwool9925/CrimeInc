@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using UnderworldEmpire.Domain;
+using UnderworldEmpire.Domain.Daily;
 using UnderworldEmpire.Domain.Items;
 using UnderworldEmpire.Domain.Jobs;
 using UnderworldEmpire.Domain.Properties;
@@ -24,6 +25,8 @@ public class GameDbContext : DbContext
     public DbSet<PlayerItem> PlayerItems => Set<PlayerItem>();
 
     public DbSet<PlayerProperty> PlayerProperties => Set<PlayerProperty>();
+
+    public DbSet<PlayerDailyObjective> PlayerDailyObjectives => Set<PlayerDailyObjective>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -160,6 +163,35 @@ public class GameDbContext : DbContext
         owned.HasOne<Player>()
             .WithMany()
             .HasForeignKey(p => p.PlayerId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Per-player, per-day, per-objective progress.
+        var daily = modelBuilder.Entity<PlayerDailyObjective>();
+
+        // Composite natural key: one row per objective per day, so a double-credit or double-claim is a
+        // schema-level impossibility rather than something the service has to remember. A player has no
+        // rows until their first action of the day, which stores one per offered objective.
+        daily.HasKey(d => new { d.PlayerId, d.UtcDate, d.ObjectiveId });
+
+        // ObjectiveId is a content id, not a foreign key. The cap is enforced by the content loader.
+        daily.Property(d => d.ObjectiveId).IsRequired().HasMaxLength(64);
+        daily.Property(d => d.Progress).IsRequired();
+        daily.Property(d => d.Claimed).IsRequired();
+        daily.Property(d => d.JobsWon).IsRequired().HasMaxLength(1024);
+
+        // Optimistic concurrency on the row itself, as on Player. A claim also updates the player (cash),
+        // which already serialises it, but the row guarding itself means a double-claim cannot pay twice
+        // even if a future reward ever stops touching the player.
+        daily.Property<uint>("xmin")
+            .HasColumnName("xmin")
+            .HasColumnType("xid")
+            .ValueGeneratedOnAddOrUpdate()
+            .IsConcurrencyToken();
+
+        // Deleting a player takes their progress with them. No navigation property on Player.
+        daily.HasOne<Player>()
+            .WithMany()
+            .HasForeignKey(d => d.PlayerId)
             .OnDelete(DeleteBehavior.Cascade);
     }
 }

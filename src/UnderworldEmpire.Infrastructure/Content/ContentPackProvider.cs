@@ -16,17 +16,21 @@ internal sealed class ContentPackProvider : IContentPackProvider
 
     public PropertyCatalog PropertyCatalog { get; }
 
+    public ObjectiveCatalog ObjectiveCatalog { get; }
+
     public ContentPackProvider(
         ContentPack pack,
         string packRoot,
         JobCatalog jobCatalog,
         ItemCatalog itemCatalog,
-        PropertyCatalog propertyCatalog)
+        PropertyCatalog propertyCatalog,
+        ObjectiveCatalog objectiveCatalog)
     {
         ActivePack = pack;
         PackRoot = packRoot;
         JobCatalog = jobCatalog;
         ItemCatalog = itemCatalog;
         PropertyCatalog = propertyCatalog;
+        ObjectiveCatalog = objectiveCatalog;
     }
 }

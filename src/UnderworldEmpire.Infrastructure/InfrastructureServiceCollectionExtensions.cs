@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using UnderworldEmpire.Domain;
+using UnderworldEmpire.Domain.Daily;
 using UnderworldEmpire.Domain.Items;
 using UnderworldEmpire.Domain.Jobs;
 using UnderworldEmpire.Domain.Properties;
@@ -35,6 +36,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<JobService>();
         services.AddScoped<JobActionService>();
         services.AddScoped<ProgressionService>();
+        services.AddScoped<DailyObjectiveService>();
+        services.AddScoped<DailyObjectiveActionService>();
 
         // Stateless, but registered scoped alongside the other rule services for lifetime uniformity.
         services.AddScoped<InventoryService>();
@@ -59,13 +62,15 @@ public static class InfrastructureServiceCollectionExtensions
         var itemCatalog = loader.LoadItems(BuildInfo.DefaultContentPack);
         var jobCatalog = loader.LoadJobs(BuildInfo.DefaultContentPack, itemCatalog);
         var propertyCatalog = loader.LoadProperties(BuildInfo.DefaultContentPack);
+        var objectiveCatalog = loader.LoadObjectives(BuildInfo.DefaultContentPack, jobCatalog);
         services.AddSingleton<IContentPackProvider>(
             new ContentPackProvider(
                 pack,
                 loader.PackRoot(BuildInfo.DefaultContentPack),
                 jobCatalog,
                 itemCatalog,
-                propertyCatalog));
+                propertyCatalog,
+                objectiveCatalog));
 
         return services;
     }

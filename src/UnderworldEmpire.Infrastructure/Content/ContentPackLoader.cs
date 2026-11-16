@@ -1,5 +1,6 @@
 ﻿using System.Text;
 using System.Text.Json;
+using UnderworldEmpire.Domain.Daily;
 using UnderworldEmpire.Domain.Items;
 using UnderworldEmpire.Domain.Jobs;
 using UnderworldEmpire.Domain.Properties;
@@ -279,6 +280,68 @@ public sealed class ContentPackLoader
         return new PropertyCatalog(properties);
     }
 
+    /// <summary>
+    /// Loads and validates the daily-objective pool for <paramref name="packId"/> from
+    /// <c>&lt;contentRoot&gt;/&lt;packId&gt;/objectives.json</c>.
+    /// </summary>
+    /// <remarks>
+    /// Same contract as <see cref="LoadProperties"/>: validation runs to completion and reports every
+    /// problem at once. The job catalog crosses in so an objective naming a job is checked against real
+    /// job ids and levels, the one place the two catalogs meet.
+    /// </remarks>
+    /// <exception cref="ContentPackException">
+    ///     Thrown when the file is missing, cannot be parsed, or fails validation.
+    /// </exception>
+    public ObjectiveCatalog LoadObjectives(string packId, JobCatalog jobCatalog)
+    {
+        var objectivesFile = Path.Combine(_contentRoot, packId, "objectives.json");
+
+        if (!File.Exists(objectivesFile))
+            throw new ContentPackException(
+                $"Objective catalog for pack '{packId}' not found at '{objectivesFile}'.");
+
+        ObjectiveCatalogFile file;
+        try
+        {
+            var json = File.ReadAllText(objectivesFile, Encoding.UTF8);
+            file = JsonSerializer.Deserialize<ObjectiveCatalogFile>(json, JsonOptions)
+                   ?? throw new ContentPackException(
+                       $"objectives.json for '{packId}' deserialised to null.");
+        }
+        catch (JsonException ex)
+        {
+            throw new ContentPackException(
+                $"objectives.json for '{packId}' is not valid JSON: {ex.Message}", ex);
+        }
+
+        ValidateObjectives(file, packId, jobCatalog);
+
+        var objectives = new List<Objective>(file.Objectives.Count);
+        foreach (var entry in file.Objectives)
+        {
+            var objective = new Objective
+            {
+                Id = entry.Id,
+                Name = entry.Name,
+                Description = entry.Description,
+                Type = ParseObjectiveType(entry.Type)!.Value,
+                JobId = string.IsNullOrWhiteSpace(entry.JobId) ? null : entry.JobId,
+                Target = entry.Target,
+                MinLevel = entry.MinLevel,
+                // ValidateObjectives has already proved the block is present.
+                RewardCash = entry.Reward!.Cash,
+                RewardXp = entry.Reward.Xp
+            };
+            objective.EnsureValid();
+            objectives.Add(objective);
+        }
+
+        return new ObjectiveCatalog(objectives);
+    }
+
+    private static ObjectiveType? ParseObjectiveType(string? name) =>
+        Enum.TryParse<ObjectiveType>(name, ignoreCase: true, out var type) && Enum.IsDefined(type) ? type : null;
+
     /// <summary>The slot names content may use, for error messages.</summary>
     private static readonly string SlotNames = string.Join(", ",
         Enum.GetNames<ItemSlot>().Select(n => n.ToLowerInvariant()));
@@ -397,8 +460,16 @@ public sealed class ContentPackLoader
 
             if (string.IsNullOrWhiteSpace(job.Id))
                 errors.Add($"{where}: 'id' is missing or empty");
-            else if (!seenIds.Add(job.Id))
-                errors.Add($"{where}: duplicate 'id'");
+            else
+            {
+                if (!seenIds.Add(job.Id))
+                    errors.Add($"{where}: duplicate 'id'");
+
+                // Daily objectives store the distinct jobs a player has won as a comma-joined list, so an
+                // id containing a comma would be split into two and miscounted.
+                if (job.Id.Contains(','))
+                    errors.Add($"{where}: 'id' must not contain a comma");
+            }
 
             if (string.IsNullOrWhiteSpace(job.Name))
                 errors.Add($"{where}: 'name' is missing or empty");
@@ -674,5 +745,83 @@ public sealed class ContentPackLoader
         if (errors.Count > 0)
             throw new ContentPackException(
                 $"Property catalog for pack '{expectedPackId}' failed validation: {string.Join("; ", errors)}.");
+    }
+
+    private static void ValidateObjectives(ObjectiveCatalogFile file, string expectedPackId, JobCatalog jobCatalog)
+    {
+        var errors = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(file.PackId))
+            errors.Add("'packId' is missing or empty");
+        else if (!string.Equals(file.PackId, expectedPackId, StringComparison.Ordinal))
+            errors.Add($"'packId' mismatch: expected '{expectedPackId}', found '{file.PackId}'");
+
+        if (file.Objectives.Count == 0)
+            errors.Add("'objectives' is missing or empty - a pack must define at least one objective");
+
+        var typeNames = string.Join(", ", Enum.GetNames<ObjectiveType>().Select(n => char.ToLowerInvariant(n[0]) + n[1..]));
+        var seenIds = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < file.Objectives.Count; i++)
+        {
+            var objective = file.Objectives[i];
+            var where = string.IsNullOrWhiteSpace(objective.Id)
+                ? $"objectives[{i}]"
+                : $"objectives[{i}] ('{objective.Id}')";
+
+            if (string.IsNullOrWhiteSpace(objective.Id))
+                errors.Add($"{where}: 'id' is missing or empty");
+            else
+            {
+                if (!seenIds.Add(objective.Id))
+                    errors.Add($"{where}: duplicate 'id'");
+
+                if (objective.Id.Length > ContentIdMaxLength)
+                    errors.Add(
+                        $"{where}: 'id' is {objective.Id.Length} characters, above the {ContentIdMaxLength}-character limit");
+            }
+
+            if (string.IsNullOrWhiteSpace(objective.Name))
+                errors.Add($"{where}: 'name' is missing or empty");
+
+            var type = ParseObjectiveType(objective.Type);
+            if (type is null)
+                errors.Add($"{where}: 'type' must be one of {typeNames}, found '{objective.Type}'");
+
+            if (objective.Target < 1)
+                errors.Add($"{where}: 'target' must be >= 1, found {objective.Target}");
+
+            if (objective.MinLevel < 1)
+                errors.Add($"{where}: 'minLevel' must be >= 1, found {objective.MinLevel}");
+
+            if (objective.Reward is null)
+                errors.Add($"{where}: 'reward' block is missing");
+            else
+            {
+                if (objective.Reward.Cash < 0)
+                    errors.Add($"{where}: 'reward.cash' must be >= 0, found {objective.Reward.Cash}");
+                if (objective.Reward.Xp < 0)
+                    errors.Add($"{where}: 'reward.xp' must be >= 0, found {objective.Reward.Xp}");
+                if (objective.Reward.Cash == 0 && objective.Reward.Xp == 0)
+                    errors.Add($"{where}: 'reward' must pay cash or xp");
+            }
+
+            if (!string.IsNullOrWhiteSpace(objective.JobId))
+            {
+                if (type is not null and not ObjectiveType.CompleteJobTimes)
+                    errors.Add($"{where}: 'jobId' only applies to completeJobTimes objectives");
+
+                var job = jobCatalog.Find(objective.JobId);
+                if (job is null)
+                    errors.Add($"{where}: 'jobId' '{objective.JobId}' is not a job in this pack");
+                else if (objective.MinLevel < job.LevelRequirement)
+                    // Offered below the job's own level gate, the objective could never be completed.
+                    errors.Add(
+                        $"{where}: 'minLevel' {objective.MinLevel} is below '{objective.JobId}' level requirement {job.LevelRequirement}");
+            }
+        }
+
+        if (errors.Count > 0)
+            throw new ContentPackException(
+                $"Objective catalog for pack '{expectedPackId}' failed validation: {string.Join("; ", errors)}.");
     }
 }

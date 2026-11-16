@@ -172,4 +172,9 @@ public record JobListResponse(
 ///     Level-up detail when this attempt crossed one or more XP thresholds; <see langword="null"/>
 ///     otherwise.
 /// </param>
-public record DoJobResponse(JobResultDto Result, MeDto Player, LevelUpDto? LevelUp);
+/// <param name="Objectives">
+///     Today's daily objectives after this attempt was counted, so the client updates its bars without
+///     another request. A failed attempt advances nothing but still reports the current state.
+/// </param>
+public record DoJobResponse(
+    JobResultDto Result, MeDto Player, LevelUpDto? LevelUp, IReadOnlyList<ObjectiveDto>? Objectives = null);
