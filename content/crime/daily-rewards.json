@@ -1,0 +1,13 @@
+{
+  "packId": "crime",
+  "version": 1,
+  "dailyRewards": [
+    { "day": 1, "cash": 50, "xp": 10 },
+    { "day": 2, "cash": 75, "xp": 15 },
+    { "day": 3, "cash": 100, "xp": 20 },
+    { "day": 4, "cash": 125, "xp": 25 },
+    { "day": 5, "cash": 150, "xp": 30 },
+    { "day": 6, "cash": 200, "xp": 40 },
+    { "day": 7, "cash": 300, "xp": 60 }
+  ]
+}

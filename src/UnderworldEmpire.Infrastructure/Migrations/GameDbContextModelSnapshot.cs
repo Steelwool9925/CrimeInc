@@ -23,6 +23,31 @@ namespace UnderworldEmpire.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("UnderworldEmpire.Domain.Daily.DailyStreak", b =>
+                {
+                    b.Property<Guid>("PlayerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("CurrentStreak")
+                        .HasColumnType("integer");
+
+                    b.Property<DateOnly>("LastClaimedUtcDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("LongestStreak")
+                        .HasColumnType("integer");
+
+                    b.Property<uint>("xmin")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("PlayerId");
+
+                    b.ToTable("DailyStreaks");
+                });
+
             modelBuilder.Entity("UnderworldEmpire.Domain.Daily.PlayerDailyObjective", b =>
                 {
                     b.Property<Guid>("PlayerId")
@@ -230,6 +255,15 @@ namespace UnderworldEmpire.Infrastructure.Migrations
                     b.HasKey("PlayerId", "PropertyId");
 
                     b.ToTable("PlayerProperties");
+                });
+
+            modelBuilder.Entity("UnderworldEmpire.Domain.Daily.DailyStreak", b =>
+                {
+                    b.HasOne("UnderworldEmpire.Domain.Player", null)
+                        .WithMany()
+                        .HasForeignKey("PlayerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("UnderworldEmpire.Domain.Daily.PlayerDailyObjective", b =>

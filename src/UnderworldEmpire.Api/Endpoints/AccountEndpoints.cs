@@ -82,7 +82,8 @@ public static class AccountEndpoints
                     extensions: new Dictionary<string, object?> { ["reason"] = "usernameTaken" });
             }
 
-            return Results.Ok(PlayerProjection.ToMeDto(player, DateTimeOffset.UtcNow));
+            var streak = await DailyEndpoints.LoadStreakAsync(db, playerId);
+            return Results.Ok(PlayerProjection.ToMeDto(player, DateTimeOffset.UtcNow, streak));
         })
         .WithName("PostAccountRegister")
         .WithTags("Account");

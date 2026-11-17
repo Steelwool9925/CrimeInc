@@ -178,6 +178,8 @@ void main() {
           skillPoints: 0,
           attack: 10,
           defense: 10,
+          dailyStreakCurrent: 0,
+          dailyClaimable: false,
         ),
       );
       final store = InMemoryTokenStore();

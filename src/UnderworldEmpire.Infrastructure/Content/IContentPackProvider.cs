@@ -38,4 +38,10 @@ public interface IContentPackProvider
     /// <see cref="ActivePack"/> - read once at startup, immutable thereafter.
     /// </summary>
     ObjectiveCatalog ObjectiveCatalog { get; }
+
+    /// <summary>
+    /// The loaded and validated daily-login reward table for the active pack. Same lifecycle as
+    /// <see cref="ActivePack"/> - read once at startup, immutable thereafter.
+    /// </summary>
+    DailyRewardCatalog DailyRewardCatalog { get; }
 }

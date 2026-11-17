@@ -38,6 +38,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ProgressionService>();
         services.AddScoped<DailyObjectiveService>();
         services.AddScoped<DailyObjectiveActionService>();
+        services.AddScoped<DailyRewardService>();
+        services.AddScoped<DailyActionService>();
 
         // Stateless, but registered scoped alongside the other rule services for lifetime uniformity.
         services.AddScoped<InventoryService>();
@@ -63,6 +65,7 @@ public static class InfrastructureServiceCollectionExtensions
         var jobCatalog = loader.LoadJobs(BuildInfo.DefaultContentPack, itemCatalog);
         var propertyCatalog = loader.LoadProperties(BuildInfo.DefaultContentPack);
         var objectiveCatalog = loader.LoadObjectives(BuildInfo.DefaultContentPack, jobCatalog);
+        var dailyRewardCatalog = loader.LoadDailyRewards(BuildInfo.DefaultContentPack);
         services.AddSingleton<IContentPackProvider>(
             new ContentPackProvider(
                 pack,
@@ -70,7 +73,8 @@ public static class InfrastructureServiceCollectionExtensions
                 jobCatalog,
                 itemCatalog,
                 propertyCatalog,
-                objectiveCatalog));
+                objectiveCatalog,
+                dailyRewardCatalog));
 
         return services;
     }

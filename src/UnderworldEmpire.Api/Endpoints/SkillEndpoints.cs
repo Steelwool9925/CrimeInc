@@ -16,7 +16,8 @@ public static class SkillEndpoints
         app.MapPost("/skills/allocate", [Authorize] async (
             AllocateSkillRequest? request,
             HttpContext ctx,
-            ProgressionService progression) =>
+            ProgressionService progression,
+            GameDbContext db) =>
         {
             var playerId = ctx.User.GetPlayerId();
 
@@ -43,22 +44,26 @@ public static class SkillEndpoints
 
             var (error, player) = await progression.AllocateAsync(playerId, target);
 
-            return error switch
+            if (error != SkillAllocationError.None)
             {
-                SkillAllocationError.UnknownPlayer => Results.NotFound(),
+                return error switch
+                {
+                    SkillAllocationError.UnknownPlayer => Results.NotFound(),
 
-                SkillAllocationError.NoSkillPoints => Results.Problem(
-                    detail: "You have no unspent skill points.",
-                    statusCode: StatusCodes.Status409Conflict,
-                    extensions: new Dictionary<string, object?> { ["reason"] = "noSkillPoints" }),
+                    SkillAllocationError.NoSkillPoints => Results.Problem(
+                        detail: "You have no unspent skill points.",
+                        statusCode: StatusCodes.Status409Conflict,
+                        extensions: new Dictionary<string, object?> { ["reason"] = "noSkillPoints" }),
 
-                SkillAllocationError.ConcurrencyConflict => Results.Problem(
-                    detail: "Another request modified your state first. Re-read and try again.",
-                    statusCode: StatusCodes.Status409Conflict),
+                    _ => Results.Problem(
+                        detail: "Another request modified your state first. Re-read and try again.",
+                        statusCode: StatusCodes.Status409Conflict)
+                };
+            }
 
-                _ => Results.Ok(new AllocateSkillResponse(
-                    PlayerProjection.ToMeDto(player!, DateTimeOffset.UtcNow)))
-            };
+            var streak = await DailyEndpoints.LoadStreakAsync(db, playerId);
+            return Results.Ok(new AllocateSkillResponse(
+                PlayerProjection.ToMeDto(player!, DateTimeOffset.UtcNow, streak)));
         })
         .WithName("AllocateSkill")
         .WithTags("Progression");

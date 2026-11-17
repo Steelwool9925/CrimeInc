@@ -4,6 +4,7 @@ import '../api/models.dart';
 import '../state/app_state.dart';
 import '../theme/pack_theme.dart';
 import '../widgets/coming_soon_screen.dart';
+import '../widgets/daily_reward_dialog.dart';
 import '../widgets/halftone_wash.dart';
 import '../widgets/meter_card.dart';
 import '../widgets/pack_logo.dart';
@@ -17,7 +18,7 @@ import 'properties_screen.dart';
 import 'skills_screen.dart';
 import 'store_screen.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.appState, required this.onChangeServer});
 
   final AppState appState;
@@ -29,11 +30,52 @@ class HomeScreen extends StatelessWidget {
   final VoidCallback onChangeServer;
 
   @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  /// Whether the daily-reward dialog is open or about to be. Set synchronously, the same reason
+  /// `ObjectivesScreen._levelUpShowing` is: build can run twice before the post-frame callback
+  /// does, and both would otherwise open one.
+  bool _dailyClaimShowing = false;
+
+  /// Shown on arrival whenever a claim is waiting. Only while this screen is the one in front —
+  /// same guard as `ObjectivesScreen._maybeShowLevelUp`, so a dashboard tile pushed on top does
+  /// not leave this popping up behind it later.
+  void _maybeShowDailyClaim(BuildContext context, AppState state) {
+    if (!state.pendingDailyClaim || _dailyClaimShowing) return;
+    if (!(ModalRoute.of(context)?.isCurrent ?? true)) return;
+
+    _dailyClaimShowing = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!context.mounted || !state.pendingDailyClaim) {
+        _dailyClaimShowing = false;
+        return;
+      }
+
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => DailyRewardDialog(appState: state),
+      ).whenComplete(() {
+        _dailyClaimShowing = false;
+        // The hardware back button pops without running the dialog's own "Nice" handler. Without
+        // this, a claim taken that way would leave lastDailyClaim stale, and the *next* day's
+        // dialog would open straight to yesterday's reward lines instead of today's prompt — the
+        // same reasoning ObjectivesScreen._maybeShowLevelUp treats any dismissal as one.
+        state.acknowledgeDailyClaim();
+      });
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: appState,
+      listenable: widget.appState,
       builder: (context, _) {
-        final pack = appState.contentPack;
+        final state = widget.appState;
+        final pack = state.contentPack;
+        _maybeShowDailyClaim(context, state);
 
         return Scaffold(
           appBar: AppBar(
@@ -41,12 +83,12 @@ class HomeScreen extends StatelessWidget {
             // it does not. Neither is hardcoded, so a different pack rebrands the app without
             // a code change. Colours are left unset so the AppBar inherits the dark
             // Steamnoir AppBarTheme from pack_theme.dart.
-            title: PackLogo(appState: appState, pack: pack),
+            title: PackLogo(appState: state, pack: pack),
             // Atmosphere only -- flexibleSpace paints behind the title/actions, so the wash
             // never affects hit-testing or the logo's legibility.
             flexibleSpace: HalftoneWash(color: Theme.of(context).colorScheme.onSurface),
           ),
-          body: _buildBody(context, appState),
+          body: _buildBody(context, state),
         );
       },
     );
@@ -68,13 +110,13 @@ class HomeScreen extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               ElevatedButton(
-                onPressed: appState.bootstrap,
+                onPressed: state.bootstrap,
                 child: const Text('Retry'),
               ),
               const SizedBox(height: 8),
               OutlinedButton(
                 key: const Key('change-server'),
-                onPressed: onChangeServer,
+                onPressed: widget.onChangeServer,
                 child: const Text('Change Server'),
               ),
             ],
@@ -127,7 +169,7 @@ class HomeScreen extends StatelessWidget {
                 : const Text('Skills'),
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(
-                builder: (_) => SkillsScreen(appState: appState),
+                builder: (_) => SkillsScreen(appState: state),
               ),
             ),
           ),
@@ -143,13 +185,13 @@ class HomeScreen extends StatelessWidget {
               cashLabel: cashLabel,
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (_) => StoreScreen(appState: appState, highlightItemId: advice.item.id),
+                  builder: (_) => StoreScreen(appState: state, highlightItemId: advice.item.id),
                 ),
               ),
             ),
             const SizedBox(height: 8),
           ],
-          _DashboardGrid(appState: appState),
+          _DashboardGrid(appState: state),
         ],
       ),
     );
@@ -553,6 +595,20 @@ class _CharacterCard extends StatelessWidget {
                 ),
               ],
             ),
+            if (me.dailyStreakCurrent > 0) ...[
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Icon(Icons.local_fire_department, size: 18, color: theme.colorScheme.primary),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Day ${me.dailyStreakCurrent} streak',
+                    key: const Key('home-streak'),
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),

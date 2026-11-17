@@ -28,7 +28,8 @@ public static class MeEndpoints
             if (player is null)
                 return Results.NotFound();
 
-            return Results.Ok(PlayerProjection.ToMeDto(player, DateTimeOffset.UtcNow));
+            var streak = await DailyEndpoints.LoadStreakAsync(db, playerId);
+            return Results.Ok(PlayerProjection.ToMeDto(player, DateTimeOffset.UtcNow, streak));
         })
         .WithName("GetMe")
         .WithTags("Player");

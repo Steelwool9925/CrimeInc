@@ -25,6 +25,8 @@ void main() {
         skillPoints: 0,
         attack: 18,
         defense: 14,
+        dailyStreakCurrent: 0,
+        dailyClaimable: false,
       );
 
   Future<AppState> pumpHome(WidgetTester tester) async {

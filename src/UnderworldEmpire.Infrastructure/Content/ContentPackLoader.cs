@@ -339,6 +339,52 @@ public sealed class ContentPackLoader
         return new ObjectiveCatalog(objectives);
     }
 
+    /// <summary>
+    /// Loads and validates the daily-login reward table for <paramref name="packId"/> from
+    /// <c>&lt;contentRoot&gt;/&lt;packId&gt;/daily-rewards.json</c>.
+    /// </summary>
+    /// <remarks>
+    /// Same contract as <see cref="LoadProperties"/>: validation runs to completion and reports
+    /// every problem at once. Unlike <see cref="LoadObjectives"/>, there is no cross-catalog check —
+    /// a day's reward names no job, item or property.
+    /// </remarks>
+    /// <exception cref="ContentPackException">
+    ///     Thrown when the file is missing, cannot be parsed, or fails validation.
+    /// </exception>
+    public DailyRewardCatalog LoadDailyRewards(string packId)
+    {
+        var rewardsFile = Path.Combine(_contentRoot, packId, "daily-rewards.json");
+
+        if (!File.Exists(rewardsFile))
+            throw new ContentPackException(
+                $"Daily reward catalog for pack '{packId}' not found at '{rewardsFile}'.");
+
+        DailyRewardCatalogFile file;
+        try
+        {
+            var json = File.ReadAllText(rewardsFile, Encoding.UTF8);
+            file = JsonSerializer.Deserialize<DailyRewardCatalogFile>(json, JsonOptions)
+                   ?? throw new ContentPackException(
+                       $"daily-rewards.json for '{packId}' deserialised to null.");
+        }
+        catch (JsonException ex)
+        {
+            throw new ContentPackException(
+                $"daily-rewards.json for '{packId}' is not valid JSON: {ex.Message}", ex);
+        }
+
+        ValidateDailyRewards(file, packId);
+
+        var rewards = file.DailyRewards
+            .OrderBy(r => r.Day)
+            .Select(entry => new DailyReward { Day = entry.Day, Cash = entry.Cash, Xp = entry.Xp })
+            .ToList();
+        foreach (var reward in rewards)
+            reward.EnsureValid();
+
+        return new DailyRewardCatalog(rewards);
+    }
+
     private static ObjectiveType? ParseObjectiveType(string? name) =>
         Enum.TryParse<ObjectiveType>(name, ignoreCase: true, out var type) && Enum.IsDefined(type) ? type : null;
 
@@ -823,5 +869,52 @@ public sealed class ContentPackLoader
         if (errors.Count > 0)
             throw new ContentPackException(
                 $"Objective catalog for pack '{expectedPackId}' failed validation: {string.Join("; ", errors)}.");
+    }
+
+    private static void ValidateDailyRewards(DailyRewardCatalogFile file, string expectedPackId)
+    {
+        var errors = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(file.PackId))
+            errors.Add("'packId' is missing or empty");
+        else if (!string.Equals(file.PackId, expectedPackId, StringComparison.Ordinal))
+            errors.Add($"'packId' mismatch: expected '{expectedPackId}', found '{file.PackId}'");
+
+        if (file.DailyRewards.Count == 0)
+            errors.Add("'dailyRewards' is missing or empty - a pack must define at least one daily reward");
+
+        var seenDays = new HashSet<int>();
+        for (int i = 0; i < file.DailyRewards.Count; i++)
+        {
+            var reward = file.DailyRewards[i];
+            var where = $"dailyRewards[{i}] (day {reward.Day})";
+
+            if (reward.Day < 1)
+                errors.Add($"{where}: 'day' must be >= 1, found {reward.Day}");
+            else if (!seenDays.Add(reward.Day))
+                errors.Add($"{where}: duplicate 'day'");
+
+            if (reward.Cash < 0)
+                errors.Add($"{where}: 'cash' must be >= 0, found {reward.Cash}");
+            if (reward.Xp < 0)
+                errors.Add($"{where}: 'xp' must be >= 0, found {reward.Xp}");
+            if (reward.Cash == 0 && reward.Xp == 0)
+                errors.Add($"{where}: reward must pay cash or xp");
+        }
+
+        // DailyRewardCatalog indexes the sorted table directly by (day - 1), so a gap in the
+        // sequence would make some day number silently resolve to whatever landed at that index
+        // after sorting, rather than a named validation error at load time.
+        if (seenDays.Count > 0)
+        {
+            int maxDay = seenDays.Max();
+            for (int day = 1; day <= maxDay; day++)
+                if (!seenDays.Contains(day))
+                    errors.Add($"'dailyRewards' is missing day {day} - days must run contiguously from 1");
+        }
+
+        if (errors.Count > 0)
+            throw new ContentPackException(
+                $"Daily reward catalog for pack '{expectedPackId}' failed validation: {string.Join("; ", errors)}.");
     }
 }

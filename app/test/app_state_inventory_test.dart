@@ -272,6 +272,8 @@ void main() {
           skillPoints: 0,
           attack: kFakeMe.attack,
           defense: kFakeMe.defense,
+          dailyStreakCurrent: kFakeMe.dailyStreakCurrent,
+          dailyClaimable: kFakeMe.dailyClaimable,
         );
 
     Future<void> settle() => Future<void>.delayed(Duration.zero);
@@ -528,6 +530,8 @@ Me _otherPlayer() => Me(
       skillPoints: 0,
       attack: kFakeMe.attack,
       defense: kFakeMe.defense,
+      dailyStreakCurrent: kFakeMe.dailyStreakCurrent,
+      dailyClaimable: kFakeMe.dailyClaimable,
     );
 
 class _BrokenSeenStore implements UpgradeSeenStore {

@@ -18,6 +18,8 @@ Me _withPoints(int points) => Me(
       skillPoints: points,
       attack: kFakeMe.attack,
       defense: kFakeMe.defense,
+      dailyStreakCurrent: kFakeMe.dailyStreakCurrent,
+      dailyClaimable: kFakeMe.dailyClaimable,
     );
 
 Future<AppState> _bootstrapped(FakeApiClient api) async {

@@ -24,6 +24,8 @@ Me _withPoints(int points) => Me(
       skillPoints: points,
       attack: kFakeMe.attack,
       defense: kFakeMe.defense,
+      dailyStreakCurrent: kFakeMe.dailyStreakCurrent,
+      dailyClaimable: kFakeMe.dailyClaimable,
     );
 
 /// A player who has just been told "No skill points to spend." on the Skills screen and has then

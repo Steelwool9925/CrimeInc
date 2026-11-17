@@ -320,6 +320,8 @@ const kFakeMe = Me(
   skillPoints: 0,
   attack: 10,
   defense: 10,
+  dailyStreakCurrent: 0,
+  dailyClaimable: false,
 );
 
 /// The player the buy endpoint returns: the starting 100 less the knuckles' 75.
@@ -353,6 +355,8 @@ const kBoughtMe = Me(
   skillPoints: 0,
   attack: 10,
   defense: 10,
+  dailyStreakCurrent: 0,
+  dailyClaimable: false,
 );
 
 /// A loadout with nothing equipped: the player's own 10/10, matching [kFakeMe].
@@ -515,6 +519,8 @@ const kPropertyBoughtMe = Me(
   skillPoints: 0,
   attack: 10,
   defense: 10,
+  dailyStreakCurrent: 0,
+  dailyClaimable: false,
 );
 
 /// The player the collect endpoint returns: the fixture's 600 plus the corner's 30 takings.
@@ -544,6 +550,8 @@ const kPropertyCollectedMe = Me(
   skillPoints: 0,
   attack: 10,
   defense: 10,
+  dailyStreakCurrent: 0,
+  dailyClaimable: false,
 );
 
 const kObjectiveOpen = DailyObjective(
@@ -618,6 +626,33 @@ final kObjectiveClaimedMe = Me(
   skillPoints: kFakeMe.skillPoints,
   attack: kFakeMe.attack,
   defense: kFakeMe.defense,
+  dailyStreakCurrent: kFakeMe.dailyStreakCurrent,
+  dailyClaimable: kFakeMe.dailyClaimable,
+);
+
+/// The player after claiming today's reward: [kFakeMe]'s cash plus the day-1 reward, with the
+/// streak fields flipped so a test reading them can only pass if the client took this response.
+final kDailyClaimedMe = Me(
+  playerId: kFakeMe.playerId,
+  energy: kFakeMe.energy,
+  stamina: kFakeMe.stamina,
+  health: kFakeMe.health,
+  cash: kFakeMe.cash + 50,
+  premiumCurrency: kFakeMe.premiumCurrency,
+  level: kFakeMe.level,
+  xp: kFakeMe.xp + 10,
+  skillPoints: kFakeMe.skillPoints,
+  attack: kFakeMe.attack,
+  defense: kFakeMe.defense,
+  dailyStreakCurrent: 1,
+  dailyClaimable: false,
+);
+
+final kClaimDailyResult = ClaimDailyResult(
+  reward: const DailyReward(day: 1, cash: 50, xp: 10),
+  currentStreak: 1,
+  longestStreak: 1,
+  player: kDailyClaimedMe,
 );
 
 class FakeApiClient implements ApiClient {
@@ -653,9 +688,12 @@ class FakeApiClient implements ApiClient {
     ClaimObjectiveResult? claimObjectiveResult,
     bool throwOnObjectives = false,
     this.refuseClaimWith,
+    ClaimDailyResult? claimDailyResult,
+    this.refuseClaimDailyWith,
   })  : objectivesResult = objectivesResult ?? kObjectiveList,
         _claimObjectiveResult = claimObjectiveResult,
         _throwOnObjectives = throwOnObjectives,
+        _claimDailyResult = claimDailyResult,
         _loginResult = loginResult ??
             const SessionResult(
               deviceToken: 'fake-token-abc',
@@ -1029,6 +1067,16 @@ class FakeApiClient implements ApiClient {
   int objectivesCalls = 0;
   final List<String> claimObjectiveCalls = [];
 
+  final ClaimDailyResult? _claimDailyResult;
+
+  /// When set, claiming the daily reward is refused with this reason token.
+  final String? refuseClaimDailyWith;
+
+  int claimDailyCalls = 0;
+
+  /// When set, claiming the daily reward waits on this before returning.
+  Completer<void>? claimDailyGate;
+
   /// When set, every GET /objectives waits on this before returning.
   Completer<void>? objectivesGate;
 
@@ -1077,6 +1125,17 @@ class FakeApiClient implements ApiClient {
 
     return _claimObjectiveResult ??
         ClaimObjectiveResult(claimed: paid, player: kObjectiveClaimedMe, objectives: after);
+  }
+
+  @override
+  Future<ClaimDailyResult> claimDaily(String deviceToken) async {
+    claimDailyCalls++;
+    if (claimDailyGate != null) await claimDailyGate!.future;
+    if (refuseClaimDailyWith != null) {
+      throw JobRefusedException(refuseClaimDailyWith!, 'refused: $refuseClaimDailyWith');
+    }
+
+    return _claimDailyResult ?? kClaimDailyResult;
   }
 
   @override

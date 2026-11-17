@@ -68,7 +68,7 @@ docker compose up -d postgres
 #    recreated — compose gives you a database, not a schema. Safe to re-run.
 ./scripts/migrate.ps1
 
-# 3. Build + test everything (886 .NET tests, 760 Flutter tests)
+# 3. Build + test everything (926 .NET tests, 774 Flutter tests)
 ./scripts/test.ps1
 
 # 4. Run the API — Swagger at http://localhost:5080/swagger
@@ -167,6 +167,25 @@ claiming it pays cash and XP, once.
   the objective row each carry an `xmin` token), so simultaneous claims pay once.
 - **The client** shows the set on the Objectives screen (Home tile, "N ready to claim"), with a one-tap
   link to Jobs or Properties for anything unfinished.
+
+## Daily login streak
+
+Each UTC day a player may claim one login reward from `content/crime/daily-rewards.json`, a
+7-entry table that escalates by day (50 cash/10 XP on day 1 up to 300 cash/60 XP on day 7) and
+clamps at the day-7 rate for any streak beyond that. Claiming on the next consecutive UTC day
+advances the streak by one; letting a day lapse resets it to day 1. A claim pays cash and XP
+unconditionally (same level-up path as jobs/objectives) and always refills energy to full — the
+whole point of a login bonus at the energy cap is a free top-up, not a top-off.
+
+- **`GET /daily`** reports today's claimable state, the stored current/longest streak, and a
+  preview of what claiming right now would pay — it writes nothing, so checking status never
+  starts or advances a streak.
+- **`POST /daily/claim`** pays out, once per UTC day. The streak row is created lazily on a
+  player's first-ever claim (same lazy-row idiom as the property holding row), and a claim is
+  guarded by the same `xmin`-token pattern used elsewhere so two concurrent claims pay once.
+- **The client** offers the reward automatically when one is ready (no extra navigation), shows
+  the current streak on Home once the player has claimed at least once, and calls out a new
+  personal-best streak on the reward dialog.
 
 ## Job reveal and sound
 

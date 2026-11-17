@@ -18,6 +18,8 @@ Me _meWithEnergy(MeterState energy) => Me(
       skillPoints: kFakeMe.skillPoints,
       attack: kFakeMe.attack,
       defense: kFakeMe.defense,
+      dailyStreakCurrent: kFakeMe.dailyStreakCurrent,
+      dailyClaimable: kFakeMe.dailyClaimable,
     );
 
 Property _property({

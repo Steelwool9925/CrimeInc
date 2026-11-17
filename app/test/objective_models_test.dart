@@ -36,6 +36,8 @@ Map<String, dynamic> _meJson() => {
       'skillPoints': 0,
       'attack': 1,
       'defense': 1,
+      'dailyStreakCurrent': 0,
+      'dailyClaimable': false,
     };
 
 void main() {

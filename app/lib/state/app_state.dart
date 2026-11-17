@@ -170,6 +170,20 @@ class AppState extends ChangeNotifier {
   /// The id of the objective currently being claimed, so the UI can disable just that row.
   String? _objectiveInFlight;
 
+  // ---- Daily login streak ----
+
+  /// True while the daily reward is being claimed.
+  bool _dailyClaimInFlight = false;
+
+  /// The server's answer to the most recent claim, kept until [acknowledgeDailyClaim] — the dialog
+  /// reads the reward lines from this, never computed locally, since the client holds no copy of
+  /// the reward table.
+  ClaimDailyResult? _lastDailyClaim;
+
+  /// A refusal or error from the last claim attempt, shown inside the dialog itself since there is
+  /// no dedicated daily screen for [actionMessage] to land on.
+  String? _dailyClaimError;
+
   LoadStatus get status => _status;
   Me? get me => _me;
   ContentPack? get contentPack => _contentPack;
@@ -295,6 +309,16 @@ class AppState extends ChangeNotifier {
 
   /// Objectives whose reward has not been taken, finished or not.
   int get objectivesOutstanding => _objectives.where((o) => !o.claimed).length;
+
+  /// Whether today's daily-login reward is still waiting to be claimed, straight off the player
+  /// projection. Accurate the instant [_me] says so — including right after [claimDaily] succeeds,
+  /// which is what makes this flip to false without a separate acknowledgement — so there is
+  /// nothing else to clear once the player has taken the reward.
+  bool get pendingDailyClaim => _me?.dailyClaimable ?? false;
+
+  bool get dailyClaimInFlight => _dailyClaimInFlight;
+  ClaimDailyResult? get lastDailyClaim => _lastDailyClaim;
+  String? get dailyClaimError => _dailyClaimError;
 
   List<Property> get properties => _properties;
   bool get propertiesLoading => _propertiesLoading;
@@ -1064,6 +1088,55 @@ class AppState extends ChangeNotifier {
 
     // A refusal means the screen was showing something the server disagrees with. Re-read it.
     if (refused) unawaited(loadObjectives());
+  }
+
+  // -------------------------------------------------------------------------
+  // Daily login streak
+  // -------------------------------------------------------------------------
+
+  /// Takes today's daily-login reward. One claim at a time, the same reasoning [claimObjective]
+  /// uses: a second tap while the first is on its way would reach the server as a double-claim.
+  ///
+  /// [lastDailyClaim] carries the server's answer once it lands, so the dialog that triggered this
+  /// can show the actual reward paid rather than a client guess — the client holds no copy of the
+  /// reward table. [acknowledgeDailyClaim] clears it again once the player has seen it.
+  Future<void> claimDaily() async {
+    final token = _deviceToken;
+    if (token == null || _dailyClaimInFlight) return;
+
+    _dailyClaimInFlight = true;
+    _dailyClaimError = null;
+    notifyListeners();
+
+    try {
+      final result = await _apiClient.claimDaily(token);
+      if (_disposed || _deviceToken != token) return;
+
+      _me = result.player;
+      _lastDailyClaim = result;
+      _haptic(HapticFeedback.mediumImpact);
+      if (result.levelUp != null) {
+        _pendingLevelUp = result.levelUp;
+        _reloadInventoryIfLevelChanged();
+        unawaited(loadJobs(supersede: true));
+      }
+    } on JobRefusedException catch (e) {
+      _dailyClaimError = e.reason == 'alreadyClaimedToday'
+          ? 'You already claimed today\'s reward.'
+          : e.detail;
+    } catch (e) {
+      _dailyClaimError = 'Could not reach the server. Try again.';
+    } finally {
+      _dailyClaimInFlight = false;
+      notifyListeners();
+    }
+  }
+
+  /// Dismisses the daily-reward dialog once the player has seen the result.
+  void acknowledgeDailyClaim() {
+    _lastDailyClaim = null;
+    _dailyClaimError = null;
+    notifyListeners();
   }
 
   // -------------------------------------------------------------------------

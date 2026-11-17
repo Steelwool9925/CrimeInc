@@ -88,7 +88,8 @@ public static class ItemEndpoints
         app.MapPost("/items/{id}/buy", [Authorize] async (
             string id,
             HttpContext ctx,
-            InventoryActionService inventoryActions) =>
+            InventoryActionService inventoryActions,
+            GameDbContext db) =>
         {
             var playerId = ctx.User.GetPlayerId();
 
@@ -101,11 +102,12 @@ public static class ItemEndpoints
             if (!purchase.Succeeded)
                 return Refusal(purchase.Failure);
 
+            var streak = await DailyEndpoints.LoadStreakAsync(db, playerId);
             return Results.Ok(new BuyItemResponse(
                 ItemId: id,
                 CashSpent: purchase.CashSpent,
                 QuantityOwned: purchase.QuantityOwned,
-                Player: PlayerProjection.ToMeDto(result.Player!, DateTimeOffset.UtcNow),
+                Player: PlayerProjection.ToMeDto(result.Player!, DateTimeOffset.UtcNow, streak),
                 Loadout: PlayerProjection.ToLoadoutDto(result.Loadout!)));
         })
         .WithName("BuyItem")
@@ -115,11 +117,12 @@ public static class ItemEndpoints
         app.MapPost("/items/{id}/equip", [Authorize] async (
             string id,
             HttpContext ctx,
-            InventoryActionService inventoryActions) =>
+            InventoryActionService inventoryActions,
+            GameDbContext db) =>
         {
             var playerId = ctx.User.GetPlayerId();
 
-            return EquipOutcome(await inventoryActions.EquipAsync(playerId, id), id);
+            return await EquipOutcome(await inventoryActions.EquipAsync(playerId, id), id, playerId, db);
         })
         .WithName("EquipItem")
         .WithTags("Items");
@@ -128,11 +131,12 @@ public static class ItemEndpoints
         app.MapPost("/items/{id}/unequip", [Authorize] async (
             string id,
             HttpContext ctx,
-            InventoryActionService inventoryActions) =>
+            InventoryActionService inventoryActions,
+            GameDbContext db) =>
         {
             var playerId = ctx.User.GetPlayerId();
 
-            return EquipOutcome(await inventoryActions.UnequipAsync(playerId, id), id);
+            return await EquipOutcome(await inventoryActions.UnequipAsync(playerId, id), id, playerId, db);
         })
         .WithName("UnequipItem")
         .WithTags("Items");
@@ -147,7 +151,8 @@ public static class ItemEndpoints
     /// <summary>
     /// Renders an equip or unequip result, which differ only in which side of the swap is populated.
     /// </summary>
-    private static IResult EquipOutcome(ItemEquipActionResult result, string itemId)
+    private static async Task<IResult> EquipOutcome(
+        ItemEquipActionResult result, string itemId, Guid playerId, GameDbContext db)
     {
         if (Translate(result.Error, itemId) is { } problem)
             return problem;
@@ -156,10 +161,11 @@ public static class ItemEndpoints
         if (!action.Succeeded)
             return Refusal(action.Failure);
 
+        var streak = await DailyEndpoints.LoadStreakAsync(db, playerId);
         return Results.Ok(new EquipItemResponse(
             EquippedItemId: action.EquippedItemId,
             UnequippedItemId: action.UnequippedItemId,
-            Player: PlayerProjection.ToMeDto(result.Player!, DateTimeOffset.UtcNow),
+            Player: PlayerProjection.ToMeDto(result.Player!, DateTimeOffset.UtcNow, streak),
             Loadout: PlayerProjection.ToLoadoutDto(result.Loadout!)));
     }
 

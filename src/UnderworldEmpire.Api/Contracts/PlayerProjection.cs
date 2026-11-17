@@ -1,4 +1,5 @@
 using UnderworldEmpire.Domain;
+using UnderworldEmpire.Domain.Daily;
 using UnderworldEmpire.Domain.Items;
 
 namespace UnderworldEmpire.Api.Contracts;
@@ -15,8 +16,14 @@ namespace UnderworldEmpire.Api.Contracts;
 /// </remarks>
 public static class PlayerProjection
 {
-    /// <summary>Projects <paramref name="player"/> as of <paramref name="nowUtc"/>.</summary>
-    public static MeDto ToMeDto(Player player, DateTimeOffset nowUtc) =>
+    /// <summary>
+    /// Projects <paramref name="player"/> as of <paramref name="nowUtc"/>. <paramref name="streak"/>
+    /// is the player's daily-login row, or <see langword="null"/> when they have never claimed —
+    /// every caller must look it up and pass it, the same way every other field here comes from
+    /// state the caller already has in hand, so a stale "no streak" can never ride along on a
+    /// response that has nothing to do with the daily reward.
+    /// </summary>
+    public static MeDto ToMeDto(Player player, DateTimeOffset nowUtc, DailyStreak? streak) =>
         new(
             PlayerId: player.Id,
             Energy: ToMeterState(player.Energy, nowUtc, MeterRates.Energy),
@@ -29,7 +36,9 @@ public static class PlayerProjection
             SkillPoints: player.SkillPoints,
             Attack: player.Attack,
             Defense: player.Defense,
-            Username: player.Username);
+            Username: player.Username,
+            DailyStreakCurrent: streak?.CurrentStreak ?? 0,
+            DailyClaimable: streak is null || streak.IsClaimableAt(nowUtc));
 
     /// <summary>Projects a computed <paramref name="loadout"/> onto the wire.</summary>
     /// <remarks>
