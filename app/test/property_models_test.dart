@@ -44,6 +44,8 @@ Map<String, dynamic> meJson({required int cash}) => {
       'skillPoints': 0,
       'attack': 10,
       'defense': 10,
+      'dailyStreakCurrent': 0,
+      'dailyClaimable': false,
     };
 
 Map<String, dynamic> meterJson() => {

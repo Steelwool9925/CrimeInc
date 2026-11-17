@@ -104,6 +104,10 @@ abstract class ApiClient {
   /// ('notToday', 'notComplete', 'alreadyClaimed').
   Future<ClaimObjectiveResult> claimObjective(String deviceToken, String objectiveId);
 
+  /// Takes today's daily-login reward. Throws [JobRefusedException] with reason
+  /// `alreadyClaimedToday` on a refusal.
+  Future<ClaimDailyResult> claimDaily(String deviceToken);
+
   /// Absolute URL for a pack art asset, by logical key ('logo', 'icon').
   ///
   /// Synchronous and unauthenticated: the server resolves the key against the manifest, so the
@@ -324,6 +328,13 @@ class HttpApiClient implements ApiClient {
       String deviceToken, String objectiveId) async {
     final response = await _post(deviceToken, '/objectives/$objectiveId/claim');
     return ClaimObjectiveResult.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  @override
+  Future<ClaimDailyResult> claimDaily(String deviceToken) async {
+    final response = await _post(deviceToken, '/daily/claim');
+    return ClaimDailyResult.fromJson(
         jsonDecode(response.body) as Map<String, dynamic>);
   }
 

@@ -46,6 +46,8 @@ class Me {
     required this.attack,
     required this.defense,
     this.username,
+    required this.dailyStreakCurrent,
+    required this.dailyClaimable,
   });
 
   final String playerId;
@@ -63,6 +65,12 @@ class Me {
   /// The account username, or null for a guest player who hasn't claimed one.
   final String? username;
 
+  /// The player's current daily-login streak; 0 if never claimed.
+  final int dailyStreakCurrent;
+
+  /// Whether today's daily-login reward is still waiting to be claimed.
+  final bool dailyClaimable;
+
   factory Me.fromJson(Map<String, dynamic> json) => Me(
         playerId: json['playerId'] as String,
         energy: MeterState.fromJson(json['energy'] as Map<String, dynamic>),
@@ -76,6 +84,8 @@ class Me {
         attack: json['attack'] as int,
         defense: json['defense'] as int,
         username: json['username'] as String?,
+        dailyStreakCurrent: json['dailyStreakCurrent'] as int,
+        dailyClaimable: json['dailyClaimable'] as bool,
       );
 }
 
@@ -1060,5 +1070,52 @@ class ClaimObjectiveResult {
             ? null
             : LevelUp.fromJson(json['levelUp'] as Map<String, dynamic>),
         objectives: DailyObjective.listFromJson(json['objectives'])!,
+      );
+}
+
+/// The reward for one streak day.
+@immutable
+class DailyReward {
+  const DailyReward({required this.day, required this.cash, required this.xp});
+
+  final int day;
+  final int cash;
+  final int xp;
+
+  factory DailyReward.fromJson(Map<String, dynamic> json) => DailyReward(
+        day: json['day'] as int,
+        cash: json['cash'] as int,
+        xp: json['xp'] as int,
+      );
+}
+
+/// Response to POST /daily/claim. [reward] carries the values the dialog shows — never computed
+/// locally, since the client holds no copy of the reward table.
+@immutable
+class ClaimDailyResult {
+  const ClaimDailyResult({
+    required this.reward,
+    required this.currentStreak,
+    required this.longestStreak,
+    required this.player,
+    this.levelUp,
+  });
+
+  final DailyReward reward;
+  final int currentStreak;
+  final int longestStreak;
+  final Me player;
+
+  /// Set when the XP reward crossed a level.
+  final LevelUp? levelUp;
+
+  factory ClaimDailyResult.fromJson(Map<String, dynamic> json) => ClaimDailyResult(
+        reward: DailyReward.fromJson(json['reward'] as Map<String, dynamic>),
+        currentStreak: json['currentStreak'] as int,
+        longestStreak: json['longestStreak'] as int,
+        player: Me.fromJson(json['player'] as Map<String, dynamic>),
+        levelUp: json['levelUp'] == null
+            ? null
+            : LevelUp.fromJson(json['levelUp'] as Map<String, dynamic>),
       );
 }

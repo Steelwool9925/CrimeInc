@@ -20,6 +20,8 @@ const _kClaimedMe = Me(
   attack: 1,
   defense: 1,
   username: 'alicecarter',
+  dailyStreakCurrent: 0,
+  dailyClaimable: false,
 );
 
 /// Pumps ProfileScreen with a bootstrapped AppState, then settles enough frames for the

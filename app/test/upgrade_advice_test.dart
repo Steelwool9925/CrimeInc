@@ -20,6 +20,8 @@ void main() {
         skillPoints: 0,
         attack: kFakeMe.attack,
         defense: kFakeMe.defense,
+        dailyStreakCurrent: kFakeMe.dailyStreakCurrent,
+        dailyClaimable: kFakeMe.dailyClaimable,
       );
 
   InventoryItem item(

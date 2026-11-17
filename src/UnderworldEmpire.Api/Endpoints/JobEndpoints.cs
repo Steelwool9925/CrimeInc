@@ -154,6 +154,7 @@ public static class JobEndpoints
             HttpContext ctx,
             JobActionService jobActions,
             IContentPackProvider content,
+            GameDbContext db,
             [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] DoJobRequest? request) =>
         {
             var playerId = ctx.User.GetPlayerId();
@@ -213,6 +214,7 @@ public static class JobEndpoints
             var catalog = content.JobCatalog;
 
             var levelUp = LevelUpProjection.ToDto(result.LevelUp, catalog);
+            var streak = await DailyEndpoints.LoadStreakAsync(db, playerId);
 
             return Results.Ok(new DoJobResponse(
                 Result: new JobResultDto(
@@ -232,7 +234,7 @@ public static class JobEndpoints
                     ItemsConsumed: outcome.ItemsConsumed
                         .Select(c => new ItemConsumptionDto(c.ItemId, c.QuantityConsumed, c.QuantityRemaining))
                         .ToList()),
-                Player: PlayerProjection.ToMeDto(result.Player!, DateTimeOffset.UtcNow),
+                Player: PlayerProjection.ToMeDto(result.Player!, DateTimeOffset.UtcNow, streak),
                 LevelUp: levelUp,
                 Objectives: ObjectiveEndpoints.ToDtos(result.Objectives)));
         })

@@ -48,7 +48,8 @@ public static class ObjectiveEndpoints
             string id,
             HttpContext ctx,
             DailyObjectiveActionService objectives,
-            IContentPackProvider content) =>
+            IContentPackProvider content,
+            GameDbContext db) =>
         {
             var playerId = ctx.User.GetPlayerId();
             var now = DateTimeOffset.UtcNow;
@@ -89,9 +90,10 @@ public static class ObjectiveEndpoints
             }
 
             var all = ToDtos(result.Objectives)!;
+            var streak = await DailyEndpoints.LoadStreakAsync(db, playerId);
             return Results.Ok(new ClaimObjectiveResponse(
                 Claimed: all.First(o => o.Id == id),
-                Player: PlayerProjection.ToMeDto(result.Player!, now),
+                Player: PlayerProjection.ToMeDto(result.Player!, now, streak),
                 LevelUp: LevelUpProjection.ToDto(result.LevelUp, content.JobCatalog),
                 Objectives: all));
         })

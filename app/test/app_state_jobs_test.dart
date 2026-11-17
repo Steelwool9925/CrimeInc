@@ -452,6 +452,8 @@ void main() {
           skillPoints: 0,
           attack: 11,
           defense: 10,
+          dailyStreakCurrent: 0,
+          dailyClaimable: false,
         ),
       );
       final state = await bootstrapped(api);

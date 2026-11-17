@@ -28,6 +28,8 @@ public class GameDbContext : DbContext
 
     public DbSet<PlayerDailyObjective> PlayerDailyObjectives => Set<PlayerDailyObjective>();
 
+    public DbSet<DailyStreak> DailyStreaks => Set<DailyStreak>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         var player = modelBuilder.Entity<Player>();
@@ -190,6 +192,34 @@ public class GameDbContext : DbContext
 
         // Deleting a player takes their progress with them. No navigation property on Player.
         daily.HasOne<Player>()
+            .WithMany()
+            .HasForeignKey(d => d.PlayerId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Per-player daily login streak — one row per player, created lazily on first claim.
+        var dailyStreak = modelBuilder.Entity<DailyStreak>();
+
+        // Single-column key, not composite: unlike objectives there is no per-day row, just one
+        // row per player that a claim updates in place.
+        dailyStreak.HasKey(d => d.PlayerId);
+
+        dailyStreak.Property(d => d.LastClaimedUtcDate).IsRequired();
+        dailyStreak.Property(d => d.CurrentStreak).IsRequired();
+        dailyStreak.Property(d => d.LongestStreak).IsRequired();
+
+        // Optimistic concurrency on the row itself, same as Player and PlayerDailyObjective — this
+        // is what makes a double-claim on an existing streak a safe, reported conflict rather than
+        // a lost update. The very first claim ever races on the INSERT itself instead; see
+        // DailyActionService's two-catch save helper for that case.
+        dailyStreak.Property<uint>("xmin")
+            .HasColumnName("xmin")
+            .HasColumnType("xid")
+            .ValueGeneratedOnAddOrUpdate()
+            .IsConcurrencyToken();
+
+        // Deleting a player takes their streak with them. No navigation property on Player, for
+        // the same reason as every other child table above.
+        dailyStreak.HasOne<Player>()
             .WithMany()
             .HasForeignKey(d => d.PlayerId)
             .OnDelete(DeleteBehavior.Cascade);

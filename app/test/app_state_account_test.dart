@@ -115,6 +115,8 @@ void main() {
         attack: 1,
         defense: 1,
         username: 'alicecarter',
+        dailyStreakCurrent: 0,
+        dailyClaimable: false,
       );
       final api = FakeApiClient(registerResult: claimed);
       final state = await bootstrapped(api);

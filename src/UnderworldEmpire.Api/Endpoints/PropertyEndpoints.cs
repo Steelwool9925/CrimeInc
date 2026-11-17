@@ -96,7 +96,8 @@ public static class PropertyEndpoints
         app.MapPost("/properties/{id}/buy", [Authorize] async (
             string id,
             HttpContext ctx,
-            PropertyActionService propertyActions) =>
+            PropertyActionService propertyActions,
+            GameDbContext db) =>
         {
             var playerId = ctx.User.GetPlayerId();
             var nowUtc = DateTimeOffset.UtcNow;
@@ -110,13 +111,14 @@ public static class PropertyEndpoints
             if (!purchase.Succeeded)
                 return Refusal(purchase.Failure);
 
+            var streak = await DailyEndpoints.LoadStreakAsync(db, playerId);
             return Results.Ok(new BuyPropertyResponse(
                 PropertyId: id,
                 CashSpent: purchase.CashSpent,
                 QuantityOwned: purchase.QuantityOwned,
                 Pending: result.Pending,
                 Cap: result.Cap,
-                Player: PlayerProjection.ToMeDto(result.Player!, nowUtc)));
+                Player: PlayerProjection.ToMeDto(result.Player!, nowUtc, streak)));
         })
         .WithName("BuyProperty")
         .WithTags("Properties");
@@ -125,7 +127,8 @@ public static class PropertyEndpoints
         app.MapPost("/properties/{id}/collect", [Authorize] async (
             string id,
             HttpContext ctx,
-            PropertyActionService propertyActions) =>
+            PropertyActionService propertyActions,
+            GameDbContext db) =>
         {
             var playerId = ctx.User.GetPlayerId();
             var nowUtc = DateTimeOffset.UtcNow;
@@ -139,12 +142,13 @@ public static class PropertyEndpoints
             if (!collection.Succeeded)
                 return Refusal(collection.Failure);
 
+            var streak = await DailyEndpoints.LoadStreakAsync(db, playerId);
             return Results.Ok(new CollectPropertyResponse(
                 PropertyId: id,
                 CashCollected: collection.CashCollected,
                 Pending: collection.PendingAfter,
                 Cap: collection.Cap,
-                Player: PlayerProjection.ToMeDto(result.Player!, nowUtc),
+                Player: PlayerProjection.ToMeDto(result.Player!, nowUtc, streak),
                 Objectives: ObjectiveEndpoints.ToDtos(result.Objectives)));
         })
         .WithName("CollectProperty")

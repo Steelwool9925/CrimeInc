@@ -25,6 +25,8 @@ public record MeterState(int Current, int Max, int RegenSecondsPerPoint, int? Se
 /// <param name="Attack">Current attack stat.</param>
 /// <param name="Defense">Current defense stat.</param>
 /// <param name="Username">The player's claimed username, or <see langword="null"/> for a guest player who hasn't claimed an account.</param>
+/// <param name="DailyStreakCurrent">The player's current daily-login streak; 0 if never claimed.</param>
+/// <param name="DailyClaimable">Whether today's daily-login reward is still waiting to be claimed.</param>
 public record MeDto(
     Guid PlayerId,
     MeterState Energy,
@@ -37,4 +39,6 @@ public record MeDto(
     int SkillPoints,
     int Attack,
     int Defense,
-    string? Username);
+    string? Username,
+    int DailyStreakCurrent,
+    bool DailyClaimable);

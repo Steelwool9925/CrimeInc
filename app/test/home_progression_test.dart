@@ -18,6 +18,8 @@ Me meWith({int level = 1, int xp = 0, int skillPoints = 0, int attack = 10, int 
       skillPoints: skillPoints,
       attack: attack,
       defense: defense,
+      dailyStreakCurrent: 0,
+      dailyClaimable: false,
     );
 
 Future<AppState> pumpHome(WidgetTester tester, FakeApiClient api) async {
