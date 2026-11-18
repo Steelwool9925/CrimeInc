@@ -1,5 +1,6 @@
 using UnderworldEmpire.Domain;
 using UnderworldEmpire.Domain.Items;
+using UnderworldEmpire.Domain.Timed;
 
 namespace UnderworldEmpire.Api.Contracts;
 
@@ -15,9 +16,30 @@ namespace UnderworldEmpire.Api.Contracts;
 /// </remarks>
 public static class PlayerProjection
 {
-    /// <summary>Projects <paramref name="player"/> as of <paramref name="nowUtc"/>.</summary>
-    public static MeDto ToMeDto(Player player, DateTimeOffset nowUtc) =>
-        new(
+    /// <summary>
+    /// Projects <paramref name="player"/> as of <paramref name="nowUtc"/>.
+    /// </summary>
+    /// <param name="timedJob">
+    ///     The player's running appointment row, or <see langword="null"/> if their slot is free.
+    /// </param>
+    /// <param name="timedJobContent">
+    ///     The content definition <paramref name="timedJob"/> refers to, needed to know its
+    ///     duration. Ignored when <paramref name="timedJob"/> is <see langword="null"/>; required
+    ///     (non-null) whenever it is not — a running row always refers to a real catalog entry.
+    /// </param>
+    public static MeDto ToMeDto(
+        Player player,
+        DateTimeOffset nowUtc,
+        PlayerTimedJob? timedJob = null,
+        TimedJob? timedJobContent = null)
+    {
+        bool running = timedJob is not null;
+        bool ready = running && timedJob!.IsReadyAt(nowUtc, TimeSpan.FromSeconds(timedJobContent!.DurationSeconds));
+        int? remainingSeconds = running
+            ? timedJob!.RemainingAt(nowUtc, TimeSpan.FromSeconds(timedJobContent!.DurationSeconds))
+            : null;
+
+        return new(
             PlayerId: player.Id,
             Energy: ToMeterState(player.Energy, nowUtc, MeterRates.Energy),
             Stamina: ToMeterState(player.Stamina, nowUtc, MeterRates.Stamina),
@@ -29,7 +51,11 @@ public static class PlayerProjection
             SkillPoints: player.SkillPoints,
             Attack: player.Attack,
             Defense: player.Defense,
-            Username: player.Username);
+            Username: player.Username,
+            TimedJobRunning: running,
+            TimedJobReady: ready,
+            TimedJobRemainingSeconds: remainingSeconds);
+    }
 
     /// <summary>Projects a computed <paramref name="loadout"/> onto the wire.</summary>
     /// <remarks>

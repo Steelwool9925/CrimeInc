@@ -620,6 +620,104 @@ final kObjectiveClaimedMe = Me(
   defense: kFakeMe.defense,
 );
 
+/// An attemptable level-1, 8-hour appointment.
+const kStartableTimedJob = TimedJob(
+  id: 'run-a-late-night-shipment',
+  name: 'Run a Late-Night Shipment',
+  description: 'Hand the truck off at the docks and let it drive itself through the night.',
+  durationSeconds: 28800,
+  energyCost: 3,
+  levelRequirement: 1,
+  cashMin: 180,
+  cashMax: 320,
+  xp: 40,
+  canStart: true,
+);
+
+/// A 24-hour appointment locked behind a level requirement — the "own gate while idle" case the
+/// ui-designer's spec never shows a fixture for.
+const kGatedTimedJob = TimedJob(
+  id: 'launder-a-nights-takings',
+  name: "Launder a Night's Takings",
+  description: 'Feed the cash through three shell businesses and collect it clean by morning.',
+  durationSeconds: 86400,
+  energyCost: 5,
+  levelRequirement: 3,
+  cashMin: 650,
+  cashMax: 1100,
+  xp: 120,
+  canStart: false,
+  unavailableReason: 'level',
+);
+
+const kTimedJobList = TimedJobList(
+  timedJobs: [kStartableTimedJob, kGatedTimedJob],
+  currentEnergy: 7,
+  level: 1,
+);
+
+/// The running row after starting [kStartableTimedJob], not yet ready.
+final kRunningTimedJob = RunningTimedJob(
+  timedJobId: 'run-a-late-night-shipment',
+  name: 'Run a Late-Night Shipment',
+  startedAtUtc: DateTime.utc(2026, 11, 17, 12, 0),
+  remainingSeconds: 28800,
+  ready: false,
+);
+
+/// The player after starting [kStartableTimedJob]: energy down by its cost, the slot occupied.
+final kTimedJobStartedMe = Me(
+  playerId: kFakeMe.playerId,
+  energy: MeterState(
+    current: kFakeMe.energy.current - kStartableTimedJob.energyCost,
+    max: kFakeMe.energy.max,
+    regenSecondsPerPoint: kFakeMe.energy.regenSecondsPerPoint,
+    secondsUntilNextPoint: kFakeMe.energy.secondsUntilNextPoint,
+  ),
+  stamina: kFakeMe.stamina,
+  health: kFakeMe.health,
+  cash: kFakeMe.cash,
+  premiumCurrency: kFakeMe.premiumCurrency,
+  level: kFakeMe.level,
+  xp: kFakeMe.xp,
+  skillPoints: kFakeMe.skillPoints,
+  attack: kFakeMe.attack,
+  defense: kFakeMe.defense,
+  timedJobRunning: true,
+  timedJobReady: false,
+  timedJobRemainingSeconds: kStartableTimedJob.durationSeconds,
+);
+
+final kStartTimedJobResult = StartTimedJobResult(
+  running: kRunningTimedJob,
+  player: kTimedJobStartedMe,
+);
+
+/// The player after collecting: cash and XP up by the appointment's payout, the slot free again.
+final kTimedJobCollectedMe = Me(
+  playerId: kFakeMe.playerId,
+  energy: kFakeMe.energy,
+  stamina: kFakeMe.stamina,
+  health: kFakeMe.health,
+  cash: kFakeMe.cash + kStartableTimedJob.cashMin,
+  premiumCurrency: kFakeMe.premiumCurrency,
+  level: kFakeMe.level,
+  xp: kFakeMe.xp + kStartableTimedJob.xp,
+  skillPoints: kFakeMe.skillPoints,
+  attack: kFakeMe.attack,
+  defense: kFakeMe.defense,
+  timedJobRunning: false,
+);
+
+final kCollectTimedJobResult = CollectTimedJobResult(
+  result: TimedJobCollectOutcome(
+    timedJobId: kStartableTimedJob.id,
+    cashEarned: kStartableTimedJob.cashMin,
+    xpEarned: kStartableTimedJob.xp,
+  ),
+  player: kTimedJobCollectedMe,
+);
+
 class FakeApiClient implements ApiClient {
   FakeApiClient({
     SessionResult? sessionResult,
@@ -653,9 +751,19 @@ class FakeApiClient implements ApiClient {
     ClaimObjectiveResult? claimObjectiveResult,
     bool throwOnObjectives = false,
     this.refuseClaimWith,
+    TimedJobList? timedJobsResult,
+    StartTimedJobResult? startTimedJobResult,
+    CollectTimedJobResult? collectTimedJobResult,
+    bool throwOnTimedJobs = false,
+    this.refuseStartTimedJobWith,
+    this.refuseCollectTimedJobWith,
   })  : objectivesResult = objectivesResult ?? kObjectiveList,
         _claimObjectiveResult = claimObjectiveResult,
         _throwOnObjectives = throwOnObjectives,
+        timedJobsResult = timedJobsResult ?? kTimedJobList,
+        _startTimedJobResult = startTimedJobResult ?? kStartTimedJobResult,
+        _collectTimedJobResult = collectTimedJobResult ?? kCollectTimedJobResult,
+        _throwOnTimedJobs = throwOnTimedJobs,
         _loginResult = loginResult ??
             const SessionResult(
               deviceToken: 'fake-token-abc',
@@ -1032,6 +1140,27 @@ class FakeApiClient implements ApiClient {
   /// When set, every GET /objectives waits on this before returning.
   Completer<void>? objectivesGate;
 
+  /// What GET /timed-jobs returns. Public and mutable: a test changes it to simulate the server's
+  /// state moving between polls. Advanced by [startTimedJob]/[collectTimedJob] below the same way
+  /// [objectivesResult] is advanced by [claimObjective].
+  TimedJobList timedJobsResult;
+  final StartTimedJobResult _startTimedJobResult;
+  final CollectTimedJobResult _collectTimedJobResult;
+  final bool _throwOnTimedJobs;
+
+  /// When set, startTimedJob throws a [JobRefusedException] with this reason.
+  final String? refuseStartTimedJobWith;
+
+  /// When set, collectTimedJob throws a [JobRefusedException] with this reason.
+  final String? refuseCollectTimedJobWith;
+
+  int timedJobsCalls = 0;
+  final List<String> startTimedJobCalls = [];
+  int collectTimedJobCalls = 0;
+
+  /// When set, every GET /timed-jobs waits on this before returning.
+  Completer<void>? timedJobsGate;
+
   /// When set, claiming waits on this before returning, holding the claim in flight.
   Completer<void>? claimGate;
 
@@ -1077,6 +1206,54 @@ class FakeApiClient implements ApiClient {
 
     return _claimObjectiveResult ??
         ClaimObjectiveResult(claimed: paid, player: kObjectiveClaimedMe, objectives: after);
+  }
+
+  @override
+  Future<TimedJobList> timedJobs(String deviceToken) async {
+    timedJobsCalls++;
+    if (_throwOnTimedJobs) throw const ApiException(500, 'timed jobs error');
+    if (timedJobsGate != null) await timedJobsGate!.future;
+    return timedJobsResult;
+  }
+
+  @override
+  Future<StartTimedJobResult> startTimedJob(String deviceToken, String timedJobId) async {
+    startTimedJobCalls.add(timedJobId);
+    if (refuseStartTimedJobWith != null) {
+      throw JobRefusedException(refuseStartTimedJobWith!, 'refused: $refuseStartTimedJobWith');
+    }
+
+    // Every other row flips to 'alreadyRunning' once one is running, same as the real server.
+    timedJobsResult = TimedJobList(
+      timedJobs: [
+        for (final j in timedJobsResult.timedJobs)
+          j.id == timedJobId
+              ? j
+              : j.copyWith(canStart: false, unavailableReason: 'alreadyRunning'),
+      ],
+      running: _startTimedJobResult.running,
+      currentEnergy: timedJobsResult.currentEnergy,
+      level: timedJobsResult.level,
+    );
+
+    return _startTimedJobResult;
+  }
+
+  @override
+  Future<CollectTimedJobResult> collectTimedJob(String deviceToken) async {
+    collectTimedJobCalls++;
+    if (refuseCollectTimedJobWith != null) {
+      throw JobRefusedException(refuseCollectTimedJobWith!, 'refused: $refuseCollectTimedJobWith');
+    }
+
+    timedJobsResult = TimedJobList(
+      timedJobs: kTimedJobList.timedJobs,
+      running: null,
+      currentEnergy: timedJobsResult.currentEnergy,
+      level: timedJobsResult.level,
+    );
+
+    return _collectTimedJobResult;
   }
 
   @override

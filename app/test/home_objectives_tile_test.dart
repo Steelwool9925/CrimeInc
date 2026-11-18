@@ -107,7 +107,7 @@ void main() {
       addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
     });
 
-    testWidgets('sits on the first screen of a phone, beside Inventory', (tester) async {
+    testWidgets('sits on the first screen of a phone, beside Overnight Jobs', (tester) async {
       tester.view.physicalSize = const Size(375, 667);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -120,12 +120,12 @@ void main() {
       );
 
       final objectives = tester.getRect(find.byKey(const Key('go-to-objectives')));
-      final inventory = tester.getRect(find.byKey(const Key('go-to-inventory')));
+      final timedJobs = tester.getRect(find.byKey(const Key('go-to-timed-jobs')));
 
-      expect(objectives.top, inventory.top, reason: 'second row, next to Inventory');
-      expect(objectives.left, lessThan(inventory.left));
-      // The bottom nav takes 56px of the 667. Like Inventory beside it, the tile must at least begin
-      // on the first screen: the dot sits in its top corner.
+      expect(objectives.top, timedJobs.top, reason: 'second row, next to Overnight Jobs');
+      expect(objectives.left, lessThan(timedJobs.left));
+      // The bottom nav takes 56px of the 667. Like Overnight Jobs beside it, the tile must at least
+      // begin on the first screen: the dot sits in its top corner.
       expect(objectives.top, lessThan(667.0 - 56.0),
           reason: 'the daily hook must not be hidden under the fold');
     });

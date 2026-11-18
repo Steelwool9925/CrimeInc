@@ -7,6 +7,7 @@ using UnderworldEmpire.Domain.Items;
 using UnderworldEmpire.Domain.Jobs;
 using UnderworldEmpire.Domain.Properties;
 using UnderworldEmpire.Domain.Randomness;
+using UnderworldEmpire.Domain.Timed;
 using UnderworldEmpire.Infrastructure.Content;
 using UnderworldEmpire.Infrastructure.Randomness;
 
@@ -38,6 +39,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ProgressionService>();
         services.AddScoped<DailyObjectiveService>();
         services.AddScoped<DailyObjectiveActionService>();
+        services.AddScoped<TimedJobService>();
+        services.AddScoped<TimedJobActionService>();
 
         // Stateless, but registered scoped alongside the other rule services for lifetime uniformity.
         services.AddScoped<InventoryService>();
@@ -63,6 +66,7 @@ public static class InfrastructureServiceCollectionExtensions
         var jobCatalog = loader.LoadJobs(BuildInfo.DefaultContentPack, itemCatalog);
         var propertyCatalog = loader.LoadProperties(BuildInfo.DefaultContentPack);
         var objectiveCatalog = loader.LoadObjectives(BuildInfo.DefaultContentPack, jobCatalog);
+        var timedJobCatalog = loader.LoadTimedJobs(BuildInfo.DefaultContentPack);
         services.AddSingleton<IContentPackProvider>(
             new ContentPackProvider(
                 pack,
@@ -70,7 +74,8 @@ public static class InfrastructureServiceCollectionExtensions
                 jobCatalog,
                 itemCatalog,
                 propertyCatalog,
-                objectiveCatalog));
+                objectiveCatalog,
+                timedJobCatalog));
 
         return services;
     }

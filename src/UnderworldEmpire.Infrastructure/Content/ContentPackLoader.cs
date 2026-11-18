@@ -4,6 +4,7 @@ using UnderworldEmpire.Domain.Daily;
 using UnderworldEmpire.Domain.Items;
 using UnderworldEmpire.Domain.Jobs;
 using UnderworldEmpire.Domain.Properties;
+using UnderworldEmpire.Domain.Timed;
 
 namespace UnderworldEmpire.Infrastructure.Content;
 
@@ -337,6 +338,65 @@ public sealed class ContentPackLoader
         }
 
         return new ObjectiveCatalog(objectives);
+    }
+
+    /// <summary>
+    /// Loads and validates the timed-job ("appointment") catalog for <paramref name="packId"/>
+    /// from <c>&lt;contentRoot&gt;/&lt;packId&gt;/timed-jobs.json</c>.
+    /// </summary>
+    /// <remarks>
+    /// Same contract as <see cref="LoadObjectives"/>: validation runs to completion and reports
+    /// every problem at once, and domain objects are constructed only after it passes. No
+    /// cross-catalog check is needed — a timed job references nothing else.
+    /// </remarks>
+    /// <exception cref="ContentPackException">
+    ///     Thrown when the file is missing, cannot be parsed, or fails validation.
+    /// </exception>
+    public TimedJobCatalog LoadTimedJobs(string packId)
+    {
+        var timedJobsFile = Path.Combine(_contentRoot, packId, "timed-jobs.json");
+
+        if (!File.Exists(timedJobsFile))
+            throw new ContentPackException(
+                $"Timed job catalog for pack '{packId}' not found at '{timedJobsFile}'.");
+
+        TimedJobCatalogFile file;
+        try
+        {
+            var json = File.ReadAllText(timedJobsFile, Encoding.UTF8);
+            file = JsonSerializer.Deserialize<TimedJobCatalogFile>(json, JsonOptions)
+                   ?? throw new ContentPackException(
+                       $"timed-jobs.json for '{packId}' deserialised to null.");
+        }
+        catch (JsonException ex)
+        {
+            throw new ContentPackException(
+                $"timed-jobs.json for '{packId}' is not valid JSON: {ex.Message}", ex);
+        }
+
+        ValidateTimedJobs(file, packId);
+
+        var timedJobs = new List<TimedJob>(file.TimedJobs.Count);
+        foreach (var entry in file.TimedJobs)
+        {
+            var timedJob = new TimedJob
+            {
+                Id = entry.Id,
+                Name = entry.Name,
+                Description = entry.Description,
+                DurationSeconds = entry.DurationSeconds,
+                EnergyCost = entry.EnergyCost,
+                LevelRequirement = entry.LevelRequirement,
+                // ValidateTimedJobs has already proved the block is present.
+                CashMin = entry.Payout!.CashMin,
+                CashMax = entry.Payout.CashMax,
+                Xp = entry.Payout.Xp
+            };
+            timedJob.EnsureValid();
+            timedJobs.Add(timedJob);
+        }
+
+        return new TimedJobCatalog(timedJobs);
     }
 
     private static ObjectiveType? ParseObjectiveType(string? name) =>
@@ -823,5 +883,68 @@ public sealed class ContentPackLoader
         if (errors.Count > 0)
             throw new ContentPackException(
                 $"Objective catalog for pack '{expectedPackId}' failed validation: {string.Join("; ", errors)}.");
+    }
+
+    private static void ValidateTimedJobs(TimedJobCatalogFile file, string expectedPackId)
+    {
+        var errors = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(file.PackId))
+            errors.Add("'packId' is missing or empty");
+        else if (!string.Equals(file.PackId, expectedPackId, StringComparison.Ordinal))
+            errors.Add($"'packId' mismatch: expected '{expectedPackId}', found '{file.PackId}'");
+
+        if (file.TimedJobs.Count == 0)
+            errors.Add("'timedJobs' is missing or empty - a pack must define at least one timed job");
+
+        var seenIds = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < file.TimedJobs.Count; i++)
+        {
+            var timedJob = file.TimedJobs[i];
+            var where = string.IsNullOrWhiteSpace(timedJob.Id)
+                ? $"timedJobs[{i}]"
+                : $"timedJobs[{i}] ('{timedJob.Id}')";
+
+            if (string.IsNullOrWhiteSpace(timedJob.Id))
+                errors.Add($"{where}: 'id' is missing or empty");
+            else
+            {
+                if (!seenIds.Add(timedJob.Id))
+                    errors.Add($"{where}: duplicate 'id'");
+
+                if (timedJob.Id.Length > ContentIdMaxLength)
+                    errors.Add(
+                        $"{where}: 'id' is {timedJob.Id.Length} characters, above the {ContentIdMaxLength}-character limit");
+            }
+
+            if (string.IsNullOrWhiteSpace(timedJob.Name))
+                errors.Add($"{where}: 'name' is missing or empty");
+
+            if (timedJob.DurationSeconds < 1)
+                errors.Add($"{where}: 'durationSeconds' must be >= 1, found {timedJob.DurationSeconds}");
+
+            if (timedJob.EnergyCost < 1)
+                errors.Add($"{where}: 'energyCost' must be >= 1, found {timedJob.EnergyCost}");
+
+            if (timedJob.LevelRequirement < 1)
+                errors.Add($"{where}: 'levelRequirement' must be >= 1, found {timedJob.LevelRequirement}");
+
+            if (timedJob.Payout is null)
+                errors.Add($"{where}: 'payout' block is missing");
+            else
+            {
+                if (timedJob.Payout.CashMin < 0)
+                    errors.Add($"{where}: 'payout.cashMin' must be >= 0, found {timedJob.Payout.CashMin}");
+                if (timedJob.Payout.CashMax < timedJob.Payout.CashMin)
+                    errors.Add(
+                        $"{where}: 'payout.cashMax' ({timedJob.Payout.CashMax}) is below 'payout.cashMin' ({timedJob.Payout.CashMin})");
+                if (timedJob.Payout.Xp < 0)
+                    errors.Add($"{where}: 'payout.xp' must be >= 0, found {timedJob.Payout.Xp}");
+            }
+        }
+
+        if (errors.Count > 0)
+            throw new ContentPackException(
+                $"Timed job catalog for pack '{expectedPackId}' failed validation: {string.Join("; ", errors)}.");
     }
 }

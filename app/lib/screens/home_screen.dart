@@ -16,6 +16,7 @@ import 'profile_screen.dart';
 import 'properties_screen.dart';
 import 'skills_screen.dart';
 import 'store_screen.dart';
+import 'timed_jobs_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key, required this.appState, required this.onChangeServer});
@@ -217,6 +218,17 @@ class _DashboardGrid extends StatelessWidget {
           ),
         ),
         _DashboardTile(
+          tileKey: const Key('go-to-timed-jobs'),
+          icon: Icons.hourglass_bottom,
+          title: 'Overnight Jobs',
+          subtitle: _timedJobSubtitle(appState),
+          badge: appState.timedJobReady,
+          badgeKey: const Key('go-to-timed-jobs-badge'),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => TimedJobsScreen(appState: appState)),
+          ),
+        ),
+        _DashboardTile(
           tileKey: const Key('go-to-inventory'),
           icon: Icons.backpack_outlined,
           title: 'Inventory',
@@ -285,6 +297,17 @@ String? _objectivesSubtitle(AppState state) {
   if (ready > 0) return '$ready ready to claim';
   final left = state.objectivesOutstanding;
   return left > 0 ? '$left left today' : 'All done today';
+}
+
+/// What the Overnight Jobs tile says, or null when nothing is running — same "say nothing" rule
+/// the Objectives tile follows. Reads the latest server-sent figure rather than ticking its own
+/// timer: a tile a few seconds stale between polls is fine, a full screen the player is staring
+/// at is where the live tick earns its keep.
+String? _timedJobSubtitle(AppState state) {
+  if (state.timedJobReady) return 'Ready to collect';
+  final remaining = state.timedJobRemainingSeconds;
+  if (remaining != null) return '${formatCountdown(remaining)} left';
+  return null;
 }
 
 class _DashboardTile extends StatelessWidget {

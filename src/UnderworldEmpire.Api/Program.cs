@@ -128,6 +128,7 @@ app.MapSkillEndpoints();
 app.MapItemEndpoints();
 app.MapPropertyEndpoints();
 app.MapObjectiveEndpoints();
+app.MapTimedJobEndpoints();
 
 app.Run();
 

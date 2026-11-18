@@ -4,6 +4,7 @@ using UnderworldEmpire.Domain.Daily;
 using UnderworldEmpire.Domain.Items;
 using UnderworldEmpire.Domain.Jobs;
 using UnderworldEmpire.Domain.Properties;
+using UnderworldEmpire.Domain.Timed;
 
 namespace UnderworldEmpire.Infrastructure;
 
@@ -27,6 +28,8 @@ public class GameDbContext : DbContext
     public DbSet<PlayerProperty> PlayerProperties => Set<PlayerProperty>();
 
     public DbSet<PlayerDailyObjective> PlayerDailyObjectives => Set<PlayerDailyObjective>();
+
+    public DbSet<PlayerTimedJob> PlayerTimedJobs => Set<PlayerTimedJob>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -192,6 +195,30 @@ public class GameDbContext : DbContext
         daily.HasOne<Player>()
             .WithMany()
             .HasForeignKey(d => d.PlayerId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // The player's single running appointment, if any.
+        var timedJob = modelBuilder.Entity<PlayerTimedJob>();
+
+        // Simple key on PlayerId alone — at most one slot per player at Tier 1, unlike the
+        // per-job composite key on PlayerJobMastery.
+        timedJob.HasKey(t => t.PlayerId);
+
+        // TimedJobId is a content id, not a foreign key — the catalog lives in timed-jobs.json,
+        // not the database.
+        timedJob.Property(t => t.TimedJobId).IsRequired().HasMaxLength(64);
+        timedJob.Property(t => t.StartedAtUtc).IsRequired();
+
+        // No dedicated xmin, unlike PlayerDailyObjective: start and collect both always write
+        // Players (energy or cash/XP) in the same SaveChangesAsync, so that row's own xmin
+        // already serializes two concurrent requests by the same player — the same reasoning
+        // that keeps PlayerItem and PlayerProperty without one of their own.
+
+        // Deleting a player takes their running appointment with them. No navigation property on
+        // Player, same reasoning as every other child entity above.
+        timedJob.HasOne<Player>()
+            .WithMany()
+            .HasForeignKey(t => t.PlayerId)
             .OnDelete(DeleteBehavior.Cascade);
     }
 }

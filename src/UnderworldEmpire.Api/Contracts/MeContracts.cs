@@ -25,6 +25,13 @@ public record MeterState(int Current, int Max, int RegenSecondsPerPoint, int? Se
 /// <param name="Attack">Current attack stat.</param>
 /// <param name="Defense">Current defense stat.</param>
 /// <param name="Username">The player's claimed username, or <see langword="null"/> for a guest player who hasn't claimed an account.</param>
+/// <param name="TimedJobRunning">Whether the player has an appointment running right now.</param>
+/// <param name="TimedJobReady">Whether the running appointment has finished and can be collected. Always false when nothing is running.</param>
+/// <param name="TimedJobRemainingSeconds">
+///     Seconds until the running appointment is ready, or <see langword="null"/> when nothing is
+///     running. Zero once it is ready. A client runs a local countdown from this rather than
+///     polling, the same approach <c>meter_card.dart</c> uses for meter regen.
+/// </param>
 public record MeDto(
     Guid PlayerId,
     MeterState Energy,
@@ -37,4 +44,7 @@ public record MeDto(
     int SkillPoints,
     int Attack,
     int Defense,
-    string? Username);
+    string? Username,
+    bool TimedJobRunning,
+    bool TimedJobReady,
+    int? TimedJobRemainingSeconds);
