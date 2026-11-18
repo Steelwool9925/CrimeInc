@@ -20,7 +20,7 @@ enum LoadStatus { loading, ready, error }
 /// The part of the game an [AppState.actionMessage] came from. A refusal is about one thing the
 /// player just did, so only the screens for that thing show it: an error from spending a skill point
 /// has no business on the Market.
-enum ActionScope { jobs, items, properties, skills, objectives }
+enum ActionScope { jobs, items, properties, skills, objectives, timedJobs }
 
 class AppState extends ChangeNotifier {
   AppState({
@@ -170,6 +170,22 @@ class AppState extends ChangeNotifier {
   /// The id of the objective currently being claimed, so the UI can disable just that row.
   String? _objectiveInFlight;
 
+  // ---- Overnight timed jobs ----
+  List<TimedJob> _timedJobs = const [];
+  RunningTimedJob? _runningTimedJob;
+  bool _timedJobsLoaded = false;
+  bool _timedJobsLoading = false;
+  int _timedJobsRequest = 0;
+  String? _timedJobsError;
+
+  /// Set while a start or the collect is in flight — only one slot exists, so one flag covers
+  /// both actions. The id of the one being started, or the sentinel below for a collect.
+  String? _timedJobActionInFlight;
+
+  /// Sentinel for [_timedJobActionInFlight] meaning the running appointment is being collected,
+  /// not any catalog id — collect has no id of its own on the wire.
+  static const String _collectingSentinel = '_collect';
+
   LoadStatus get status => _status;
   Me? get me => _me;
   ContentPack? get contentPack => _contentPack;
@@ -296,6 +312,38 @@ class AppState extends ChangeNotifier {
   /// Objectives whose reward has not been taken, finished or not.
   int get objectivesOutstanding => _objectives.where((o) => !o.claimed).length;
 
+  /// The overnight-timed-job catalog as last read. Empty until [timedJobsLoaded].
+  List<TimedJob> get timedJobs => _timedJobs;
+
+  /// The full running-appointment row — name, start time, live countdown fields — as last read
+  /// from GET /timed-jobs or folded from a start/collect response. Null when the slot is free.
+  /// [timedJobRunning] below is the cheaper `/me`-sourced bool for a presence check; this is the
+  /// richer object the full screen's countdown card needs.
+  RunningTimedJob? get runningTimedJob => _runningTimedJob;
+  bool get timedJobsLoaded => _timedJobsLoaded;
+  bool get timedJobsLoading => _timedJobsLoading;
+  String? get timedJobsError => _timedJobsError;
+
+  /// The id of the appointment being started, or null when no start is in flight.
+  String? get timedJobStartInFlight =>
+      _timedJobActionInFlight == _collectingSentinel ? null : _timedJobActionInFlight;
+
+  /// Whether the running appointment is currently being collected.
+  bool get timedJobCollectInFlight => _timedJobActionInFlight == _collectingSentinel;
+
+  /// Whether any timed-job action (a start or the collect) is in flight — busy-disables every
+  /// Start button so a slow network cannot double-spend energy across two catalog entries.
+  bool get timedJobActionInFlight => _timedJobActionInFlight != null;
+
+  /// Whether an appointment is running right now, per the last-read player projection.
+  bool get timedJobRunning => _me?.timedJobRunning ?? false;
+
+  /// Whether the running appointment has finished and can be collected.
+  bool get timedJobReady => _me?.timedJobReady ?? false;
+
+  /// Seconds until the running appointment is ready, or null when nothing is running.
+  int? get timedJobRemainingSeconds => _me?.timedJobRemainingSeconds;
+
   List<Property> get properties => _properties;
   bool get propertiesLoading => _propertiesLoading;
   String? get propertiesError => _propertiesError;
@@ -360,6 +408,9 @@ class AppState extends ChangeNotifier {
     // Same reasoning: the Home tile says how many objectives are outstanding, and a failure here
     // costs only that line.
     unawaited(loadObjectives());
+    // Same reasoning again: the Home tile's running-appointment subtitle otherwise has nothing to
+    // show until the Timed Jobs screen is opened once.
+    unawaited(loadTimedJobs());
   }
 
   /// Reads which advised upgrade this player has already been shown. Off the path to Home like the
@@ -1064,6 +1115,119 @@ class AppState extends ChangeNotifier {
 
     // A refusal means the screen was showing something the server disagrees with. Re-read it.
     if (refused) unawaited(loadObjectives());
+  }
+
+  // -------------------------------------------------------------------------
+  // Overnight timed jobs
+  // -------------------------------------------------------------------------
+
+  /// Reads the timed-job catalog and the player's running appointment, if any. Safe to call
+  /// repeatedly; concurrent calls are collapsed. The read writes nothing server-side, so the
+  /// screen can poll it.
+  Future<void> loadTimedJobs() async {
+    final token = _deviceToken;
+    if (token == null || _timedJobsLoading) return;
+
+    final request = ++_timedJobsRequest;
+    _timedJobsLoading = true;
+    _timedJobsError = null;
+    notifyListeners();
+
+    try {
+      final list = await _apiClient.timedJobs(token);
+      if (request != _timedJobsRequest || _deviceToken != token) return;
+      _timedJobs = list.timedJobs;
+      _runningTimedJob = list.running;
+      _timedJobsLoaded = true;
+    } catch (e) {
+      if (request == _timedJobsRequest) _timedJobsError = e.toString();
+    } finally {
+      if (request == _timedJobsRequest) {
+        _timedJobsLoading = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  /// Starts [timedJobId]. One action at a time across both start and collect — only one slot
+  /// exists, so a second tap while either is in flight would reach the server as a race it
+  /// already resolves safely, but the player would see a confusing conflict for a thing that
+  /// either already worked or was never going to.
+  Future<void> startTimedJob(String timedJobId) async {
+    final token = _deviceToken;
+    if (token == null || _timedJobActionInFlight != null) return;
+
+    _timedJobActionInFlight = timedJobId;
+    _actionMessage = null;
+    notifyListeners();
+
+    try {
+      final result = await _apiClient.startTimedJob(token, timedJobId);
+      if (_disposed || _deviceToken != token) return;
+
+      _me = result.player;
+      _runningTimedJob = result.running;
+      _haptic(HapticFeedback.mediumImpact);
+      // Every other row's canStart just flipped to 'alreadyRunning' server-side; a full reload is
+      // simplest and correct for a catalog this small, rather than hand-patching every row.
+      unawaited(loadTimedJobs());
+    } on JobRefusedException catch (e) {
+      _setActionMessage(
+        ActionScope.timedJobs,
+        switch (e.reason) {
+          'alreadyRunning' => 'You already have an appointment running.',
+          'level' => 'Your level is too low for that appointment.',
+          'energy' => 'Not enough energy.',
+          _ => e.detail,
+        },
+      );
+      // The slot/gating picture this screen was showing disagreed with the server; re-read it.
+      unawaited(loadTimedJobs());
+    } catch (e) {
+      _setActionMessage(ActionScope.timedJobs, 'Could not start that appointment. $e');
+    } finally {
+      _timedJobActionInFlight = null;
+      notifyListeners();
+    }
+  }
+
+  /// Collects the running appointment.
+  Future<void> collectTimedJob() async {
+    final token = _deviceToken;
+    if (token == null || _timedJobActionInFlight != null) return;
+
+    _timedJobActionInFlight = _collectingSentinel;
+    _actionMessage = null;
+    notifyListeners();
+
+    try {
+      final result = await _apiClient.collectTimedJob(token);
+      if (_disposed || _deviceToken != token) return;
+
+      _me = result.player;
+      _runningTimedJob = null;
+      _haptic(HapticFeedback.mediumImpact);
+      if (result.levelUp != null) {
+        _pendingLevelUp = result.levelUp;
+        _reloadInventoryIfLevelChanged();
+      }
+      // The slot just freed; every row's canStart flips back. Same reasoning as startTimedJob.
+      unawaited(loadTimedJobs());
+    } on JobRefusedException catch (e) {
+      _setActionMessage(
+        ActionScope.timedJobs,
+        switch (e.reason) {
+          'notReady' => 'Nothing is ready to collect.',
+          _ => e.detail,
+        },
+      );
+      unawaited(loadTimedJobs());
+    } catch (e) {
+      _setActionMessage(ActionScope.timedJobs, 'Could not collect that. $e');
+    } finally {
+      _timedJobActionInFlight = null;
+      notifyListeners();
+    }
   }
 
   // -------------------------------------------------------------------------

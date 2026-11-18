@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using UnderworldEmpire.Api.Auth;
 using UnderworldEmpire.Api.Contracts;
 using UnderworldEmpire.Infrastructure;
+using UnderworldEmpire.Infrastructure.Content;
 
 namespace UnderworldEmpire.Api.Endpoints;
 
@@ -16,7 +17,8 @@ public static class MeEndpoints
         // Meters are lazy-regenned at request time; nothing is persisted.
         app.MapGet("/me", [Authorize] async (
             HttpContext ctx,
-            GameDbContext db) =>
+            GameDbContext db,
+            IContentPackProvider content) =>
         {
             var playerId = ctx.User.GetPlayerId();
 
@@ -28,7 +30,16 @@ public static class MeEndpoints
             if (player is null)
                 return Results.NotFound();
 
-            return Results.Ok(PlayerProjection.ToMeDto(player, DateTimeOffset.UtcNow));
+            // A second read, only for the one field group that needs it: whether an appointment
+            // is running. Null for the common case of nothing running.
+            var timedJob = await db.PlayerTimedJobs
+                .AsNoTracking()
+                .FirstOrDefaultAsync(t => t.PlayerId == playerId);
+            var timedJobContent = timedJob is not null
+                ? content.TimedJobCatalog.Find(timedJob.TimedJobId)
+                : null;
+
+            return Results.Ok(PlayerProjection.ToMeDto(player, DateTimeOffset.UtcNow, timedJob, timedJobContent));
         })
         .WithName("GetMe")
         .WithTags("Player");

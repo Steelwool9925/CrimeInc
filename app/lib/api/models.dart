@@ -46,6 +46,9 @@ class Me {
     required this.attack,
     required this.defense,
     this.username,
+    this.timedJobRunning = false,
+    this.timedJobReady = false,
+    this.timedJobRemainingSeconds,
   });
 
   final String playerId;
@@ -63,6 +66,18 @@ class Me {
   /// The account username, or null for a guest player who hasn't claimed one.
   final String? username;
 
+  /// Whether an overnight-timed-job appointment is running right now.
+  final bool timedJobRunning;
+
+  /// Whether the running appointment has finished and can be collected. Always false when
+  /// nothing is running.
+  final bool timedJobReady;
+
+  /// Seconds until the running appointment is ready, or null when nothing is running. Zero once
+  /// ready. A client runs a local countdown from this rather than polling, the same approach
+  /// [MeterState.secondsUntilNextPoint] uses for meter regen.
+  final int? timedJobRemainingSeconds;
+
   factory Me.fromJson(Map<String, dynamic> json) => Me(
         playerId: json['playerId'] as String,
         energy: MeterState.fromJson(json['energy'] as Map<String, dynamic>),
@@ -76,6 +91,9 @@ class Me {
         attack: json['attack'] as int,
         defense: json['defense'] as int,
         username: json['username'] as String?,
+        timedJobRunning: json['timedJobRunning'] as bool? ?? false,
+        timedJobReady: json['timedJobReady'] as bool? ?? false,
+        timedJobRemainingSeconds: (json['timedJobRemainingSeconds'] as num?)?.toInt(),
       );
 }
 
@@ -1060,5 +1078,188 @@ class ClaimObjectiveResult {
             ? null
             : LevelUp.fromJson(json['levelUp'] as Map<String, dynamic>),
         objectives: DailyObjective.listFromJson(json['objectives'])!,
+      );
+}
+
+/// One overnight-timed-job appointment as offered to the calling player, as returned by
+/// GET /timed-jobs.
+@immutable
+class TimedJob {
+  const TimedJob({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.durationSeconds,
+    required this.energyCost,
+    required this.levelRequirement,
+    required this.cashMin,
+    required this.cashMax,
+    required this.xp,
+    required this.canStart,
+    this.unavailableReason,
+  });
+
+  final String id;
+  final String name;
+  final String description;
+  final int durationSeconds;
+  final int energyCost;
+  final int levelRequirement;
+  final int cashMin;
+  final int cashMax;
+  final int xp;
+
+  /// Whether the player may start it right now. Computed server-side.
+  final bool canStart;
+
+  /// Why [canStart] is false — `alreadyRunning`, `level` or `energy` — or null when it is true.
+  final String? unavailableReason;
+
+  /// A copy with [canStart]/[unavailableReason] overridden, every other field unchanged — for a
+  /// fake API client flipping one row's availability without restating the rest of the catalog
+  /// entry by hand.
+  TimedJob copyWith({bool? canStart, String? unavailableReason}) => TimedJob(
+        id: id,
+        name: name,
+        description: description,
+        durationSeconds: durationSeconds,
+        energyCost: energyCost,
+        levelRequirement: levelRequirement,
+        cashMin: cashMin,
+        cashMax: cashMax,
+        xp: xp,
+        canStart: canStart ?? this.canStart,
+        unavailableReason: unavailableReason ?? this.unavailableReason,
+      );
+
+  factory TimedJob.fromJson(Map<String, dynamic> json) => TimedJob(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        description: json['description'] as String? ?? '',
+        durationSeconds: (json['durationSeconds'] as num).toInt(),
+        energyCost: (json['energyCost'] as num).toInt(),
+        levelRequirement: (json['levelRequirement'] as num).toInt(),
+        cashMin: (json['cashMin'] as num).toInt(),
+        cashMax: (json['cashMax'] as num).toInt(),
+        xp: (json['xp'] as num).toInt(),
+        canStart: json['canStart'] as bool,
+        unavailableReason: json['unavailableReason'] as String?,
+      );
+
+  static List<TimedJob> listFromJson(Object? json) => json == null
+      ? const []
+      : (json as List<dynamic>)
+          .map((j) => TimedJob.fromJson(j as Map<String, dynamic>))
+          .toList(growable: false);
+}
+
+/// The calling player's one running appointment, if any — there is at most one at Tier 1.
+@immutable
+class RunningTimedJob {
+  const RunningTimedJob({
+    required this.timedJobId,
+    required this.name,
+    required this.startedAtUtc,
+    required this.remainingSeconds,
+    required this.ready,
+  });
+
+  final String timedJobId;
+  final String name;
+  final DateTime startedAtUtc;
+
+  /// Seconds until ready, floored at zero.
+  final int remainingSeconds;
+  final bool ready;
+
+  factory RunningTimedJob.fromJson(Map<String, dynamic> json) => RunningTimedJob(
+        timedJobId: json['timedJobId'] as String,
+        name: json['name'] as String,
+        startedAtUtc: DateTime.parse(json['startedAtUtc'] as String).toUtc(),
+        remainingSeconds: (json['remainingSeconds'] as num).toInt(),
+        ready: json['ready'] as bool,
+      );
+}
+
+/// Response to GET /timed-jobs.
+@immutable
+class TimedJobList {
+  const TimedJobList({
+    required this.timedJobs,
+    this.running,
+    required this.currentEnergy,
+    required this.level,
+  });
+
+  final List<TimedJob> timedJobs;
+  final RunningTimedJob? running;
+  final int currentEnergy;
+  final int level;
+
+  factory TimedJobList.fromJson(Map<String, dynamic> json) => TimedJobList(
+        timedJobs: TimedJob.listFromJson(json['timedJobs']),
+        running: json['running'] == null
+            ? null
+            : RunningTimedJob.fromJson(json['running'] as Map<String, dynamic>),
+        currentEnergy: (json['currentEnergy'] as num).toInt(),
+        level: (json['level'] as num).toInt(),
+      );
+}
+
+/// Response to POST /timed-jobs/{id}/start.
+@immutable
+class StartTimedJobResult {
+  const StartTimedJobResult({required this.running, required this.player});
+
+  final RunningTimedJob running;
+  final Me player;
+
+  factory StartTimedJobResult.fromJson(Map<String, dynamic> json) => StartTimedJobResult(
+        running: RunningTimedJob.fromJson(json['running'] as Map<String, dynamic>),
+        player: Me.fromJson(json['player'] as Map<String, dynamic>),
+      );
+}
+
+/// What one collected appointment paid out, as returned by POST /timed-jobs/collect.
+@immutable
+class TimedJobCollectOutcome {
+  const TimedJobCollectOutcome({
+    required this.timedJobId,
+    required this.cashEarned,
+    required this.xpEarned,
+  });
+
+  final String timedJobId;
+  final int cashEarned;
+  final int xpEarned;
+
+  factory TimedJobCollectOutcome.fromJson(Map<String, dynamic> json) => TimedJobCollectOutcome(
+        timedJobId: json['timedJobId'] as String,
+        cashEarned: (json['cashEarned'] as num).toInt(),
+        xpEarned: (json['xpEarned'] as num).toInt(),
+      );
+}
+
+/// Response to POST /timed-jobs/collect.
+@immutable
+class CollectTimedJobResult {
+  const CollectTimedJobResult({
+    required this.result,
+    required this.player,
+    this.levelUp,
+  });
+
+  final TimedJobCollectOutcome result;
+  final Me player;
+
+  /// Set when the XP reward crossed a level.
+  final LevelUp? levelUp;
+
+  factory CollectTimedJobResult.fromJson(Map<String, dynamic> json) => CollectTimedJobResult(
+        result: TimedJobCollectOutcome.fromJson(json['result'] as Map<String, dynamic>),
+        player: Me.fromJson(json['player'] as Map<String, dynamic>),
+        levelUp: json['levelUp'] == null
+            ? null
+            : LevelUp.fromJson(json['levelUp'] as Map<String, dynamic>),
       );
 }

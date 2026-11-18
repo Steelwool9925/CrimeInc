@@ -1,0 +1,32 @@
+{
+  "packId": "crime",
+  "version": 1,
+  "timedJobs": [
+    {
+      "id": "run-a-late-night-shipment",
+      "name": "Run a Late-Night Shipment",
+      "description": "Hand the truck off at the docks and let it drive itself through the night.",
+      "durationSeconds": 28800,
+      "energyCost": 3,
+      "levelRequirement": 1,
+      "payout": {
+        "cashMin": 180,
+        "cashMax": 320,
+        "xp": 40
+      }
+    },
+    {
+      "id": "launder-a-nights-takings",
+      "name": "Launder a Night's Takings",
+      "description": "Feed the cash through three shell businesses and collect it clean by morning.",
+      "durationSeconds": 86400,
+      "energyCost": 5,
+      "levelRequirement": 3,
+      "payout": {
+        "cashMin": 650,
+        "cashMax": 1100,
+        "xp": 120
+      }
+    }
+  ]
+}

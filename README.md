@@ -168,6 +168,23 @@ claiming it pays cash and XP, once.
 - **The client** shows the set on the Objectives screen (Home tile, "N ready to claim"), with a one-tap
   link to Jobs or Properties for anything unfinished.
 
+## Overnight jobs
+
+Separate from the tap-and-collect jobs on the Jobs screen, `content/crime/timed-jobs.json` lists
+a handful of longer appointments (hours to a full day) a player starts once and comes back to
+collect later — no taps while it runs.
+
+- **One slot, server-timed.** A player can have at most one timed job running; starting one spends
+  energy and levelRequirement-gates on the player's level, exactly like a regular job. The payout
+  (a cash range plus XP) is rolled and the clock starts server-side on `POST`; the client only
+  ever renders the countdown it's told.
+- **Collect when ready.** `GET` while running reports the remaining time; collecting before it
+  elapses is refused. A ready job pays out cash and XP in one request, the same mastery/level
+  payout bonuses other jobs get, and frees the slot for the next start.
+- **The client** shows this as its own Overnight Jobs screen (`app/lib/screens/timed_jobs_screen.dart`),
+  reachable from a Home tile, with a live countdown while a job is running and a Collect button
+  that lights up the moment it's done.
+
 ## Job reveal and sound
 
 A finished job is revealed rather than dropped on screen: a short hold, then a verdict whose

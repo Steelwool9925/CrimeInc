@@ -104,6 +104,17 @@ abstract class ApiClient {
   /// ('notToday', 'notComplete', 'alreadyClaimed').
   Future<ClaimObjectiveResult> claimObjective(String deviceToken, String objectiveId);
 
+  /// The overnight-timed-job catalog with this player's running appointment, if any.
+  Future<TimedJobList> timedJobs(String deviceToken);
+
+  /// Starts [timedJobId]. Throws [JobRefusedException] on a refusal
+  /// ('alreadyRunning', 'level', 'energy').
+  Future<StartTimedJobResult> startTimedJob(String deviceToken, String timedJobId);
+
+  /// Collects the running appointment. Throws [JobRefusedException] with reason 'notReady' when
+  /// nothing is running or it has not finished yet.
+  Future<CollectTimedJobResult> collectTimedJob(String deviceToken);
+
   /// Absolute URL for a pack art asset, by logical key ('logo', 'icon').
   ///
   /// Synchronous and unauthenticated: the server resolves the key against the manifest, so the
@@ -324,6 +335,32 @@ class HttpApiClient implements ApiClient {
       String deviceToken, String objectiveId) async {
     final response = await _post(deviceToken, '/objectives/$objectiveId/claim');
     return ClaimObjectiveResult.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  @override
+  Future<TimedJobList> timedJobs(String deviceToken) async {
+    final response = await _client.get(
+      Uri.parse('$_baseUrl/timed-jobs'),
+      headers: {'Authorization': 'Bearer $deviceToken'},
+    );
+    _checkStatus(response);
+    return TimedJobList.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  @override
+  Future<StartTimedJobResult> startTimedJob(
+      String deviceToken, String timedJobId) async {
+    final response = await _post(deviceToken, '/timed-jobs/$timedJobId/start');
+    return StartTimedJobResult.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  @override
+  Future<CollectTimedJobResult> collectTimedJob(String deviceToken) async {
+    final response = await _post(deviceToken, '/timed-jobs/collect');
+    return CollectTimedJobResult.fromJson(
         jsonDecode(response.body) as Map<String, dynamic>);
   }
 

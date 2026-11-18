@@ -18,13 +18,16 @@ internal sealed class ContentPackProvider : IContentPackProvider
 
     public ObjectiveCatalog ObjectiveCatalog { get; }
 
+    public TimedJobCatalog TimedJobCatalog { get; }
+
     public ContentPackProvider(
         ContentPack pack,
         string packRoot,
         JobCatalog jobCatalog,
         ItemCatalog itemCatalog,
         PropertyCatalog propertyCatalog,
-        ObjectiveCatalog objectiveCatalog)
+        ObjectiveCatalog objectiveCatalog,
+        TimedJobCatalog timedJobCatalog)
     {
         ActivePack = pack;
         PackRoot = packRoot;
@@ -32,5 +35,6 @@ internal sealed class ContentPackProvider : IContentPackProvider
         ItemCatalog = itemCatalog;
         PropertyCatalog = propertyCatalog;
         ObjectiveCatalog = objectiveCatalog;
+        TimedJobCatalog = timedJobCatalog;
     }
 }
